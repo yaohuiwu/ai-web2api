@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import abc
 import logging
+import os
+import time
 from dataclasses import dataclass
 from typing import AsyncIterator, Literal
 
@@ -76,6 +78,77 @@ class BaseProvider(abc.ABC):
             return True
         except Exception:
             return False
+        finally:
+            await page.close()
+
+    def get_credentials(self) -> dict[str, str]:
+        """从环境变量/.env 读取登录凭据（键名可配置，兼容 username/password 写法）。"""
+        u = os.getenv(self.cfg.login.username_env) or os.getenv("username")
+        p = os.getenv(self.cfg.login.password_env) or os.getenv("password")
+        return {"username": (u or "").strip(), "password": (p or "").strip()}
+
+    async def auto_login(self) -> dict:
+        """用 .env 中的账号密码自动登录（login.mode=auto）。
+
+        流程：打开登录页 → （必要时切到密码 tab）→ 填账号/密码 → 提交 →
+        等聊天页出现 → storage_state 落盘。已登录时幂等返回。
+        返回 {"ok": bool, "reason"?: str, "already_logged_in"?: bool}。
+        """
+        cfg = self.cfg
+        creds = self.get_credentials()
+        if not creds["username"] or not creds["password"]:
+            return {
+                "ok": False,
+                "reason": (
+                    f'.env 未配置凭据键名 {cfg.login.username_env} / '
+                    f"{cfg.login.password_env}（或 username / password）"
+                ),
+            }
+        page = await self.browser.open_page(self.name)
+        try:
+            await page.goto(cfg.url, wait_until="domcontentloaded", timeout=30000)
+            # 已登录则幂等返回
+            sel = await first_match(page, self.login_check_selectors)
+            if sel is not None:
+                await page.wait_for_timeout(800)
+                return {"ok": True, "already_logged_in": True}
+
+            lp = cfg.login.page
+            # 若默认是验证码 tab，先切到"密码登录"
+            tab_sel = await first_match(page, lp.password_tab)
+            if tab_sel is not None:
+                await page.locator(tab_sel).first.click()
+                await page.wait_for_timeout(800)
+
+            user_sel = await first_match(page, lp.username)
+            pwd_sel = await first_match(page, lp.password)
+            if user_sel is None or pwd_sel is None:
+                return {
+                    "ok": False,
+                    "reason": f"登录页输入框未匹配（user={user_sel}, pwd={pwd_sel}）",
+                    "url": page.url,
+                }
+            await page.locator(user_sel).first.fill(creds["username"])
+            await page.locator(pwd_sel).first.fill(creds["password"])
+
+            submit_sel = await first_match(page, lp.submit)
+            if submit_sel is not None:
+                await page.locator(submit_sel).first.click()
+            else:
+                await page.keyboard.press("Enter")
+
+            # 等待跳转聊天页（= 登录成功）
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                if await first_match(page, self.login_check_selectors) is not None:
+                    await self.browser.save_state(self.name)
+                    return {"ok": True, "already_logged_in": False}
+                await page.wait_for_timeout(1000)
+            return {
+                "ok": False,
+                "reason": "登录超时（60s 内未进入聊天页，可能触发验证码/风控，请手动登录）",
+                "url": page.url,
+            }
         finally:
             await page.close()
 

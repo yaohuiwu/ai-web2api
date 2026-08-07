@@ -93,8 +93,16 @@ _MD_JS = r"""
 
 
 async def count_matches(page: Page, selector: str) -> int:
-    """统计页面中匹配 selector 的元素个数。"""
-    return await page.evaluate(f"document.querySelectorAll({json.dumps(selector)}).length")
+    """统计页面中匹配 selector 的元素个数。
+
+    用 Playwright locator 实现：同时支持纯 CSS 与 Playwright 扩展语法
+    （:has-text()、text= 等）。注意 extract_markdown 的 JS 提取仍要求
+    纯 CSS，响应容器选择器请保持 CSS 写法。
+    """
+    try:
+        return await page.locator(selector).count()
+    except Exception:
+        return 0
 
 
 async def first_match(page: Page, selectors: list[str]) -> str | None:

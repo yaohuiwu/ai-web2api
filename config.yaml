@@ -34,8 +34,22 @@ providers:
       login_check: []                    # 空 = 用 input 选择器判定登录
       new_chat_button: []
     login:
-      mode: manual
-      hint: "在打开的浏览器窗口中完成登录（手机号验证码 / 密码），完成后调用 /admin/deepseek/login/status"
+      mode: auto                  # auto = 用 .env 凭据自动登录；manual = 手动弹窗
+      username_env: DEEPSEEK_USERNAME
+      password_env: DEEPSEEK_PASSWORD
+      page:
+        password_tab:             # 默认是验证码 tab 时，切到"密码登录"
+          - "div[role=button]:has-text(\"密码登录\")"
+        username:                 # 2026-08 实测：无 id/name，placeholder 定位
+          - "input[placeholder=\"请输入手机号/邮箱地址\"]"
+          - "input[placeholder*=手机号]"
+          - "input[type=text]"
+        password:
+          - "input[placeholder=\"请输入密码\"]"
+          - "input[type=password]"
+        submit:
+          - "div.ds-button--primary"
+          - "button[type=submit]"
     queue: {max_size: 10, timeout: 60}
     response_timeout: 180
     poll_interval: 0.2

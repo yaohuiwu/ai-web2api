@@ -195,6 +195,15 @@ def create_router(registry: ProviderRegistry) -> APIRouter:
         registry.set_login_status(name, ok)
         return {"provider": name, "logged_in": ok}
 
+    @router.post("/admin/{name}/login/auto")
+    async def login_auto(name: str):
+        """用 .env 中的账号密码自动登录（login.mode=auto 时可用）。"""
+        provider = registry.get_provider(name)
+        result = await provider.gate.run(provider.auto_login)
+        ok = bool(result.get("ok"))
+        registry.set_login_status(name, ok)
+        return {"provider": name, **result}
+
     @router.post("/admin/{name}/login/cookies")
     async def login_cookies(name: str, payload: CookiesPayload):
         provider = registry.get_provider(name)

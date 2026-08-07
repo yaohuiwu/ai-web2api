@@ -6,11 +6,17 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+# 项目根 .env（自动登录凭据 DEEPSEEK_USERNAME/DEEPSEEK_PASSWORD 等）
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+load_dotenv()
 
 from .api.routes import create_router
 from .browser.manager import BrowserManager

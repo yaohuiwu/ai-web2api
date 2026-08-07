@@ -29,9 +29,30 @@ class SelectorsConfig(BaseModel):
     new_chat_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 每次请求前点"新建对话"（可选）
 
 
+class LoginPageSelectors(BaseModel):
+    """登录页选择器（候选列表，取第一个匹配的）。DeepSeek 2026-08 实测值见 config.yaml。"""
+
+    password_tab: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 切"密码登录"tab（默认可能是验证码 tab）
+    username: Annotated[list[str], BeforeValidator(_norm_selectors)] = [
+        "input[placeholder*=\"手机号\"]",
+        "input[type=text]",
+    ]
+    password: Annotated[list[str], BeforeValidator(_norm_selectors)] = [
+        "input[type=password]"
+    ]
+    submit: Annotated[list[str], BeforeValidator(_norm_selectors)] = [
+        "div.ds-button--primary",
+        "button[type=submit]",
+    ]
+
+
 class LoginConfig(BaseModel):
-    mode: Literal["manual", "cookies"] = "manual"
+    mode: Literal["manual", "cookies", "auto"] = "manual"
     hint: str = ""
+    # auto 模式：.env 中凭据的键名
+    username_env: str = "DEEPSEEK_USERNAME"
+    password_env: str = "DEEPSEEK_PASSWORD"
+    page: LoginPageSelectors = Field(default_factory=LoginPageSelectors)
 
 
 class QueueConfig(BaseModel):

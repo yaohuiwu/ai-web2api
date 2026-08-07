@@ -107,7 +107,23 @@ providers:                 # 也支持 list 写法
         - ".ds-think"
       stop_button: []              # 填了可加快"生成结束"判定
       login_check: []              # 空 = 用 input 判定登录
-    login: {mode: manual}
+    login:
+      mode: auto                  # auto = 用 .env 凭据自动登录；manual = 手动弹窗
+      username_env: DEEPSEEK_USERNAME
+      password_env: DEEPSEEK_PASSWORD
+      page:
+        password_tab:             # 默认是验证码 tab 时，切到"密码登录"
+          - "div[role=button]:has-text(\"密码登录\")"
+        username:                 # 2026-08 实测：无 id/name，placeholder 定位
+          - "input[placeholder=\"请输入手机号/邮箱地址\"]"
+          - "input[placeholder*=手机号]"
+          - "input[type=text]"
+        password:
+          - "input[placeholder=\"请输入密码\"]"
+          - "input[type=password]"
+        submit:
+          - "div.ds-button--primary"
+          - "button[type=submit]"
     queue: {max_size: 10, timeout: 60}   # 每 provider 串行队列
     response_timeout: 180
 ```
@@ -119,11 +135,33 @@ providers:                 # 也支持 list 写法
 | GET | `/v1/models` | 模型列表 |
 | POST | `/v1/chat/completions` | 聊天补全（`stream` 走 SSE） |
 | GET | `/healthz` | 健康检查 + 各 provider 登录态 |
-| POST | `/admin/{p}/login/start` | 打开登录窗口 |
+| POST | `/admin/{p}/login/auto` | 自动登录（读 .env 凭据，见下） |
+| POST | `/admin/{p}/login/start` | 打开登录窗口（手动登录） |
 | GET | `/admin/{p}/login/status` | 查询/确认登录并保存状态 |
 | POST | `/admin/{p}/login/cookies` | 导入 cookies |
 | POST | `/admin/{p}/login/logout` | 清除登录态 |
 | GET | `/admin/{p}/debug/dom?selector=…` | 调试：返回页面元素 HTML（排查选择器失效） |
+| POST | `/admin/{p}/debug/probe` | 调试：发测试消息并 dump 响应区 DOM（确定新 UI 容器选择器） |
+
+### 自动登录（login.mode=auto）
+
+在项目根 `.env` 配置（键名见 `config.yaml` 的 `login.username_env/password_env`，默认
+`DEEPSEEK_USERNAME` / `DEEPSEEK_PASSWORD`，也兼容 `username` / `password`）：
+
+```bash
+DEEPSEEK_USERNAME=你的账号
+DEEPSEEK_PASSWORD=你的密码
+```
+
+然后：
+
+```bash
+curl -X POST http://127.0.0.1:8000/admin/deepseek/login/auto   # 自动填表登录（约 15s）
+curl http://127.0.0.1:8000/admin/deepseek/login/status         # 确认 logged_in: true
+```
+
+注意：登录页按浏览器语言渲染（中文选择器需 zh-CN 语言环境）；若触发验证码/风控卡在登录页，
+改用 `login/start` 手动登录一次即可（登录态落盘后重启自动恢复）。
 
 ## 新增一个 Web AI
 
