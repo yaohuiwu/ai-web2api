@@ -3,9 +3,14 @@
 server:
   host: 127.0.0.1
   port: 8001
+  # 测试用小 TTL：thread 空闲 10s 回收；login_check_interval 缩短让清扫尽快跑
+  thread_ttl: 10
+  max_threads: 4
+  thread_parallel: true
 
 browser:
   headless: true
+  login_check_interval: 5.0
 
 profiles_dir: /tmp/ai-web2api-fake-profiles
 
@@ -32,3 +37,4 @@ providers:
     poll_interval: 0.15
     stable_polls: 8
     min_wait_before_stable: 1.5
+    thread_busy_timeout: 5.0  # 假页 resume 快速判定页面忙

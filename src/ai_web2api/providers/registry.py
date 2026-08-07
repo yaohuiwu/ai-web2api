@@ -36,6 +36,7 @@ OPENAI_COMMON_MODELS: tuple[str, ...] = (
 
 class ProviderRegistry:
     def __init__(self, config: AppConfig, browser: BrowserManager):
+        self.config = config
         self._providers: dict[str, BaseProvider] = {}
         self._model_map: dict[str, BaseProvider] = {}
         self._aliases: dict[str, str] = {}  # 别名 → 真实模型名（客户端兼容层）

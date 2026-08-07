@@ -79,6 +79,7 @@ class ProviderConfig(BaseModel):
     poll_interval: float = 0.2
     stable_polls: int = 12          # 连续多少次轮询无变化判定"结束"（稳定兜底）
     min_wait_before_stable: float = 8.0  # 稳定判定生效前的最短等待（防思考→正文间隙误判）
+    thread_busy_timeout: float = 20.0  # resume 时发送后无新容器即判定页面忙（上一请求未完成）
 
 
 class BrowserConfig(BaseModel):
@@ -98,6 +99,10 @@ class ServerConfig(BaseModel):
     port: int = 8000
     api_keys: list[str] = Field(default_factory=list)  # 空 = 不鉴权（本地使用）
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+    # 会话绑定（thread_id）：空闲回收 TTL / 上限 / 是否并行
+    thread_ttl: float = 900.0      # 秒，thread 空闲多久回收（关页面）
+    max_threads: int = 8           # 同时活跃 thread 上限，超出 429
+    thread_parallel: bool = True   # False = thread 请求也走 provider 全局串行（保守防风控）
 
 
 class AppConfig(BaseModel):

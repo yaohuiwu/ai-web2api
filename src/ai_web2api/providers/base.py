@@ -41,6 +41,14 @@ def build_prompt(messages: list[dict]) -> str:
     return "\n\n".join(p for p in parts if p)
 
 
+def last_user_message(messages: list[dict]) -> str:
+    """取最后一条 user 消息的文本（会话绑定续用：页面为准，只发这条）。"""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            return str(m.get("content", "")).strip()
+    return ""
+
+
 class BaseProvider(abc.ABC):
     """Web AI 驱动基类。
 
@@ -151,16 +159,37 @@ class BaseProvider(abc.ABC):
         finally:
             await page.close()
 
-    async def complete(self, messages: list[dict], model: str) -> tuple[str, str | None]:
+    async def complete(
+        self,
+        messages: list[dict],
+        model: str,
+        *,
+        thread_mode: str | None = None,
+        thread_page=None,
+    ) -> tuple[str, str | None]:
         """非流式：返回 (content, reasoning_content)。"""
-        chunks = [c async for c in self.generate(messages, model)]
+        chunks = [c async for c in self.generate(messages, model, thread_mode=thread_mode, thread_page=thread_page)]
         content = "".join(c.text for c in chunks if c.kind == "content")
         thinking = "".join(c.text for c in chunks if c.kind == "thinking")
         return content, thinking or None
 
     @abc.abstractmethod
-    def generate(self, messages: list[dict], model: str) -> AsyncIterator[StreamChunk]:
+    def generate(
+        self,
+        messages: list[dict],
+        model: str,
+        *,
+        thread_mode: str | None = None,
+        thread_page=None,
+    ) -> AsyncIterator[StreamChunk]:
         """打开新 Tab → 注入上下文 → 发送 → 增量产出响应。
+
+        thread_mode:
+          - None（默认）：无状态——自开新页，注入完整历史，用完关闭页面；
+          - "create"：页面由 ThreadManager 打开（thread_page 传入），
+            注入完整历史（支持从无状态迁移），页面留给 manager 复用；
+          - "resume"：复用 thread_page（页面已有完整历史），只发最后一条
+            user 消息，不注入历史、不点新对话。
 
         注意：实现必须是 async generator（含 yield），因此这里用普通 def 声明。
         """
@@ -168,8 +197,11 @@ class BaseProvider(abc.ABC):
 
     # ---------- 内部工具 ----------
 
-    async def _open_chat_page(self) -> Page:
-        """打开聊天页并确认已登录；未登录抛 NotLoggedInError。"""
+    async def open_chat_page(self) -> Page:
+        """打开聊天页并确认已登录；未登录抛 NotLoggedInError。
+
+        供无状态请求与 ThreadManager（会话绑定）共用。
+        """
         page = await self.browser.open_page(self.name)
         await page.goto(self.cfg.url, wait_until="domcontentloaded", timeout=30000)
         try:

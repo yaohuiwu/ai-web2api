@@ -53,6 +53,7 @@ class ChatCompletionRequest(BaseModel):
     model: str
     messages: list[ChatMessage] = Field(min_length=1)
     stream: bool = False
+    thread_id: str | None = None  # 会话绑定：同 id 复用同一 Web 页面多轮；缺省 = 无状态新会话
     # 以下字段在 Web 端不可控，收到不报错、仅忽略：
     temperature: float | None = None
     max_tokens: int | None = None
@@ -78,6 +79,7 @@ class ChatCompletionResponse(BaseModel):
     object: str = "chat.completion"
     created: int
     model: str
+    thread_id: str | None = None  # 会话绑定时回显；无状态请求为 null
     choices: list[ChatCompletionChoice]
     usage: dict[str, Any] = Field(default_factory=dict)
 

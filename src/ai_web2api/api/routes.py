@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -15,7 +16,14 @@ from fastapi.responses import (
 from pydantic import BaseModel, Field
 
 from ..browser import extractor
-from ..core.errors import ProviderError, RateLimitedError
+from ..core.errors import (
+    ProviderError,
+    RateLimitedError,
+    ThreadBusyError,
+    ThreadExpiredError,
+    ThreadTimeoutError,
+)
+from ..core.threads import ThreadManager
 from ..providers.registry import ProviderRegistry
 from .schemas import (
     ChatCompletionChoice,
@@ -99,8 +107,9 @@ def _sse(payload: dict) -> str:
     return "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
 
 
-def create_router(registry: ProviderRegistry) -> APIRouter:
+def create_router(registry: ProviderRegistry, threads: ThreadManager | None = None) -> APIRouter:
     router = APIRouter()
+    thread_parallel = threads is not None and registry.config.server.thread_parallel
 
     # ---------------- OpenAI 兼容 API ----------------
 
@@ -118,6 +127,64 @@ def create_router(registry: ProviderRegistry) -> APIRouter:
         model = req.model                       # 响应回显请求名（OpenAI 兼容）
         resolved = registry.resolve_model_name(model)  # 驱动用真实模型名
         chat_id = _chat_id()
+
+        thread_id = req.thread_id or request.headers.get("x-thread-id")
+        if thread_id:
+            if threads is None:
+                raise ProviderError("会话绑定未启用（threads manager 未初始化）")
+            tm: ThreadManager = threads
+            session, is_new = await tm.get_or_create(thread_id, provider, resolved)
+            thread_mode = "create" if is_new else "resume"
+            kwargs = {"thread_mode": thread_mode, "thread_page": session.page}
+
+            if req.stream:
+
+                async def _gen():
+                    # 同一 thread 串行（session.lock）：页面只有一个输入框
+                    try:
+                        await asyncio.wait_for(session.lock.acquire(), timeout=60)
+                    except asyncio.TimeoutError:
+                        await tm.close(thread_id)
+                        raise ThreadTimeoutError(
+                            f'thread "{thread_id}" 上一请求未释放（可能客户端中断），会话已销毁，请重试'
+                        )
+                    try:
+                        async for chunk in provider.generate(messages, resolved, **kwargs):
+                            yield chunk
+                    finally:
+                        session.lock.release()
+
+                return StreamingResponse(
+                    _stream_thread_completions(_gen(), chat_id, model, thread_id, tm),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+
+            try:
+                async with session.lock:
+                    content, thinking = await asyncio.wait_for(
+                        provider.complete(messages, resolved, **kwargs),
+                        timeout=provider.cfg.response_timeout + 60,
+                    )
+            except asyncio.TimeoutError:
+                await tm.close(thread_id)  # 销毁：页面关闭强制打断挂起的 Playwright 调用
+                raise ThreadTimeoutError(
+                    f'thread "{thread_id}" 响应超时，会话已销毁，请重试'
+                )
+            except ThreadExpiredError:
+                await tm.close(thread_id)  # 页面失效 → 销毁，客户端可重建
+                raise
+            except ThreadBusyError:
+                await tm.close(thread_id)  # 页面忙（上一请求未完成）→ 销毁，客户端可重建
+                raise
+            message = ResponseMessage(content=content, reasoning_content=thinking)
+            return ChatCompletionResponse(
+                id=chat_id,
+                created=int(time.time()),
+                model=model,
+                thread_id=thread_id,
+                choices=[ChatCompletionChoice(message=message)],
+            )
 
         if req.stream:
             return StreamingResponse(
@@ -177,6 +244,69 @@ def create_router(registry: ProviderRegistry) -> APIRouter:
             }
         )
         yield "data: [DONE]\n\n"
+
+    async def _stream_thread_completions(agen, chat_id, model, thread_id, threads: ThreadManager | None):
+        """会话绑定模式的 SSE：与 _stream_completions 相同，另回显 thread_id，
+        流中途页面失效（ThreadExpiredError）时销毁会话并结束流。"""
+        created = int(time.time())
+        meta = {"id": chat_id, "object": "chat.completion.chunk", "created": created,
+                "model": model, "thread_id": thread_id}
+        yield _sse({**meta, "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]})
+        try:
+            async for chunk in agen:
+                delta = (
+                    {"reasoning_content": chunk.text}
+                    if chunk.kind == "thinking"
+                    else {"content": chunk.text}
+                )
+                yield _sse({**meta, "choices": [{"index": 0, "delta": delta, "finish_reason": None}]})
+        except (ThreadExpiredError, ThreadBusyError):
+            if threads is not None:
+                await threads.close(thread_id)
+            logger.error("thread %s expired/busy mid-stream, closed", thread_id)
+            return
+        except ProviderError as e:
+            logger.error("thread stream error for %s: %s", model, e.message)
+            return
+        yield _sse({**meta, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+        yield "data: [DONE]\n\n"
+
+    # ---------------- admin：会话绑定管理 ----------------
+
+    @router.get("/admin/threads")
+    async def threads_list():
+        if threads is None:
+            return {"threads": [], "active": 0, "max": 0}
+        return {"threads": threads.list(), "active": threads.active_count(), "max": threads.max_threads}
+
+    @router.delete("/admin/threads/{thread_id}")
+    async def threads_delete(thread_id: str):
+        if threads is None:
+            return {"thread_id": thread_id, "closed": False}
+        closed = await threads.close(thread_id)
+        return {"thread_id": thread_id, "closed": closed}
+
+    @router.get("/admin/threads/{thread_id}/dom")
+    async def threads_dom(thread_id: str, selector: str = "div.ds-message"):
+        """调试：直接查询指定 thread 页面的 DOM（绑定页面的真实状态）。"""
+        if threads is None:
+            return {"thread_id": thread_id, "error": "threads manager 未初始化"}
+        session = threads.get(thread_id)
+        if session is None:
+            return {"thread_id": thread_id, "error": "thread not found"}
+        try:
+            loc = session.page.locator(selector)
+            count = await loc.count()
+            snippets = []
+            for i in range(min(count, 5)):
+                try:
+                    html = await loc.nth(i).evaluate("el => el.outerHTML")
+                    snippets.append(html[:500])
+                except Exception:
+                    snippets.append("<error>")
+            return {"thread_id": thread_id, "url": session.page.url, "count": count, "snippets": snippets}
+        except Exception as e:
+            return {"thread_id": thread_id, "error": str(e)}
 
     # ---------------- admin：登录管理 ----------------
 

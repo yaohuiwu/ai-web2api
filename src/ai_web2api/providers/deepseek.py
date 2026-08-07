@@ -9,8 +9,12 @@ from typing import AsyncIterator, Literal
 from playwright.async_api import Page
 
 from ..browser import extractor
-from ..core.errors import ResponseTimeoutError
-from .base import BaseProvider, StreamChunk, build_prompt
+from ..core.errors import (
+    ResponseTimeoutError,
+    ThreadBusyError,
+    ThreadExpiredError,
+)
+from .base import BaseProvider, StreamChunk, build_prompt, last_user_message
 
 logger = logging.getLogger(__name__)
 
@@ -18,38 +22,70 @@ logger = logging.getLogger(__name__)
 class DeepSeekProvider(BaseProvider):
     name = "deepseek"
 
-    async def generate(self, messages: list[dict], model: str) -> AsyncIterator[StreamChunk]:
+    async def generate(
+        self,
+        messages: list[dict],
+        model: str,
+        *,
+        thread_mode: str | None = None,
+        thread_page=None,
+    ) -> AsyncIterator[StreamChunk]:
         cfg = self.cfg
-        page = await self._open_chat_page()
+        resume = thread_mode == "resume"
+        # resume 专属：页面可能仍在生成上一请求（DeepSeek 生成中输入=排队），
+        # 发送后若迟迟无新容器 → 判定页面忙，抛 ThreadBusyError 销毁重建
+        busy_timeout = cfg.thread_busy_timeout if resume else None
+        page = thread_page or await self.open_chat_page()
+        logger.info(
+            "[%s] generate mode=%s url=%s", self.name, thread_mode or "stateless", page.url
+        )
         try:
             input_sel = await extractor.first_match(page, cfg.selectors.input)
             if input_sel is None:
+                if resume:
+                    raise ThreadExpiredError(
+                        f'provider "{self.name}" thread 页面失效（找不到输入框），会话已自动销毁',
+                        provider=self.name,
+                    )
                 raise ResponseTimeoutError(
                     f'provider "{self.name}" 找不到输入框（input 选择器均未匹配）',
                     provider=self.name,
                 )
+            logger.info("[%s] input matched: %s", self.name, input_sel)
 
             # 发送前记录各候选容器的数量，之后只取"新增"的那个
             md_before = {s: await extractor.count_matches(page, s) for s in cfg.selectors.response_container}
             th_before = {s: await extractor.count_matches(page, s) for s in cfg.selectors.thinking_container}
 
-            prompt = build_prompt(messages)
+            if resume:
+                # 会话绑定续用：页面已有完整历史（页面为准），只发最后一条 user 消息
+                prompt = last_user_message(messages)
+            else:
+                # 无状态 / create：完整历史拼单条 prompt 注入
+                prompt = build_prompt(messages)
+            logger.info("[%s] sending prompt (%d chars): %.60r", self.name, len(prompt), prompt)
             await self._send_prompt(page, input_sel, prompt)
+            logger.info("[%s] prompt sent, polling", self.name)
 
-            async for chunk in self._poll_response(page, md_before, th_before):
+            async for chunk in self._poll_response(page, md_before, th_before, busy_timeout):
                 yield chunk
         finally:
-            await page.close()
+            # 无状态请求：用完即关；thread 模式：页面留给 ThreadManager 管理
+            if thread_mode is None and thread_page is None:
+                await page.close()
 
     # ---------- 内部 ----------
 
     async def _send_prompt(self, page: Page, input_sel: str, prompt: str) -> None:
         cfg = self.cfg
         input_el = page.locator(input_sel).first
+        logger.info("[%s] send: click input", self.name)
         await input_el.click()
+        logger.info("[%s] send: fill", self.name)
         await input_el.fill(prompt)
         await page.wait_for_timeout(250)  # 等 UI 启用发送
         send_sel = await extractor.first_match(page, cfg.selectors.send_button)
+        logger.info("[%s] send: button=%s", self.name, send_sel)
         if send_sel:
             await page.locator(send_sel).first.click()
         else:
@@ -60,6 +96,7 @@ class DeepSeekProvider(BaseProvider):
         page: Page,
         md_before: dict[str, int],
         th_before: dict[str, int],
+        busy_timeout: float | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """增量 diff 响应文本，产出 StreamChunk（thinking 与 content 分开）。
 
@@ -82,6 +119,13 @@ class DeepSeekProvider(BaseProvider):
             if elapsed > timeout:
                 raise ResponseTimeoutError(
                     f'provider "{self.name}" 发送后未检测到回复开始', provider=self.name
+                )
+            if busy_timeout is not None and elapsed > busy_timeout:
+                # resume 且页面忙（在生成上一请求的内容，新消息只是排队）→ 立即失败
+                raise ThreadBusyError(
+                    f'provider "{self.name}" thread 页面正忙（上一请求未完成，发送被排队），'
+                    f"会话已销毁，请稍后重试（thread_busy_timeout={busy_timeout:.0f}s）",
+                    provider=self.name,
                 )
             md_sel = await self._find_new(page, md_before)
             th_sel = await self._find_new(page, th_before)

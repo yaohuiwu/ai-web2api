@@ -64,6 +64,30 @@ resp = client.chat.completions.create(
 print(resp.choices[0].message.content)
 ```
 
+### 2.5 会话绑定（thread_id，可选）
+
+默认**无状态**：每次请求开新会话，历史由客户端在 `messages` 里带全。需要"同一 Web 会话多轮"时传 `thread_id`：
+
+```bash
+# 第一次：创建会话（注入 messages 全部历史）
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "deepseek-web", "thread_id": "my-chat", "messages": [{"role": "user", "content": "我叫小明"}]}'
+
+# 后续：同 thread_id 复用同一页面；只发最后一条 user 消息，历史以页面为准（无需重传）
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "deepseek-web", "thread_id": "my-chat", "messages": [{"role": "user", "content": "我叫什么名字"}]}'
+```
+
+- `thread_id` 由客户端自定义（服务端不生成，只回显确认）：非流式响应的 `thread_id` 字段、SSE 每个 chunk 的 `thread_id` 字段，均回显本次绑定的 id；不带 thread_id 时为 `null`
+- 也支持 `X-Thread-Id` header；OpenAI SDK 传非标准字段用 `extra_body={"thread_id": "..."}`（或 `extra_headers={"X-Thread-Id": "..."}`）
+- 同一 `thread_id` 串行执行；不同 thread 并行（`server.thread_parallel: false` 可退回全局串行）
+- 页面空闲超过 `server.thread_ttl`（默认 900s）自动回收；活跃会话上限 `server.max_threads`（默认 8，超限 429）
+- 管理：`GET /admin/threads`（列表）、`DELETE /admin/threads/{id}`（强杀，客户端下次同 id 请求自动重建）
+- 同一 thread 切换 model 会报 409（创建时绑定 provider+model）
+- 页面忙（上一请求未完成，新消息被 Web 端排队）→ 20s 内返回 409 `thread_busy` 并销毁会话（配置 `thread_busy_timeout`），客户端稍后重试即自动重建；上一请求未释放（客户端中断）→ 60s 内返回 504 `thread_timeout` 并销毁。请求均**有界**，不会无限挂起
+
 ### 3. 自测（不需要登录）
 
 仓库带一个假聊天页 + 假配置，把 DeepSeek 驱动完整跑一遍（含思考区提取、流式、Markdown 转换、超时/错误路径）：
@@ -142,6 +166,8 @@ providers:                 # 也支持 list 写法
 | POST | `/admin/{p}/login/logout` | 清除登录态 |
 | GET | `/admin/{p}/debug/dom?selector=…` | 调试：返回页面元素 HTML（排查选择器失效） |
 | POST | `/admin/{p}/debug/probe` | 调试：发测试消息并 dump 响应区 DOM（确定新 UI 容器选择器） |
+| GET | `/admin/threads` | 会话绑定：活跃会话列表 |
+| DELETE | `/admin/threads/{id}` | 会话绑定：强杀会话（同 id 下次请求自动重建） |
 
 ### 自动登录（login.mode=auto）
 
@@ -176,7 +202,7 @@ curl http://127.0.0.1:8000/admin/deepseek/login/status         # 确认 logged_i
 
 ## 已知限制
 
-- 多轮对话为**无状态模式**：每次请求把完整历史拼成一条 prompt 注入（借用 Web 端长上下文能力）；不做跨请求会话
+- 多轮对话默认**无状态模式**：每次请求把完整历史拼成一条 prompt 注入新会话（借用 Web 端长上下文能力）；需要跨请求会话时用 `thread_id`（见上文 2.5，复用同一 Web 页面，历史以页面为准）
 - `max_tokens`/`top_p`/`stop` 等参数在 Web 端不可控，收到后忽略
 - 数学公式（KaTeX）尽力还原，复杂排版可能失真
 - 无 API key 鉴权（本地使用）；对外部署请自行加反代/鉴权

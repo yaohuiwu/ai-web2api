@@ -22,6 +22,7 @@ from .api.routes import create_router
 from .browser.manager import BrowserManager
 from .config import load_config
 from .core.errors import ProviderError
+from .core.threads import ThreadManager
 from .providers.registry import ProviderRegistry
 
 logging.basicConfig(
@@ -37,6 +38,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
     cfg = load_config(config_path)
     browser = BrowserManager(cfg.browser, cfg.profiles_dir)
     registry = ProviderRegistry(cfg, browser)
+    threads = ThreadManager(cfg.server, registry)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -48,6 +50,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
             yield
         finally:
             bg.cancel()
+            await threads.close_all()
             await browser.stop()
 
     app = FastAPI(title="ai-web2api", version="0.1.0", lifespan=lifespan)
@@ -58,9 +61,10 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
-    app.include_router(create_router(registry))
+    app.include_router(create_router(registry, threads))
     app.state.registry = registry
     app.state.browser = browser
+    app.state.threads = threads
     app.state.config = cfg
 
     @app.exception_handler(ProviderError)
@@ -122,7 +126,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
                 )
 
     async def _background_loop():
-        """定期刷新登录态 + 定期保存 storage_state（防登录态过期丢失）。"""
+        """定期刷新登录态 + 定期保存 storage_state + 回收空闲 thread 会话。"""
         while True:
             try:
                 await asyncio.sleep(cfg.browser.login_check_interval)
@@ -130,6 +134,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
                 for name in registry.providers():
                     if registry.login_status().get(name):
                         await browser.save_state(name)
+                await threads.cleanup()
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001

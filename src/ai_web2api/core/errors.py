@@ -38,3 +38,31 @@ class RateLimitedError(ProviderError):
 class QueueFullError(ProviderError):
     status_code = 429
     error_type = "queue_full"
+
+
+class ThreadMismatchError(ProviderError):
+    """同一 thread_id 请求了不同的 provider/model。"""
+
+    status_code = 409
+    error_type = "thread_mismatch"
+
+
+class ThreadExpiredError(ProviderError):
+    """thread 页面失效（登出/崩溃/超长会话），已自动销毁，可重试重建。"""
+
+    status_code = 409
+    error_type = "thread_expired"
+
+
+class ThreadTimeoutError(ProviderError):
+    """thread 请求超时（页面挂起/上一请求未释放），会话已销毁，可重试重建。"""
+
+    status_code = 504
+    error_type = "thread_timeout"
+
+
+class ThreadBusyError(ProviderError):
+    """thread 页面正在生成其他内容（上一请求未完成，排队等待中），会话已销毁，可重试重建。"""
+
+    status_code = 409
+    error_type = "thread_busy"
