@@ -20,7 +20,12 @@ logger = logging.getLogger(__name__)
 
 
 class DeepSeekProvider(BaseProvider):
+    """chat.deepseek.com 驱动。"""
+
     name = "deepseek"
+    # 会话 URL: chat.deepseek.com/a/chat/s/<uuid>（末段即 DeepSeek 会话 id，
+    # 服务端保存用户会话不回收 → thread 持久化恢复可靠）
+    session_url_pattern = r"/a/chat/s/([0-9a-fA-F-]{8,})"
 
     async def generate(
         self,

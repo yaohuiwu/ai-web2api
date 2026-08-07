@@ -87,6 +87,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 - 管理：`GET /admin/threads`（列表）、`DELETE /admin/threads/{id}`（强杀，客户端下次同 id 请求自动重建）
 - 同一 thread 切换 model 会报 409（创建时绑定 provider+model）
 - 页面忙（上一请求未完成，新消息被 Web 端排队）→ 20s 内返回 409 `thread_busy` 并销毁会话（配置 `thread_busy_timeout`），客户端稍后重试即自动重建；上一请求未释放（客户端中断）→ 60s 内返回 504 `thread_timeout` 并销毁。请求均**有界**，不会无限挂起
+- **跨重启持久化**（`server.thread_persist: true`，默认开）：每次请求完成后，服务端把绑定页的 DeepSeek 会话 id（URL 末段 `/a/chat/s/<uuid>`）落盘到 `profiles/<provider>/threads.json`。服务重启后，同 `thread_id` 的请求会自动 `goto` 该会话 URL 恢复——**多轮记忆跨重启保持**（DeepSeek 不删用户会话）。TTL 空闲回收/服务关闭**保留**恢复能力；`DELETE /admin/threads/{id}`、页面失效/超时/忙错误**清除**（下次同 id 开全新会话）。恢复时切换 model 同样 409
 
 ### 3. 自测（不需要登录）
 

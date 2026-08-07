@@ -58,6 +58,10 @@ class BaseProvider(abc.ABC):
 
     name: str = ""
 
+    # thread 持久化用：从页面 URL 提取 provider 会话 id 的正则（如 DeepSeek
+    # /a/chat/s/<uuid>）。None = 该 provider 不支持会话恢复（不落盘）。
+    session_url_pattern: str | None = None
+
     def __init__(self, cfg: ProviderConfig, browser: BrowserManager):
         self.cfg = cfg
         self.name = cfg.name  # 覆盖类属性：同一驱动类可服务多个 provider 实例（context/登录态按名字隔离）

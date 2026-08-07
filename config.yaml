@@ -6,6 +6,7 @@ server:
   thread_ttl: 900
   max_threads: 8
   thread_parallel: true
+  thread_persist: true  # thread_id → DeepSeek 会话 URL id 落盘，重启后 goto 恢复
   cors_origins: ["*"]
 
 browser:

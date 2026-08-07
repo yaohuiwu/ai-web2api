@@ -99,10 +99,11 @@ class ServerConfig(BaseModel):
     port: int = 8000
     api_keys: list[str] = Field(default_factory=list)  # 空 = 不鉴权（本地使用）
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
-    # 会话绑定（thread_id）：空闲回收 TTL / 上限 / 是否并行
+    # 会话绑定（thread_id）：空闲回收 TTL / 上限 / 是否并行 / 是否持久化
     thread_ttl: float = 900.0      # 秒，thread 空闲多久回收（关页面）
     max_threads: int = 8           # 同时活跃 thread 上限，超出 429
     thread_parallel: bool = True   # False = thread 请求也走 provider 全局串行（保守防风控）
+    thread_persist: bool = True    # thread_id → provider 会话 URL id 落盘，重启后 goto 恢复
 
 
 class AppConfig(BaseModel):

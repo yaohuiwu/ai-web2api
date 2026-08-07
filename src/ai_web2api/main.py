@@ -38,7 +38,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
     cfg = load_config(config_path)
     browser = BrowserManager(cfg.browser, cfg.profiles_dir)
     registry = ProviderRegistry(cfg, browser)
-    threads = ThreadManager(cfg.server, registry)
+    threads = ThreadManager(cfg.server, registry, cfg.profiles_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

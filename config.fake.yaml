@@ -7,6 +7,7 @@ server:
   thread_ttl: 10
   max_threads: 4
   thread_parallel: true
+  thread_persist: false  # 假页 URL 无会话 id（file:// 不匹配 /a/chat/s/），无需持久化
 
 browser:
   headless: true

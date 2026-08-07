@@ -133,9 +133,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             if threads is None:
                 raise ProviderError("会话绑定未启用（threads manager 未初始化）")
             tm: ThreadManager = threads
-            session, is_new = await tm.get_or_create(thread_id, provider, resolved)
-            thread_mode = "create" if is_new else "resume"
-            kwargs = {"thread_mode": thread_mode, "thread_page": session.page}
+            session, mode = await tm.get_or_create(thread_id, provider, resolved)
+            kwargs = {"thread_mode": mode, "thread_page": session.page}
 
             if req.stream:
 
@@ -151,6 +150,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                     try:
                         async for chunk in provider.generate(messages, resolved, **kwargs):
                             yield chunk
+                        await tm.persist(thread_id)  # 正常完成 → 落盘会话 URL id（重启可恢复）
                     finally:
                         session.lock.release()
 
@@ -166,6 +166,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                         provider.complete(messages, resolved, **kwargs),
                         timeout=provider.cfg.response_timeout + 60,
                     )
+                await tm.persist(thread_id)  # 正常完成 → 落盘会话 URL id（重启可恢复）
             except asyncio.TimeoutError:
                 await tm.close(thread_id)  # 销毁：页面关闭强制打断挂起的 Playwright 调用
                 raise ThreadTimeoutError(
