@@ -17,11 +17,29 @@ DRIVERS: dict[str, type[BaseProvider]] = {
     "deepseek": DeepSeekProvider,
 }
 
+# 常见 OpenAI 模型名（llama_index 等客户端默认使用）→ 自动映射到首选 provider 的默认模型。
+# 这样客户端零配置即可接入；provider 配置里的 model_aliases 优先于这里的兜底。
+OPENAI_COMMON_MODELS: tuple[str, ...] = (
+    "gpt-4",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4-turbo",
+    "gpt-3.5-turbo",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "o1",
+    "o1-mini",
+    "o3-mini",
+    "o4-mini",
+)
+
 
 class ProviderRegistry:
     def __init__(self, config: AppConfig, browser: BrowserManager):
         self._providers: dict[str, BaseProvider] = {}
         self._model_map: dict[str, BaseProvider] = {}
+        self._aliases: dict[str, str] = {}  # 别名 → 真实模型名（客户端兼容层）
+        self._alias_owner: dict[str, str] = {}  # 别名 → provider 名（用于暴露列表）
         self._login_status: dict[str, bool] = {}
 
         for pcfg in config.providers:
@@ -35,7 +53,25 @@ class ProviderRegistry:
             self._providers[pcfg.name] = provider
             for m in pcfg.models:
                 self._model_map[m.name] = provider
+            for alias, target in pcfg.model_aliases.items():
+                if target not in self._model_map:
+                    logger.warning(
+                        "provider %s 的别名 %r 指向不存在的模型 %r，已跳过",
+                        pcfg.name, alias, target,
+                    )
+                    continue
+                self._aliases[alias] = target
+                self._alias_owner[alias] = pcfg.name
             logger.info("registered provider %s (models=%s)", pcfg.name, [m.name for m in pcfg.models])
+
+        # 内置兜底：常见 OpenAI 模型名 → 首选 provider 的默认模型（显式别名优先，不覆盖）
+        for name, p in self._providers.items():
+            default_model = p.exposed_models[0]
+            for alias in OPENAI_COMMON_MODELS:
+                if alias not in self._aliases and default_model in self._model_map:
+                    self._aliases.setdefault(alias, default_model)
+                    self._alias_owner.setdefault(alias, name)
+            break  # 只给第一个启用的 provider 挂内置别名
 
     # ---------- 查询 ----------
 
@@ -48,14 +84,27 @@ class ProviderRegistry:
     def get_for_model(self, model: str) -> BaseProvider:
         p = self._model_map.get(model)
         if p is None:
+            target = self._aliases.get(model)
+            if target:
+                p = self._model_map.get(target)
+        if p is None:
             raise ModelNotFoundError(f'model "{model}" 不存在')
         return p
+
+    def resolve_model_name(self, model: str) -> str:
+        """请求模型名 → 实际驱动模型名（别名解析）。"""
+        if model in self._model_map:
+            return model
+        return self._aliases.get(model, model)
 
     def list_models(self) -> list[dict]:
         out = []
         for name, p in self._providers.items():
             for m in p.exposed_models:
                 out.append({"id": m, "object": "model", "created": 0, "owned_by": name})
+        # 别名也暴露，客户端（llama_index 等）可校验到
+        for alias, owner in self._alias_owner.items():
+            out.append({"id": alias, "object": "model", "created": 0, "owned_by": owner})
         return out
 
     def providers(self) -> dict[str, BaseProvider]:

@@ -35,6 +35,11 @@ providers:
       new_chat_button:                   # 发送前点\"开启新对话\"，隔离账号历史会话（防上下文污染）
         - "text=开启新对话"
         - "div.ds-button:has-text(\"新对话\")"
+    model_aliases:                       # 客户端（llama_index 等）默认模型名 → 本 provider 模型
+      gpt-4: deepseek-web
+      gpt-4o: deepseek-web
+      gpt-4o-mini: deepseek-web
+      gpt-3.5-turbo: deepseek-web
     login:
       mode: auto                  # auto = 用 .env 凭据自动登录；manual = 手动弹窗
       username_env: DEEPSEEK_USERNAME

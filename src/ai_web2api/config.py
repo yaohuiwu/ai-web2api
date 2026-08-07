@@ -74,6 +74,7 @@ class ProviderConfig(BaseModel):
     selectors: SelectorsConfig = Field(default_factory=SelectorsConfig)
     login: LoginConfig = Field(default_factory=LoginConfig)
     queue: QueueConfig = Field(default_factory=QueueConfig)
+    model_aliases: dict[str, str] = {}  # 别名 → 本 provider 的模型名（如 gpt-4 → deepseek-web）
     response_timeout: float = 180.0
     poll_interval: float = 0.2
     stable_polls: int = 12          # 连续多少次轮询无变化判定"结束"（稳定兜底）

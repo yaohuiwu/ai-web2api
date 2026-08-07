@@ -115,17 +115,18 @@ def create_router(registry: ProviderRegistry) -> APIRouter:
             raise RateLimitedError("n>1 不受支持，请使用 n=1", provider=provider.name)
 
         messages = [normalize_message(m.model_dump()) for m in req.messages]
-        model = req.model
+        model = req.model                       # 响应回显请求名（OpenAI 兼容）
+        resolved = registry.resolve_model_name(model)  # 驱动用真实模型名
         chat_id = _chat_id()
 
         if req.stream:
             return StreamingResponse(
-                _stream_completions(provider, messages, model, chat_id),
+                _stream_completions(provider, messages, resolved, chat_id),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
-        content, thinking = await provider.gate.run(provider.complete, messages, model)
+        content, thinking = await provider.gate.run(provider.complete, messages, resolved)
         message = ResponseMessage(content=content, reasoning_content=thinking)
         return ChatCompletionResponse(
             id=chat_id,
