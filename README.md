@@ -160,6 +160,11 @@ curl -X POST http://127.0.0.1:8000/admin/deepseek/login/auto   # 自动填表登
 curl http://127.0.0.1:8000/admin/deepseek/login/status         # 确认 logged_in: true
 ```
 
+**启动时自动登录**：若某 provider 无 `profiles/<name>/state.json`（未登录），且 `login.mode=auto`、
+.env 已配置凭据，服务启动时会自动尝试登录（日志可见"未登录，尝试自动登录…"→"自动登录成功"）；
+失败不阻塞启动（验证码/风控时改用 `login/start` 手动登录一次）。已有 state.json 时直接恢复，
+不会重复登录。
+
 注意：登录页按浏览器语言渲染（中文选择器需 zh-CN 语言环境）；若触发验证码/风控卡在登录页，
 改用 `login/start` 手动登录一次即可（登录态落盘后重启自动恢复）。
 
@@ -177,6 +182,10 @@ curl http://127.0.0.1:8000/admin/deepseek/login/status         # 确认 logged_i
 - 无 API key 鉴权（本地使用）；对外部署请自行加反代/鉴权
 - Web 端改版会导致选择器失效，用 `/admin/{p}/debug/dom` 排查并更新配置
 - 账号风控风险：请自用，控制频率
+- llama_index.llms.openai 兼容：role 支持 `developer`/`tool`/`function`（`developer` 自动映射为
+  `system`），`content` 支持多部分列表（提取 text 部分），`tool_calls` 等字段自动忽略；
+  注意 llama_index 客户端对非官方 OpenAI 模型名有校验与 tokenizer 限制（传 `max_tokens`
+  可跳过 tokenizer 计数，老版本则无此问题）
 
 ## 项目结构
 

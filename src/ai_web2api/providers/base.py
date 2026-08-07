@@ -33,13 +33,12 @@ def build_prompt(messages: list[dict]) -> str:
 
     无状态模式：每个请求是新会话，完整历史注入为一条 prompt，
     借用 Web 端的长上下文能力处理多轮对话。
+
+    只拼用户会输入的内容（纯文本、换行分隔，不带 <role> 标签）——
+    Web 输入框是用户打字的地方，尖括号内容可能被前端转义或干扰模型。
     """
-    parts = []
-    for m in messages:
-        role = m.get("role", "user")
-        content = str(m.get("content", ""))
-        parts.append(f"<{role}>\n{content}\n</{role}>")
-    return "\n\n".join(parts)
+    parts = [str(m.get("content", "")).strip() for m in messages]
+    return "\n\n".join(p for p in parts if p)
 
 
 class BaseProvider(abc.ABC):

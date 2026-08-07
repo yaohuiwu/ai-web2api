@@ -42,6 +42,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
     async def lifespan(app: FastAPI):
         await browser.start()
         await registry.refresh_login_status()
+        await _auto_login_missing(registry)
         bg = asyncio.create_task(_background_loop())
         try:
             yield
@@ -83,6 +84,42 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
                 name: {"logged_in": ok} for name, ok in registry.login_status().items()
             },
         }
+
+    async def _auto_login_missing(registry: ProviderRegistry) -> None:
+        """启动时自动登录：未登录 + login.mode=auto + .env 有凭据 → 尝试自动登录。
+
+        失败不阻塞启动（可能触发验证码/风控，留待手动登录），仅记日志。
+        """
+        for name in registry.providers():
+            if registry.login_status().get(name):
+                continue  # 已有登录态（state.json 恢复）
+            provider = registry.get_provider(name)
+            if provider.cfg.login.mode != "auto":
+                continue
+            creds = provider.get_credentials()
+            if not creds["username"] or not creds["password"]:
+                logger.warning(
+                    'provider "%s" login.mode=auto 但未配置凭据键名（%s/%s），跳过自动登录',
+                    name,
+                    provider.cfg.login.username_env,
+                    provider.cfg.login.password_env,
+                )
+                continue
+            logger.info('provider "%s" 未登录，尝试自动登录…', name)
+            try:
+                result = await provider.gate.run(provider.auto_login)
+            except Exception:
+                logger.exception('provider "%s" 自动登录异常，请手动登录', name)
+                continue
+            if result.get("ok"):
+                registry.set_login_status(name, True)
+                logger.info('provider "%s" 自动登录成功', name)
+            else:
+                logger.warning(
+                    'provider "%s" 自动登录失败: %s',
+                    name,
+                    result.get("reason", "未知原因"),
+                )
 
     async def _background_loop():
         """定期刷新登录态 + 定期保存 storage_state（防登录态过期丢失）。"""

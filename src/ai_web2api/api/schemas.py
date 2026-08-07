@@ -4,12 +4,49 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatMessage(BaseModel):
-    role: Literal["system", "user", "assistant"]
-    content: str = ""
+    """OpenAI 兼容消息。role 放宽到全部已知角色（llama_index 会发 developer/tool）。
+
+    content 兼容 str 与多部分列表（[{type:text, text:...}, {type:image_url,...}]）；
+    其余字段（tool_calls/tool_call_id/name 等）默认忽略，不参与校验。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    role: Literal["system", "user", "assistant", "developer", "tool", "function"] = "user"
+    content: str | list[Any] = ""
+
+
+def normalize_message(m: dict) -> dict:
+    """把 OpenAI 消息归一化成驱动层可用的 {role, content: str}。
+
+    - developer → system（OpenAI 语义：developer 是 system 的替代）
+    - content 为多部分列表时提取 text 部分；图片/未知类型保留占位
+    """
+    role = m.get("role", "user")
+    if role == "developer":
+        role = "system"
+    content = m.get("content", "")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for p in content:
+            if isinstance(p, dict):
+                ptype = p.get("type")
+                if ptype in ("text", "input_text"):
+                    parts.append(str(p.get("text", "")))
+                elif ptype == "image_url":
+                    parts.append("[图片]")
+                else:
+                    parts.append("[内容]")
+            else:
+                parts.append(str(p))
+        content = "\n".join(parts)
+    else:
+        content = str(content)
+    return {"role": role, "content": content}
 
 
 class ChatCompletionRequest(BaseModel):

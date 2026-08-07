@@ -22,6 +22,7 @@ from .schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ResponseMessage,
+    normalize_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ def create_router(registry: ProviderRegistry) -> APIRouter:
         if req.n and req.n > 1:
             raise RateLimitedError("n>1 不受支持，请使用 n=1", provider=provider.name)
 
-        messages = [m.model_dump() for m in req.messages]
+        messages = [normalize_message(m.model_dump()) for m in req.messages]
         model = req.model
         chat_id = _chat_id()
 

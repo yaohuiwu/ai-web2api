@@ -32,7 +32,9 @@ providers:
         - ".ds-think"
       stop_button: []                    # 填了可加快"生成结束"判定
       login_check: []                    # 空 = 用 input 选择器判定登录
-      new_chat_button: []
+      new_chat_button:                   # 发送前点\"开启新对话\"，隔离账号历史会话（防上下文污染）
+        - "text=开启新对话"
+        - "div.ds-button:has-text(\"新对话\")"
     login:
       mode: auto                  # auto = 用 .env 凭据自动登录；manual = 手动弹窗
       username_env: DEEPSEEK_USERNAME
