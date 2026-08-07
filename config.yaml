@@ -1,0 +1,43 @@
+# ai-web2api 配置
+server:
+  host: 0.0.0.0
+  port: 8000
+  cors_origins: ["*"]
+
+browser:
+  headless: false         # 首次登录需要看到浏览器窗口；登录完成后可改为 true
+  login_check_interval: 300
+  state_save_interval: 600
+
+profiles_dir: profiles
+
+providers:
+  deepseek:
+    url: https://chat.deepseek.com
+    models:
+      - {name: deepseek-web, ui_label: "DeepSeek 最新版"}
+      - {name: deepseek-r1-web, ui_label: "DeepSeek-R1"}
+    selectors:
+      # 每个字段都是候选列表：按顺序取第一个在页面上匹配的（UI 改版容错）
+      input:
+        - "textarea[name=search]"        # 2025-08 新版 UI 实测
+        - "textarea"                     # 兜底：聊天页通常只有一个 textarea
+        - "#chat-input"                  # 旧版 UI
+      send_button: []                    # 空 = 用回车发送
+      response_container:
+        - "[class*=markdown]"            # 待实测确认
+        - ".ds-markdown"                 # 旧版 UI
+      thinking_container:
+        - "[class*=think]"
+        - ".ds-think"
+      stop_button: []                    # 填了可加快"生成结束"判定
+      login_check: []                    # 空 = 用 input 选择器判定登录
+      new_chat_button: []
+    login:
+      mode: manual
+      hint: "在打开的浏览器窗口中完成登录（手机号验证码 / 密码），完成后调用 /admin/deepseek/login/status"
+    queue: {max_size: 10, timeout: 60}
+    response_timeout: 180
+    poll_interval: 0.2
+    stable_polls: 12
+    min_wait_before_stable: 8.0

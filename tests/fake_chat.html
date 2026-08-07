@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Fake AI Chat（端到端测试页）</title>
+<style>
+  body { font-family: sans-serif; max-width: 700px; margin: 40px auto; }
+  #messages { border: 1px solid #ddd; min-height: 200px; padding: 12px; }
+  .msg { margin: 8px 0; }
+  .user { color: #555; }
+  .ds-think { background: #f5f5f5; border-left: 3px solid #999; padding: 6px; margin: 6px 0; color: #666; }
+  .ds-markdown { margin: 6px 0; }
+  textarea { width: 100%; height: 60px; margin-top: 12px; }
+  pre { background: #f0f0f0; padding: 8px; }
+  table { border-collapse: collapse; }
+  td, th { border: 1px solid #ccc; padding: 4px 8px; }
+</style>
+</head>
+<body>
+  <h2>Fake AI Chat（模拟 DeepSeek Web 的聊天 UI）</h2>
+  <div id="messages"></div>
+  <textarea id="chat-input" placeholder="输入消息，回车发送"></textarea>
+<script>
+  const box = document.getElementById('messages');
+  const input = document.getElementById('chat-input');
+
+  function addUser(text) {
+    const d = document.createElement('div');
+    d.className = 'msg user';
+    d.textContent = '你: ' + text;
+    box.appendChild(d);
+  }
+
+  // 按间隔把 parts 逐段追加进元素（模拟流式渲染；HTML 片段用 innerHTML 生成真实元素）
+  function streamInto(el, parts, interval, done) {
+    let i = 0;
+    const timer = setInterval(() => {
+      if (i >= parts.length) { clearInterval(timer); done && done(); return; }
+      el.innerHTML += parts[i++];
+    }, interval);
+  }
+
+  function handleSend() {
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    addUser(text);
+
+    // 阶段1：思考区流式输出（模拟 R1 的思考过程）
+    const think = document.createElement('div');
+    think.className = 'ds-think';
+    box.appendChild(think);
+    const thinkParts = ['我需要', '认真', '思考', '这个', '问题。', '用户说：', text, '。'];
+    streamInto(think, thinkParts, 150, () => {
+      // 阶段2：思考→正文之间有 2s 停顿（验证稳定判定不会被间隙误杀）
+      setTimeout(() => {
+        // 阶段3：正文流式输出（含真实 HTML 元素：代码块、表格、加粗、行内代码）
+        const md = document.createElement('div');
+        md.className = 'ds-markdown';
+        box.appendChild(md);
+        const mdParts = [
+          '好的，', '这是',
+          '<strong>加粗文本</strong>和<code>行内代码</code>。\n\n',
+          '<pre><code class="language-python">print("hello")\nfor i in range(3):\n    print(i)</code></pre>\n\n',
+          '<table><tr><th>列1</th><th>列2</th></tr><tr><td>a</td><td>b</td></tr></table>\n\n',
+          '回答完毕。'
+        ];
+        streamInto(md, mdParts, 250);
+      }, 2000);
+    });
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  });
+</script>
+</body>
+</html>

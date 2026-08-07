@@ -1,0 +1,34 @@
+# 端到端验证用配置：把 DeepSeek 驱动指向本地假聊天页（tests/fake_chat.html），无需登录。
+# 启动：AI_WEB2API_CONFIG=config.fake.yaml .venv/bin/python -m ai_web2api.main
+server:
+  host: 127.0.0.1
+  port: 8001
+
+browser:
+  headless: true
+
+profiles_dir: /tmp/ai-web2api-fake-profiles
+
+providers:
+  fake:
+    driver: deepseek
+    url: file:///Users/yaohuiwu/SourceCode/AI/ai-web2api/tests/fake_chat.html
+    models:
+      - {name: fake-web}
+      - {name: fake-r1}
+    selectors:
+      input:
+        - "textarea#chat-input"
+      send_button: []
+      response_container:
+        - ".ds-markdown"
+      thinking_container:
+        - ".ds-think"
+      stop_button: []
+      login_check:
+        - "textarea#chat-input"
+    queue: {max_size: 5, timeout: 30}
+    response_timeout: 60
+    poll_interval: 0.15
+    stable_polls: 8
+    min_wait_before_stable: 1.5
