@@ -170,9 +170,18 @@ class BaseProvider(abc.ABC):
         *,
         thread_mode: str | None = None,
         thread_page=None,
+        mode: str | None = None,
+        deep_think: bool | None = None,
+        search: bool | None = None,
+        attachments: list[dict] | None = None,
     ) -> tuple[str, str | None]:
         """非流式：返回 (content, reasoning_content)。"""
-        chunks = [c async for c in self.generate(messages, model, thread_mode=thread_mode, thread_page=thread_page)]
+        chunks = [c async for c in self.generate(
+            messages, model,
+            thread_mode=thread_mode, thread_page=thread_page,
+            mode=mode, deep_think=deep_think, search=search,
+            attachments=attachments,
+        )]
         content = "".join(c.text for c in chunks if c.kind == "content")
         thinking = "".join(c.text for c in chunks if c.kind == "thinking")
         return content, thinking or None
@@ -185,6 +194,10 @@ class BaseProvider(abc.ABC):
         *,
         thread_mode: str | None = None,
         thread_page=None,
+        mode: str | None = None,
+        deep_think: bool | None = None,
+        search: bool | None = None,
+        attachments: list[dict] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """打开新 Tab → 注入上下文 → 发送 → 增量产出响应。
 
@@ -194,6 +207,10 @@ class BaseProvider(abc.ABC):
             注入完整历史（支持从无状态迁移），页面留给 manager 复用；
           - "resume"：复用 thread_page（页面已有完整历史），只发最后一条
             user 消息，不注入历史、不点新对话。
+
+        mode/deep_think/search：Web 端选项（通用值，provider 映射自己的 UI）。
+        mode 仅新会话（create/无状态）生效；resume 时忽略（会话页不可切换模式）。
+        deep_think/search 每次请求生效；页面无对应开关时忽略。
 
         注意：实现必须是 async generator（含 yield），因此这里用普通 def 声明。
         """

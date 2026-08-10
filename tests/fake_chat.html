@@ -18,6 +18,17 @@
 </head>
 <body>
   <h2>Fake AI Chat（模拟 DeepSeek Web 的聊天 UI）</h2>
+  <div class="mode-row" role="radiogroup">
+    <div class="mode-opt" role="radio" aria-checked="true" data-mode="fast">快速模式</div>
+    <div class="mode-opt" role="radio" aria-checked="false" data-mode="expert">专家模式</div>
+    <div class="mode-opt" role="radio" aria-checked="false" data-mode="image">识图模式</div>
+  </div>
+  <div class="toggle-row">
+    <div class="ds-toggle-button ds-toggle-button--m" data-toggle="deep_think">深度思考</div>
+    <div class="ds-toggle-button ds-toggle-button--m ds-toggle-button--selected" data-toggle="search">智能搜索</div>
+  </div>
+  <div id="attach-preview" class="attach-row"></div>
+  <input type="file" id="attach-input" multiple accept=".png,.jpg,.jpeg,.pdf,.txt,.md" style="display:none">
   <div id="messages"></div>
   <textarea id="chat-input" placeholder="输入消息，回车发送"></textarea>
 <script>
@@ -31,6 +42,39 @@
     box.appendChild(d);
   }
 
+  function currentState() {
+    const mode = document.querySelector('[role=radio][aria-checked=true]');
+    const dt = document.querySelector('[data-toggle=deep_think]');
+    const sr = document.querySelector('[data-toggle=search]');
+    const atts = [...document.querySelectorAll('#attach-preview .att-chip')].map(c => c.textContent);
+    return {
+      mode: mode ? mode.textContent : '?',
+      deepThink: dt && dt.className.includes('ds-toggle-button--selected') ? '开' : '关',
+      search: sr && sr.className.includes('ds-toggle-button--selected') ? '开' : '关',
+      attach: atts,
+    };
+  }
+
+  // 附件上传：文件 → 预览 chip（模拟 DeepSeek 上传，blob URL 图片预览）
+  const attachInput = document.getElementById('attach-input');
+  const attachRow = document.getElementById('attach-preview');
+  attachInput.addEventListener('change', () => {
+    [...attachInput.files].forEach((f) => {
+      const chip = document.createElement('span');
+      chip.className = 'att-chip';
+      chip.textContent = f.name;
+      attachRow.appendChild(chip);
+      if (f.type.startsWith('image/')) {
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(f);
+        img.width = 48; img.height = 48;
+        img.className = 'att-preview';
+        attachRow.appendChild(img);
+      }
+    });
+    attachInput.value = '';
+  });
+
   // 按间隔把 parts 逐段追加进元素（模拟流式渲染；HTML 片段用 innerHTML 生成真实元素）
   function streamInto(el, parts, interval, done) {
     let i = 0;
@@ -42,9 +86,14 @@
 
   function handleSend() {
     const text = input.value.trim();
-    if (!text) return;
+    const attCount = document.querySelectorAll('#attach-preview .att-chip').length;
+    if (!text && !attCount) return;  // 无文本无附件不发送（模拟 DeepSeek：有附件可空文本发送）
     input.value = '';
     addUser(text);
+
+    const st = currentState();
+    const attTag = st.attach.length ? '[附件:' + st.attach.join(',') + ']' : '';
+    const stateTag = '[模式:' + st.mode + '][深度思考:' + st.deepThink + '][智能搜索:' + st.search + ']' + attTag;
 
     // 阶段1：思考区流式输出（模拟 R1 的思考过程）
     const think = document.createElement('div');
@@ -59,6 +108,7 @@
         md.className = 'ds-markdown';
         box.appendChild(md);
         const mdParts = [
+          stateTag + ' ',
           '好的，', '这是',
           '<strong>加粗文本</strong>和<code>行内代码</code>。\n\n',
           '<pre><code class="language-python">print("hello")\nfor i in range(3):\n    print(i)</code></pre>\n\n',
@@ -72,6 +122,17 @@
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  });
+
+  // 模拟 DeepSeek 交互：radio 切换 aria-checked；toggle 切换 --selected class
+  document.querySelectorAll('[role=radio]').forEach((r) => {
+    r.addEventListener('click', () => {
+      document.querySelectorAll('[role=radio]').forEach((x) => x.setAttribute('aria-checked', 'false'));
+      r.setAttribute('aria-checked', 'true');
+    });
+  });
+  document.querySelectorAll('.ds-toggle-button').forEach((t) => {
+    t.addEventListener('click', () => t.classList.toggle('ds-toggle-button--selected'));
   });
 </script>
 </body>

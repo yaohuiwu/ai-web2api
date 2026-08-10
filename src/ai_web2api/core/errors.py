@@ -47,6 +47,20 @@ class ThreadMismatchError(ProviderError):
     error_type = "thread_mismatch"
 
 
+class UnsupportedModeError(ProviderError):
+    """请求了 provider 不支持 / 页面找不到的 mode（客户端参数错误）。"""
+
+    status_code = 400
+    error_type = "unsupported_mode"
+
+
+class AttachmentError(ProviderError):
+    """附件不支持/超限（客户端参数错误）。"""
+
+    status_code = 400
+    error_type = "attachments_error"
+
+
 class ThreadExpiredError(ProviderError):
     """thread 页面失效（登出/崩溃/超长会话），已自动销毁，可重试重建。"""
 

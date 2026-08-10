@@ -28,6 +28,16 @@ class SelectorsConfig(BaseModel):
     login_check: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 存在即已登录（空 = 用 input）
     new_chat_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 每次请求前点"新建对话"（可选）
 
+    # 模式选择（radiogroup）：API mode 值 → 候选列表（DeepSeek: fast/expert/image → 快速/专家/识图）。
+    # 通常只在"新对话页"存在；会话页无模式区（不可切换）。
+    mode_button: dict[str, list[str]] = {}
+    mode_checked: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 判断当前选中的 radio（如 div[role=radio][aria-checked="true"]）
+
+    # 开关（toggle，如深度思考/智能搜索）：API 字段名 → 候选列表
+    toggle_button: dict[str, list[str]] = {}
+    toggle_checked: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 判断开关已开
+    upload_input: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 附件上传入口（input[type=file] 等）
+
 
 class LoginPageSelectors(BaseModel):
     """登录页选择器（候选列表，取第一个匹配的）。DeepSeek 2026-08 实测值见 config.yaml。"""

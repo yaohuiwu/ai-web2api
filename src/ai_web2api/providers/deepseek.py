@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import tempfile
 import time
 from typing import AsyncIterator, Literal
 
@@ -10,9 +13,12 @@ from playwright.async_api import Page
 
 from ..browser import extractor
 from ..core.errors import (
+    AttachmentError,
+    ProviderError,
     ResponseTimeoutError,
     ThreadBusyError,
     ThreadExpiredError,
+    UnsupportedModeError,
 )
 from .base import BaseProvider, StreamChunk, build_prompt, last_user_message
 
@@ -34,6 +40,10 @@ class DeepSeekProvider(BaseProvider):
         *,
         thread_mode: str | None = None,
         thread_page=None,
+        mode: str | None = None,
+        deep_think: bool | None = None,
+        search: bool | None = None,
+        attachments: list[dict] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         cfg = self.cfg
         resume = thread_mode == "resume"
@@ -58,6 +68,12 @@ class DeepSeekProvider(BaseProvider):
                 )
             logger.info("[%s] input matched: %s", self.name, input_sel)
 
+            # 发送前应用模式/开关（在记录容器数量之前，避免 UI 重渲染影响增量判定）
+            await self._apply_options(page, mode, deep_think, search, can_set_mode=not resume)
+
+            # 发送前上传附件（图片等）：写入输入框，发送时随消息带上
+            await self._upload_attachments(page, attachments)
+
             # 发送前记录各候选容器的数量，之后只取"新增"的那个
             md_before = {s: await extractor.count_matches(page, s) for s in cfg.selectors.response_container}
             th_before = {s: await extractor.count_matches(page, s) for s in cfg.selectors.thinking_container}
@@ -80,6 +96,184 @@ class DeepSeekProvider(BaseProvider):
                 await page.close()
 
     # ---------- 内部 ----------
+
+    async def _apply_options(
+        self,
+        page: Page,
+        mode: str | None,
+        deep_think: bool | None,
+        search: bool | None,
+        can_set_mode: bool,
+    ) -> None:
+        """发送前把请求参数映射到页面 UI（模式 radio / 开关 toggle）。
+
+        - mode：仅新会话（create/无状态）可设；resume 时页面在会话页，无模式区，忽略。
+        - deep_think/search：每次请求按参数设置（已是目标态则跳过）；页面无对应开关时忽略。
+        """
+        cfg = self.cfg
+        sels = cfg.selectors
+        if mode:
+            if not can_set_mode:
+                # resume：会话页无模式区（DeepSeek 实测），忽略并提示
+                logger.info("[%s] mode=%s ignored (resume: 会话页不可切换模式)", self.name, mode)
+            else:
+                cands = sels.mode_button.get(mode, [])
+                if not cands:
+                    raise UnsupportedModeError(
+                        f'provider "{self.name}" 不支持 mode="{mode}"（可选: {list(sels.mode_button) or "无"}）',
+                        provider=self.name,
+                    )
+                sel = await extractor.first_match(page, cands)
+                if sel is None:
+                    raise UnsupportedModeError(
+                        f'provider "{self.name}" mode="{mode}" 的按钮未在页面找到'
+                        f"（候选: {cands}）",
+                        provider=self.name,
+                    )
+                if not await self._is_checked(page, sel, sels.mode_checked):
+                    logger.info("[%s] mode: click %s -> %s", self.name, sel, mode)
+                    await page.locator(sel).first.click()
+                    await page.wait_for_timeout(1200)  # 等模式切换生效（可能重渲染）
+                else:
+                    logger.info("[%s] mode=%s already active", self.name, mode)
+        if deep_think is not None:
+            await self._set_toggle(page, "deep_think", sels.toggle_button.get("deep_think", []), deep_think)
+        if search is not None:
+            await self._set_toggle(page, "search", sels.toggle_button.get("search", []), search)
+
+    async def _set_toggle(self, page: Page, field: str, cands: list[str], want_on: bool) -> None:
+        """设置开关到目标状态（已是目标态则跳过）；UI 无此开关时忽略（如被模式隐藏）。"""
+        if not cands:
+            return
+        sel = await extractor.first_match(page, cands)
+        if sel is None:
+            logger.info("[%s] toggle %s=%s skipped: 页面无此开关（可能被当前模式隐藏）", self.name, field, want_on)
+            return
+        is_on = await self._is_checked(page, sel, self.cfg.selectors.toggle_checked)
+        if is_on == want_on:
+            logger.info("[%s] toggle %s already %s", self.name, field, "on" if want_on else "off")
+            return
+        logger.info("[%s] toggle %s -> %s", self.name, field, "on" if want_on else "off")
+        await page.locator(sel).first.click()
+        await page.wait_for_timeout(800)  # 等 toggle 状态渲染
+
+    MAX_ATTACHMENTS = 50   # DeepSeek tooltip：最多 50 个
+    MAX_ATTACH_BYTES = 100 * 1024 * 1024  # 每个最大 100MB
+
+    async def _upload_attachments(self, page: Page, attachments: list[dict] | None) -> None:
+        """发送前把请求附件上传到输入框（DeepSeek：仅快速/识图模式支持，仅识别图片文字）。
+
+        - data URL → base64 解码写临时文件；http(s) URL → 下载后上传
+        - 上传入口：selectors.upload_input（默认 input[type=file]），找不到 → 400
+        - 上传完成后等待预览出现（输入框上方的 blob 图片），再返回
+        """
+        if not attachments:
+            return
+        if len(attachments) > self.MAX_ATTACHMENTS:
+            raise AttachmentError(
+                f"附件数量 {len(attachments)} 超过上限 {self.MAX_ATTACHMENTS} 个", provider=self.name
+            )
+        sels = self.cfg.selectors.upload_input or ["input[type=file]"]
+        sel = await extractor.first_match(page, sels)
+        if sel is None:
+            raise AttachmentError(
+                'provider "%s" 当前页面/模式不支持附件上传（未找到上传入口 input[type=file]），'
+                "DeepSeek 仅快速/识图模式支持" % self.name,
+                provider=self.name,
+            )
+        paths: list[str] = []
+        tmpdir: str | None = None
+        try:
+            import uuid
+            for att in attachments:
+                name = att.get("name", "image")
+                data = att.get("data")
+                if data:
+                    import base64
+                    try:
+                        raw = base64.b64decode(data)
+                    except Exception:
+                        raise AttachmentError(f"附件 {name} base64 解码失败", provider=self.name)
+                elif att.get("url"):
+                    raw = await asyncio.to_thread(self._download_attachment, att["url"])
+                else:
+                    raise AttachmentError(f"附件 {name} 缺少 data/url", provider=self.name)
+                if len(raw) > self.MAX_ATTACH_BYTES:
+                    raise AttachmentError(
+                        f"附件 {name} 超过上限 100MB", provider=self.name
+                    )
+                if tmpdir is None:
+                    tmpdir = os.path.join(tempfile.gettempdir(), f"aiw2a_{uuid.uuid4().hex[:8]}")
+                    os.makedirs(tmpdir, exist_ok=True)
+                safe_name = os.path.basename(name) or "image"  # 防路径穿越；保留原名（上传后 chip 显示原名）
+                path = os.path.join(tmpdir, safe_name)
+                with open(path, "wb") as f:
+                    f.write(raw)
+                paths.append(path)
+            logger.info("[%s] upload %d attachment(s) via %s", self.name, len(paths), sel)
+            await page.locator(sel).first.set_input_files(paths)
+            # 等上传完成：输入框上方的 blob 图片预览出现
+            # （排除 .ds-message 内的历史消息图片；位置范围 500px 兼容布局差异）
+            ta = page.locator(self.cfg.selectors.input[0] if self.cfg.selectors.input else "textarea").first
+            try:
+                box = await ta.bounding_box()
+            except Exception:
+                box = None
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                try:
+                    cnt = await page.evaluate(
+                        """(ty) => {
+                          const imgs = document.querySelectorAll("img[src^='blob:']");
+                          let n = 0;
+                          for (const im of imgs) {
+                            if (im.closest('.ds-message')) continue;  // 消息区图片不算
+                            const r = im.getBoundingClientRect();
+                            if (r.width > 10 && r.height > 10 && ty !== null &&
+                                r.y < ty && r.y > ty - 500) n++;
+                          }
+                          return n;
+                        }""",
+                        box["y"] if box else None,
+                    )
+                    if cnt >= len(paths):
+                        break
+                except Exception:
+                    pass
+                await page.wait_for_timeout(500)
+            await page.wait_for_timeout(800)  # 等上传状态稳定
+        finally:
+            import shutil
+            if tmpdir:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+
+    @staticmethod
+    def _download_attachment(url: str, timeout: float = 30) -> bytes:
+        """同步下载 http(s) 附件（asyncio.to_thread 包裹）。"""
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+
+    @staticmethod
+    async def _is_checked(page: Page, sel: str, checked_sels: list[str]) -> bool:
+        """用 checked 选择器判断元素当前是否选中/开启（el.matches 检查）。"""
+        checked_sel = None
+        for s in checked_sels:
+            try:
+                if await page.locator(s).first.count() > 0:
+                    checked_sel = s
+                    break
+            except Exception:
+                continue
+        if checked_sel is None:
+            return False
+        try:
+            return bool(await page.locator(sel).first.evaluate(
+                "(el, s) => el.matches(s)", checked_sel
+            ))
+        except Exception:
+            return False
 
     async def _send_prompt(self, page: Page, input_sel: str, prompt: str) -> None:
         cfg = self.cfg

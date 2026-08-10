@@ -123,7 +123,11 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         if req.n and req.n > 1:
             raise RateLimitedError("n>1 不受支持，请使用 n=1", provider=provider.name)
 
-        messages = [normalize_message(m.model_dump()) for m in req.messages]
+        messages, attachments = [], []
+        for m in req.messages:
+            nm, atts = normalize_message(m.model_dump())
+            messages.append(nm)
+            attachments.extend(atts)
         model = req.model                       # 响应回显请求名（OpenAI 兼容）
         resolved = registry.resolve_model_name(model)  # 驱动用真实模型名
         chat_id = _chat_id()
@@ -135,6 +139,14 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             tm: ThreadManager = threads
             session, mode = await tm.get_or_create(thread_id, provider, resolved)
             kwargs = {"thread_mode": mode, "thread_page": session.page}
+            if req.mode is not None:
+                kwargs["mode"] = req.mode
+            if req.deep_think is not None:
+                kwargs["deep_think"] = req.deep_think
+            if req.search is not None:
+                kwargs["search"] = req.search
+            if attachments:
+                kwargs["attachments"] = attachments
 
             if req.stream:
 
@@ -187,14 +199,24 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 choices=[ChatCompletionChoice(message=message)],
             )
 
+        opts = {}
+        if req.mode is not None:
+            opts["mode"] = req.mode
+        if req.deep_think is not None:
+            opts["deep_think"] = req.deep_think
+        if req.search is not None:
+            opts["search"] = req.search
+        if attachments:
+            opts["attachments"] = attachments
+
         if req.stream:
             return StreamingResponse(
-                _stream_completions(provider, messages, resolved, chat_id),
+                _stream_completions(provider, messages, resolved, chat_id, **opts),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
-        content, thinking = await provider.gate.run(provider.complete, messages, resolved)
+        content, thinking = await provider.gate.run(provider.complete, messages, resolved, **opts)
         message = ResponseMessage(content=content, reasoning_content=thinking)
         return ChatCompletionResponse(
             id=chat_id,
@@ -203,7 +225,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             choices=[ChatCompletionChoice(message=message)],
         )
 
-    async def _stream_completions(provider, messages, model, chat_id):
+    async def _stream_completions(provider, messages, model, chat_id, **opts):
         created = int(time.time())
         # 首个 chunk：角色声明
         yield _sse(
@@ -216,7 +238,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             }
         )
         try:
-            async for chunk in provider.gate.run_iter(provider.generate, messages, model):
+            async for chunk in provider.gate.run_iter(provider.generate, messages, model, **opts):
                 delta = (
                     {"reasoning_content": chunk.text}
                     if chunk.kind == "thinking"

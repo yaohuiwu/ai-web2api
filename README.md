@@ -89,6 +89,49 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 - 页面忙（上一请求未完成，新消息被 Web 端排队）→ 20s 内返回 409 `thread_busy` 并销毁会话（配置 `thread_busy_timeout`），客户端稍后重试即自动重建；上一请求未释放（客户端中断）→ 60s 内返回 504 `thread_timeout` 并销毁。请求均**有界**，不会无限挂起
 - **跨重启持久化**（`server.thread_persist: true`，默认开）：每次请求完成后，服务端把绑定页的 DeepSeek 会话 id（URL 末段 `/a/chat/s/<uuid>`）落盘到 `profiles/<provider>/threads.json`。服务重启后，同 `thread_id` 的请求会自动 `goto` 该会话 URL 恢复——**多轮记忆跨重启保持**（DeepSeek 不删用户会话）。TTL 空闲回收/服务关闭**保留**恢复能力；`DELETE /admin/threads/{id}`、页面失效/超时/忙错误**清除**（下次同 id 开全新会话）。恢复时切换 model 同样 409
 
+### 2.6 Web 端选项：模式 + 开关（provider 通用）
+
+DeepSeek Web 端支持**三种模式**（快速/专家/识图）与**两个开关**（深度思考/智能搜索）。API 用通用字段（OpenAI SDK 用 `extra_body` 传），provider 各自映射自己的 UI：
+
+```python
+resp = client.chat.completions.create(
+    model="deepseek-web",
+    messages=[{"role": "user", "content": "帮我看下这张图的代码"}],
+    extra_body={
+        "mode": "image",        # fast / expert / image（新会话生效）
+        "deep_think": True,     # 深度思考开关（每次请求生效）
+        "search": False,        # 智能搜索开关（每次请求生效）
+    })
+```
+
+- `mode`：`fast`（快速模式）/ `expert`（专家模式）/ `image`（识图模式）。**仅新会话生效**（无状态请求或 thread 创建时）；thread 续用（resume/恢复）时页面已在会话页、无法切换模式，参数被忽略（会话模式以创建时为准）。未知值返回 400 `unsupported_mode`
+- `deep_think` / `search`：每次请求生效（已处于目标状态则不点击）。页面无对应开关时自动跳过（如专家模式会话页只有"深度思考"开关、无"智能搜索"）
+- 开关是页面级 UI 状态：**并行 thread 同时使用不同开关参数可能互相影响**（同一浏览器 context 共享开关状态），固定设置时无影响；`thread_parallel: false` 可完全避免
+- 选择器全部配置化：`selectors.mode_button`（API 值 → 候选）、`mode_checked`、`toggle_button`（字段名 → 候选）、`toggle_checked`（见 config.yaml，2026-08 实测 DeepSeek UI）
+
+### 2.7 附件上传（图片识别，provider 通用）
+
+DeepSeek 快速/识图模式支持上传附件（输入框左下方附件按钮，仅识别图片中的文字，最多 50 个、每个 100MB）。API 用 OpenAI 标准的多部分 `content` + `image_url` 表达（OpenAI SDK 原生支持）：
+
+```python
+resp = client.chat.completions.create(
+    model="deepseek-web",
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "这张图里写了什么？"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,<base64>"}},
+        ],
+    }],
+)
+```
+
+- `image_url.url` 支持 **data URL**（`data:image/png;base64,...`）和 **http(s) 外链**（服务端下载后上传）
+- 纯图片消息（无 text 部分）也可以发送（Web 端上传后即使输入框为空也能发送）
+- 服务端把附件解码为临时文件 → 通过页面 `input[type=file]` 上传 → 随消息发送；`selectors.upload_input` 配置化（找不到上传入口 → 400 `attachments_error`）
+- 限制：**最多 50 个、每个最大 100MB**，超限 400 `attachments_error`（与 Web 端 tooltips 一致）
+- 附件仅作用于本次请求的 user 消息（thread 续用时注入的历史为纯文本，图片不会重放）；expert 模式等无上传入口的页面收到附件参数 → 400
+
 ### 3. 自测（不需要登录）
 
 仓库带一个假聊天页 + 假配置，把 DeepSeek 驱动完整跑一遍（含思考区提取、流式、Markdown 转换、超时/错误路径）：

@@ -33,6 +33,20 @@ providers:
       stop_button: []
       login_check:
         - "textarea#chat-input"
+      # 假页模式/开关（fake_chat.html 模拟 DeepSeek UI）
+      mode_button:
+        fast: ['div[role=radio]:has-text("快速模式")']
+        expert: ['div[role=radio]:has-text("专家模式")']
+        image: ['div[role=radio]:has-text("识图模式")']
+      mode_checked:
+        - 'div[role=radio][aria-checked="true"]'
+      toggle_button:
+        deep_think: ['div.ds-toggle-button:has-text("深度思考")']
+        search: ['div.ds-toggle-button:has-text("智能搜索")']
+      toggle_checked:
+        - '.ds-toggle-button--selected'
+      upload_input:
+        - 'input[type=file]'
     queue: {max_size: 5, timeout: 30}
     response_timeout: 60
     poll_interval: 0.15

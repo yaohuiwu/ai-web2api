@@ -40,6 +40,21 @@ providers:
       new_chat_button:                   # 发送前点\"开启新对话\"，隔离账号历史会话（防上下文污染）
         - "text=开启新对话"
         - "div.ds-button:has-text(\"新对话\")"
+      # 三模式（radiogroup，2026-08 实测：div[role=radio]，仅新对话页存在；会话页无模式区不可切换）
+      mode_button:                       # API mode 值（fast/expert/image）→ 候选选择器
+        fast: ['div[role=radio]:has-text("快速模式")']
+        expert: ['div[role=radio]:has-text("专家模式")']
+        image: ['div[role=radio]:has-text("识图模式")']
+      mode_checked:                      # 判断当前选中的 radio
+        - 'div[role=radio][aria-checked="true"]'
+      # 开关（toggle，2026-08 实测：div.ds-toggle-button--m，选中态加 --selected class）
+      toggle_button:                     # API 字段名 → 候选选择器
+        deep_think: ['div.ds-toggle-button:has-text("深度思考")']
+        search: ['div.ds-toggle-button:has-text("智能搜索")']
+      toggle_checked:                    # 判断开关已开
+        - '.ds-toggle-button--selected'
+      upload_input:                      # 附件上传入口（input[type=file]，2026-08 实测）
+        - 'input[type=file]'
     model_aliases:                       # 客户端（llama_index 等）默认模型名 → 本 provider 模型
       gpt-4: deepseek-web
       gpt-4o: deepseek-web
