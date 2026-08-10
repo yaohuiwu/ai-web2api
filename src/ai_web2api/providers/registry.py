@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 
+from playwright.async_api import async_playwright
+
 from ..browser.manager import BrowserManager
 from ..config import AppConfig
 from ..core.errors import ModelNotFoundError
-from .base import BaseProvider
+from .base import BaseProvider, first_match
 from .deepseek import DeepSeekProvider
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,7 @@ OPENAI_COMMON_MODELS: tuple[str, ...] = (
 class ProviderRegistry:
     def __init__(self, config: AppConfig, browser: BrowserManager):
         self.config = config
+        self._browser = browser
         self._providers: dict[str, BaseProvider] = {}
         self._model_map: dict[str, BaseProvider] = {}
         self._aliases: dict[str, str] = {}  # 别名 → 真实模型名（客户端兼容层）
@@ -120,6 +123,12 @@ class ProviderRegistry:
         return dict(self._login_status)
 
     async def refresh_login_status(self) -> None:
+        if not self.config.browser.status_check:
+            logger.info("定时状态检测已关闭（browser.status_check=false），跳过")
+            return
+        if self.config.browser.status_check_headless:
+            await self._refresh_login_status_headless()
+            return
         for name, p in self._providers.items():
             try:
                 ok = await p.check_login()
@@ -128,3 +137,43 @@ class ProviderRegistry:
                 ok = False
             self._login_status[name] = ok
             logger.info("login status %s: %s", name, ok)
+
+    async def _refresh_login_status_headless(self) -> None:
+        """用独立 headless 浏览器做定时状态检测（不占用/不弹出主浏览器窗口）。
+
+        登录态取主浏览器 context 的实时 storage_state（context 不存在时回退
+        state.json），逐 provider 打开页面检查 login_check 选择器。
+        """
+        from ..browser.manager import LAUNCH_ARGS
+
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=LAUNCH_ARGS,
+            )
+            try:
+                for name, p in self._providers.items():
+                    ok = False
+                    try:
+                        state = await self._browser.export_storage_state(name)
+                        kwargs: dict = {}
+                        if state is not None:
+                            kwargs["storage_state"] = state
+                        ctx = await browser.new_context(
+                            user_agent=self.config.browser.user_agent, **kwargs
+                        )
+                        try:
+                            page = await ctx.new_page()
+                            await page.goto(p.cfg.url, wait_until="domcontentloaded", timeout=30000)
+                            sel = await first_match(page, p.login_check_selectors)
+                            if sel is not None:
+                                await page.wait_for_selector(sel, timeout=8000)
+                                ok = True
+                        finally:
+                            await ctx.close()
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("headless check_login(%s) 失败: %s", name, e)
+                    self._login_status[name] = ok
+                    logger.info("login status %s: %s (headless)", name, ok)
+            finally:
+                await browser.close()

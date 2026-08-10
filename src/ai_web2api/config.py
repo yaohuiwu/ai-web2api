@@ -102,6 +102,8 @@ class BrowserConfig(BaseModel):
     default_timeout: float = 30.0
     login_check_interval: float = 300.0  # 后台刷新登录态间隔（秒）
     state_save_interval: float = 600.0   # 后台定期保存 storage_state 间隔（秒）
+    status_check: bool = True            # 定时状态检测总开关（关掉后后台不再访问页面）
+    status_check_headless: bool = True   # 定时检测用独立 headless 浏览器（不弹窗口，默认开）
 
 
 class ServerConfig(BaseModel):

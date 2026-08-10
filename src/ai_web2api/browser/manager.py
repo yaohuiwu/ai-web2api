@@ -5,7 +5,13 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+from playwright.async_api import (
+    Browser,
+    BrowserContext,
+    Page,
+    StorageState,
+    async_playwright,
+)
 
 from ..config import BrowserConfig
 
@@ -84,6 +90,28 @@ class BrowserManager:
         path.parent.mkdir(parents=True, exist_ok=True)
         await ctx.storage_state(path=str(path))
         logger.info("state saved for provider %s", provider)
+
+    async def export_storage_state(self, provider: str) -> StorageState | None:
+        """导出 provider 当前登录态（供独立 headless 检测使用）。
+
+        优先取主浏览器 context 的实时 storage_state；context 不存在时回退到
+        落盘的 state.json（无登录态返回 None）。
+        """
+        ctx = self._contexts.get(provider)
+        if ctx:
+            try:
+                return await ctx.storage_state()
+            except Exception:
+                pass
+        path = self.state_path(provider)
+        if path.exists():
+            try:
+                import json
+
+                return json.loads(path.read_text())
+            except Exception:
+                pass
+        return None
 
     async def clear_state(self, provider: str) -> None:
         ctx = self._contexts.get(provider)

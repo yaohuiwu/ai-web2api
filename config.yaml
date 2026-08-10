@@ -13,6 +13,9 @@ browser:
   headless: false         # 首次登录需要看到浏览器窗口；登录完成后可改为 true
   login_check_interval: 300
   state_save_interval: 600
+  # 定时状态检测：独立开关 + 默认 headless（即使主浏览器 headed 也不弹窗）
+  status_check: true      # 定时检测登录态/保存状态总开关
+  status_check_headless: true  # 检测用独立 headless 浏览器，不占用/弹出主浏览器窗口
 
 profiles_dir: profiles
 

@@ -161,6 +161,9 @@ server:
   port: 8000
 browser:
   headless: false          # 首次登录用 false，之后可改 true
+  login_check_interval: 300  # 定时检测登录态间隔（秒）
+  status_check: true         # 定时状态检测总开关
+  status_check_headless: true  # 检测用独立 headless 浏览器，不弹出/占用主浏览器窗口（默认开）
 profiles_dir: profiles     # 登录态持久化目录
 
 providers:                 # 也支持 list 写法

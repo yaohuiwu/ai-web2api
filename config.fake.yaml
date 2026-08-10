@@ -10,8 +10,11 @@ server:
   thread_persist: false  # 假页 URL 无会话 id（file:// 不匹配 /a/chat/s/），无需持久化
 
 browser:
-  headless: true
+  headless: true  # 主浏览器（用户可手动登录/调试）
   login_check_interval: 5.0
+  # 定时状态检测：独立开关 + 默认 headless（不弹浏览器窗口）
+  status_check: true
+  status_check_headless: true
 
 profiles_dir: /tmp/ai-web2api-fake-profiles
 
