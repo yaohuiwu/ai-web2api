@@ -33,6 +33,7 @@
     border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 13px;
     background: #fff; color: var(--text); max-width: 180px;
   }
+  .opts select:disabled { opacity: .5; cursor: not-allowed; }
   #chat {
     flex: 1; overflow-y: auto; padding: 20px; max-width: 860px; width: 100%; margin: 0 auto;
   }
@@ -510,13 +511,17 @@ $("#input").addEventListener("keydown", (e) => {
 });
 $("#threadId").addEventListener("change", () => { history = []; });
 $("#threadId").addEventListener("input", (e) => {
-  $("#hint").textContent = e.target.value.trim()
-    ? "已启用会话绑定：首次请求创建会话并注入全部历史，后续 resume 只发最后一条"
+  const tid = e.target.value.trim();
+  // mode 是页面级参数（DeepSeek 会话页无模式区），绑定会话后不可切换 → 明确禁用
+  $("#mode").disabled = !!tid;
+  $("#mode").title = tid ? "mode 仅新会话可选（绑定 thread 后不可切换）" : "";
+  $("#hint").textContent = tid
+    ? "已启用会话绑定：首次请求创建会话并注入全部历史，后续 resume 只发最后一条；深度思考/智能搜索可随时切换，mode 仅新会话可选"
     : "";
 });
 $("#mode").addEventListener("change", (e) => {
   $("#hint").textContent = e.target.value
-    ? "mode 仅在新对话创建时生效（会话页不可切换模式）"
+    ? "mode 将在新对话创建时生效（已绑定会话时不可切换）"
     : "";
 });
 
