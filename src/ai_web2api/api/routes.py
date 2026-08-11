@@ -138,7 +138,14 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             if threads is None:
                 raise ProviderError("会话绑定未启用（threads manager 未初始化）")
             tm: ThreadManager = threads
-            session, mode = await tm.get_or_create(thread_id, provider, resolved)
+            # 第一句 user 消息作会话标题（create 时记录；resume 忽略，保留原标题）
+            first_msg = next(
+                (m["content"] for m in messages if m.get("role") == "user" and m.get("content")),
+                "",
+            )
+            session, mode = await tm.get_or_create(
+                thread_id, provider, resolved, first_message=first_msg[:60]
+            )
             kwargs = {"thread_mode": mode, "thread_page": session.page}
             if req.mode is not None:
                 kwargs["mode"] = req.mode

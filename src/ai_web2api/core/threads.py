@@ -40,7 +40,7 @@ class ThreadSession:
 
     __slots__ = (
         "thread_id", "provider", "page", "model",
-        "lock", "created", "last_used", "url_id",
+        "lock", "created", "last_used", "url_id", "first_message",
     )
 
     def __init__(
@@ -49,11 +49,13 @@ class ThreadSession:
         provider: BaseProvider,
         page: Page,
         model: str,
+        first_message: str = "",
     ) -> None:
         self.thread_id = thread_id
         self.provider = provider
         self.page = page
         self.model = model
+        self.first_message = first_message  # 会话第一句 user 消息（左侧列表标题）
         self.lock = asyncio.Lock()  # 同一 thread 串行（页面只有一个输入框）
         self.url_id: str | None = None  # provider 会话 id（DeepSeek: /a/chat/s/<uuid>）
         now = time.monotonic()
@@ -76,6 +78,7 @@ class ThreadSession:
             "thread_id": self.thread_id,
             "provider": self.provider.name,
             "model": self.model,
+            "first_message": self.first_message,
             "created": round(self.created, 1),
             "idle_seconds": round(time.monotonic() - self.last_used, 1),
             "page_url": self.page.url if not self.page.is_closed() else "closed",
@@ -122,7 +125,7 @@ class ThreadManager:
         return self._profiles_dir / provider / "threads.json"
 
     def _load_urls(self, provider: str) -> dict[str, dict]:
-        """返回 {thread_id: {"url": str, "model": str | None}}（兼容旧纯字符串格式）。"""
+        """返回 {thread_id: {"url": str, "model": str | None, "title": str}}（兼容旧格式）。"""
         try:
             data = json.loads(self._persist_path(provider).read_text(encoding="utf-8"))
         except Exception:
@@ -130,9 +133,13 @@ class ThreadManager:
         out: dict[str, dict] = {}
         for k, v in data.items():
             if isinstance(v, str):
-                out[k] = {"url": v, "model": None}
+                out[k] = {"url": v, "model": None, "title": ""}
             elif isinstance(v, dict) and isinstance(v.get("url"), str):
-                out[k] = {"url": v["url"], "model": v.get("model")}
+                out[k] = {
+                    "url": v["url"],
+                    "model": v.get("model"),
+                    "title": v.get("title", ""),
+                }
         return out
 
     def _save_urls(self, provider: str, urls: dict[str, dict]) -> None:
@@ -165,6 +172,7 @@ class ThreadManager:
         thread_id: str,
         provider: BaseProvider,
         model: str,
+        first_message: str = "",
     ) -> tuple[ThreadSession, str]:
         """取现有会话，或恢复/创建新会话。
 
@@ -173,6 +181,8 @@ class ThreadManager:
           驱动只发最后一条 user 消息，不注入历史、不点新对话；
         - "create"：全新会话（打开新页面，点"开启新对话"）。
         创建/恢复时页面打开失败不会注册残留。
+        first_message：create 时的第一句 user 消息（作左侧列表标题）；
+        已有会话/磁盘恢复时忽略调用方参数（保留原标题）。
         """
         existing = self._sessions.get(thread_id)
         if existing is not None:
@@ -204,7 +214,13 @@ class ThreadManager:
                     "或通过 DELETE /admin/threads/{id} 释放",
                 )
             session = ThreadSession(thread_id, provider, page, model)
-            session.url_id = self._load_urls(provider.name).get(thread_id, {}).get("url")
+            entry = self._load_urls(provider.name).get(thread_id, {})
+            session.url_id = entry.get("url")
+            if restored:
+                # 磁盘恢复：标题用持久化的第一句话（调用方参数忽略）
+                session.first_message = entry.get("title", "") or ""
+            else:
+                session.first_message = first_message or ""
             self._sessions[thread_id] = session
             logger.info(
                 "thread %s %s (provider=%s, model=%s, active=%d/%d)",
@@ -277,9 +293,18 @@ class ThreadManager:
             return
         urls = self._load_urls(session.provider.name)
         cur = urls.get(thread_id)
-        if cur and cur["url"] == url_id and cur.get("model") == session.model:
+        if (
+            cur
+            and cur["url"] == url_id
+            and cur.get("model") == session.model
+            and cur.get("title", "") == session.first_message
+        ):
             return  # 无变化
-        urls[thread_id] = {"url": url_id, "model": session.model}
+        urls[thread_id] = {
+            "url": url_id,
+            "model": session.model,
+            "title": session.first_message,
+        }
         self._save_urls(session.provider.name, urls)
         logger.info("thread %s persisted url_id=%s (model=%s)", thread_id, url_id, session.model)
 

@@ -119,6 +119,35 @@
     margin: 6px 0 0;
   }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; text-align: center; }
+  #layout { flex: 1; display: flex; min-height: 0; }
+  #sidebar {
+    width: 250px; min-width: 250px; background: var(--card);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .sidebar-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+  }
+  .sidebar-head h2 { font-size: 14px; margin: 0; font-weight: 600; }
+  .sidebar-head .btn { padding: 4px 10px; font-size: 12px; }
+  #threadList { flex: 1; overflow-y: auto; }
+  .thread-item {
+    padding: 9px 12px; border-bottom: 1px solid var(--border);
+    cursor: pointer; border-left: 3px solid transparent;
+  }
+  .thread-item:hover { background: #eef1f5; }
+  .thread-item.active { background: #e8f0fe; border-left-color: #2563eb; }
+  .thread-item .tt {
+    font-size: 13px; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .thread-item .tid {
+    font-size: 11px; color: var(--muted); margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .thread-item .empty { color: var(--muted); font-style: italic; font-size: 12px; }
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 </style>
 </head>
 <body>
@@ -150,6 +179,15 @@
   </div>
 </header>
 
+<div id="layout">
+<aside id="sidebar">
+  <div class="sidebar-head">
+    <h2>会话</h2>
+    <button class="btn" id="newChat" title="清空 thread_id，开始无状态新对话">＋ 新会话</button>
+  </div>
+  <div id="threadList"></div>
+</aside>
+<main id="main">
 <div id="chat">
   <div class="msg meta"><div class="bubble">输入消息开始测试本地 OpenAI 兼容接口（POST /v1/chat/completions）</div></div>
 </div>
@@ -161,6 +199,8 @@
     <button class="btn" id="clear">清空</button>
   </div>
   <div class="hint" id="hint"></div>
+</div>
+</main>
 </div>
 
 <script>
@@ -498,6 +538,7 @@ async function send() {
     streaming = false;
     $("#send").disabled = false;
     $("#input").focus();
+    refreshThreads(); // 新 thread 创建后立即出现在左侧
   }
 }
 
@@ -525,7 +566,61 @@ $("#mode").addEventListener("change", (e) => {
     : "";
 });
 
+// ---- 左侧会话列表（GET /admin/threads 轮询；点击切换 thread）----
+function refreshThreads() {
+  fetch("/admin/threads")
+    .then((r) => r.json())
+    .then((data) => {
+      const cur = $("#threadId").value.trim();
+      const list = $("#threadList");
+      const items = data.threads || [];
+      list.innerHTML = "";
+      if (!items.length) {
+        list.innerHTML =
+          '<div class="thread-item"><div class="empty">暂无会话<br>发送带 thread_id 的消息后出现在这里</div></div>';
+        return;
+      }
+      for (const t of items) {
+        const item = document.createElement("div");
+        item.className = "thread-item" + (t.thread_id === cur ? " active" : "");
+        const title = t.first_message || t.thread_id;
+        item.innerHTML =
+          `<div class="tt">${esc(title)}</div>` +
+          `<div class="tid">${esc(t.thread_id)} · ${esc(t.model || "")}</div>`;
+        item.onclick = () => switchThread(t.thread_id);
+        list.appendChild(item);
+      }
+    })
+    .catch(() => {});
+}
+
+function switchThread(tid) {
+  if (streaming) return;
+  const el = $("#threadId");
+  el.value = tid;
+  el.dispatchEvent(new Event("input")); // 触发 mode 禁用 + hint 更新
+  history = [];
+  // 暂不保存历史消息：切换后聊天区清空，新消息将续用该会话
+  $("#chat").innerHTML =
+    `<div class="msg meta"><div class="bubble">已切换到会话 <code>${esc(tid)}</code>（历史消息不保留，新消息将续用该会话）</div></div>`;
+  refreshThreads();
+}
+
+function newChat() {
+  if (streaming) return;
+  $("#threadId").value = "";
+  $("#threadId").dispatchEvent(new Event("input"));
+  history = [];
+  $("#chat").innerHTML =
+    '<div class="msg meta"><div class="bubble">已开始新会话（无 thread_id = 无状态，每次请求独立）</div></div>';
+  refreshThreads();
+}
+
+$("#newChat").onclick = newChat;
+setInterval(refreshThreads, 5000);
+
 loadModels();
+refreshThreads();
 $("#input").focus();
 </script>
 </body>
