@@ -511,6 +511,11 @@ async function sendStream(body) {
     contentBox.textContent = "（空回复）";
   } else {
     contentBox.innerHTML = md(fullContent);
+    // 服务端错误透传（[会话错误]/[错误] 前缀）→ 红色气泡
+    if (/^\s*\[(会话错误|错误)\]/.test(fullContent)) {
+      bubble.classList.add("error");
+      contentBox.style.color = "#dc2626";
+    }
   }
 }
 

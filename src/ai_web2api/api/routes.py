@@ -291,13 +291,18 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                     else {"content": chunk.text}
                 )
                 yield _sse({**meta, "choices": [{"index": 0, "delta": delta, "finish_reason": None}]})
-        except (ThreadExpiredError, ThreadBusyError):
+        except (ThreadExpiredError, ThreadBusyError) as e:
             if threads is not None:
                 await threads.close(thread_id)
             logger.error("thread %s expired/busy mid-stream, closed", thread_id)
+            # 错误透传：不静默空流，客户端能看到失败原因
+            yield _sse({**meta, "choices": [{"index": 0, "delta": {"content": f"\n\n[会话错误] {e.message}"}, "finish_reason": None}]})
+            yield "data: [DONE]\n\n"
             return
         except ProviderError as e:
             logger.error("thread stream error for %s: %s", model, e.message)
+            yield _sse({**meta, "choices": [{"index": 0, "delta": {"content": f"\n\n[错误] {e.message}"}, "finish_reason": None}]})
+            yield "data: [DONE]\n\n"
             return
         yield _sse({**meta, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
         yield "data: [DONE]\n\n"

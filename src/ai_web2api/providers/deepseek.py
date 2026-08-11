@@ -110,14 +110,29 @@ class DeepSeekProvider(BaseProvider):
             input_sel = await extractor.first_match(page, cfg.selectors.input)
             if input_sel is None:
                 if resume:
-                    raise ThreadExpiredError(
-                        f'provider "{self.name}" thread 页面失效（找不到输入框），会话已自动销毁',
+                    # 页面可能正被 SPA 导航/后台重载打断（count() 瞬时异常被吞成 0）。
+                    # 先 reload 当前会话页恢复，仍失败才判定失效销毁。
+                    logger.info(
+                        "[%s] resume page input not matched, reloading to recover", self.name
+                    )
+                    try:
+                        await page.reload(wait_until="domcontentloaded", timeout=30000)
+                        await page.wait_for_timeout(2000)  # SPA 渲染会话页
+                        input_sel = await extractor.first_match(page, cfg.selectors.input)
+                    except Exception:
+                        input_sel = None
+                    if input_sel is not None:
+                        logger.info("[%s] recovered after reload: %s", self.name, input_sel)
+                if input_sel is None:
+                    if resume:
+                        raise ThreadExpiredError(
+                            f'provider "{self.name}" thread 页面失效（找不到输入框），会话已自动销毁',
+                            provider=self.name,
+                        )
+                    raise ResponseTimeoutError(
+                        f'provider "{self.name}" 找不到输入框（input 选择器均未匹配）',
                         provider=self.name,
                     )
-                raise ResponseTimeoutError(
-                    f'provider "{self.name}" 找不到输入框（input 选择器均未匹配）',
-                    provider=self.name,
-                )
             logger.info("[%s] input matched: %s", self.name, input_sel)
 
             # 发送前应用模式/开关（在记录容器数量之前，避免 UI 重渲染影响增量判定）
