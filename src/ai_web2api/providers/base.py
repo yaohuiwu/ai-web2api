@@ -218,12 +218,16 @@ class BaseProvider(abc.ABC):
 
     # ---------- 内部工具 ----------
 
+    def init_scripts(self) -> list[str]:
+        """页面级注入脚本（goto 前生效）。子类可覆写（如 DeepSeek 的网络监听）。"""
+        return []
+
     async def open_chat_page(self) -> Page:
         """打开聊天页并确认已登录；未登录抛 NotLoggedInError。
 
         供无状态请求与 ThreadManager（会话绑定）共用。
         """
-        page = await self.browser.open_page(self.name)
+        page = await self.browser.open_page(self.name, init_scripts=self.init_scripts())
         await page.goto(self.cfg.url, wait_until="domcontentloaded", timeout=30000)
         try:
             sel = await first_match(page, self.login_check_selectors)

@@ -33,11 +33,16 @@ providers:
         - "#chat-input"                  # 旧版 UI
       send_button: []                    # 空 = 用回车发送
       response_container:
-        - "[class*=markdown]"            # 待实测确认
-        - ".ds-markdown"                 # 旧版 UI
+        # 2026-08 实测：正文容器 class 为 "ds-markdown ds-assistant-message-main-content"。
+        # 注意思考区内部也有一个裸 ".ds-markdown"（思考内容走 markdown 渲染，且先于正文
+        # 出现）——任何能匹配思考区的选择器都不能出现在候选里：_find_new 会在思考阶段
+        # 就锁定它，正文永远提取不到。故只能用组合选择器精确匹配正文。
+        - ".ds-markdown.ds-assistant-message-main-content"
+        - ".ds-assistant-message-main-content"
       thinking_container:
+        - ".ds-think-content"            # 2026-08 实测：思考内容容器
+        - ".ds-think"                    # 旧版 UI
         - "[class*=think]"
-        - ".ds-think"
       stop_button: []                    # 填了可加快"生成结束"判定
       login_check: []                    # 空 = 用 input 选择器判定登录
       new_chat_button:                   # 发送前点\"开启新对话\"，隔离账号历史会话（防上下文污染）

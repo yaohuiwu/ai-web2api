@@ -124,6 +124,14 @@ class BrowserManager:
         if path.exists():
             path.unlink()
 
-    async def open_page(self, provider: str) -> Page:
+    async def open_page(self, provider: str, init_scripts: list[str] | None = None) -> Page:
+        """新开页面（调用方随后 goto）。
+
+        ``init_scripts``：provider 提供的页面级注入脚本（如 DeepSeek 的 XHR 网络
+        监听），在 goto 之前注入（add_init_script 只对后续导航生效）。
+        """
         ctx = await self.get_context(provider)
-        return await ctx.new_page()
+        page = await ctx.new_page()
+        for script in init_scripts or []:
+            await page.add_init_script(script)
+        return page

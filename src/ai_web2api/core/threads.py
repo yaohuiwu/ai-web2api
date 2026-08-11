@@ -231,7 +231,9 @@ class ThreadManager:
                         f'thread "{thread_id}" 持久化会话绑定 model '
                         f"{entry['model']}，无法切换到 {model}",
                     )
-                page = await provider.browser.open_page(provider.name)
+                page = await provider.browser.open_page(
+                    provider.name, init_scripts=provider.init_scripts()
+                )
                 try:
                     restore_url = f"{provider.cfg.url.rstrip('/')}/a/chat/s/{entry['url']}"
                     await page.goto(restore_url, wait_until="domcontentloaded", timeout=30000)
