@@ -83,6 +83,7 @@ class ThreadSession:
             "idle_seconds": round(time.monotonic() - self.last_used, 1),
             "page_url": self.page.url if not self.page.is_closed() else "closed",
             "url_id": self.url_id,
+            "loaded": True,
         }
 
 
@@ -110,7 +111,28 @@ class ThreadManager:
         return self._sessions.get(thread_id)
 
     def list(self) -> list[dict]:
-        return [s.to_dict() for s in self._sessions.values()]
+        """内存活跃会话 + 磁盘持久化条目（重启后左侧列表不空）。
+
+        磁盘条目标记 loaded=false，点击切换后由下次请求触发恢复。
+        """
+        out = [s.to_dict() for s in self._sessions.values()]
+        if self._persist:
+            seen = {d["thread_id"] for d in out}
+            for provider in self._registry.providers().values():
+                for tid, entry in self._load_urls(provider.name).items():
+                    if tid in seen:
+                        continue
+                    out.append(
+                        {
+                            "thread_id": tid,
+                            "provider": provider.name,
+                            "model": entry.get("model"),
+                            "first_message": entry.get("title", "") or "",
+                            "loaded": False,
+                        }
+                    )
+                    seen.add(tid)
+        return out
 
     def active_count(self) -> int:
         return len(self._sessions)

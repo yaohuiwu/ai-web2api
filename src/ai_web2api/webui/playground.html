@@ -146,6 +146,10 @@
     font-size: 11px; color: var(--muted); margin-top: 2px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  .thread-item .arch {
+    font-size: 10px; color: #b45309; background: #fef3c7;
+    border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px;
+  }
   .thread-item .empty { color: var(--muted); font-style: italic; font-size: 12px; }
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 </style>
@@ -582,7 +586,7 @@ function refreshThreads() {
       list.innerHTML = "";
       if (!items.length) {
         list.innerHTML =
-          '<div class="thread-item"><div class="empty">暂无会话<br>发送带 thread_id 的消息后出现在这里</div></div>';
+          '<div class="thread-item"><div class="empty">暂无会话<br>发送消息后会出现在这里（可切换回访）</div></div>';
         return;
       }
       for (const t of items) {
@@ -590,16 +594,16 @@ function refreshThreads() {
         item.className = "thread-item" + (t.thread_id === cur ? " active" : "");
         const title = t.first_message || t.thread_id;
         item.innerHTML =
-          `<div class="tt">${esc(title)}</div>` +
+          `<div class="tt">${esc(title)}${t.loaded === false ? ' <span class="arch">存档</span>' : ""}</div>` +
           `<div class="tid">${esc(t.thread_id)} · ${esc(t.model || "")}</div>`;
-        item.onclick = () => switchThread(t.thread_id);
+        item.onclick = () => switchThread(t.thread_id, t.loaded !== false);
         list.appendChild(item);
       }
     })
     .catch(() => {});
 }
 
-function switchThread(tid) {
+function switchThread(tid, loaded = true) {
   if (streaming) return;
   const el = $("#threadId");
   el.value = tid;
@@ -607,7 +611,9 @@ function switchThread(tid) {
   history = [];
   // 暂不保存历史消息：切换后聊天区清空，新消息将续用该会话
   $("#chat").innerHTML =
-    `<div class="msg meta"><div class="bubble">已切换到会话 <code>${esc(tid)}</code>（历史消息不保留，新消息将续用该会话）</div></div>`;
+    `<div class="msg meta"><div class="bubble">已切换到会话 <code>${esc(tid)}</code>（${
+      loaded ? "历史消息不保留，新消息将续用该会话" : "已保存的会话，发送消息将自动恢复并继续"
+    }）</div></div>`;
   refreshThreads();
 }
 
