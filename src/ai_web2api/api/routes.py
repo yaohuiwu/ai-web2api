@@ -134,6 +134,10 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         chat_id = _chat_id()
 
         thread_id = req.thread_id or request.headers.get("x-thread-id")
+        if not thread_id and threads is not None:
+            # 无 thread_id 请求也保存为可回访会话（playground「新会话」左侧列表需要）：
+            # 自动分配 thread_id，标题=第一句 user 消息，之后可点击切换回来续用。
+            thread_id = f"auto-{uuid.uuid4().hex[:8]}"
         if thread_id:
             if threads is None:
                 raise ProviderError("会话绑定未启用（threads manager 未初始化）")
