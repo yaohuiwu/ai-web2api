@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,7 +13,8 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 # 项目根 .env（自动登录凭据 DEEPSEEK_USERNAME/DEEPSEEK_PASSWORD 等）
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
@@ -66,6 +68,18 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
     app.state.browser = browser
     app.state.threads = threads
     app.state.config = cfg
+    app.state.started_at = time.monotonic()
+
+    # Web 管理界面：状态面板 + OpenAI API 测试页
+    webui_dir = Path(__file__).resolve().parent / "webui"
+    if webui_dir.is_dir():
+        app.mount("/ui", StaticFiles(directory=webui_dir, html=True), name="ui")
+
+        @app.get("/", include_in_schema=False)
+        async def root():
+            return RedirectResponse(url="/ui/")
+    else:
+        logger.warning("webui 目录不存在（%s），/ui 界面未挂载", webui_dir)
 
     @app.exception_handler(ProviderError)
     async def _provider_error_handler(request, exc: ProviderError):

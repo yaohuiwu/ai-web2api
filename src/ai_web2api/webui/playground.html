@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ai-web2api · OpenAI 测试</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #fff; --border: #e3e6ea;
+    --text: #1c2733; --muted: #6b7686;
+    --user: #2563eb; --user-bg: #e8f0fe;
+    --assistant: #fff; --assistant-border: #e3e6ea;
+    --red: #d64545; --red-bg: #fdecec;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+    height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 20px; background: var(--card); border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header a { color: var(--blue, #2563eb); text-decoration: none; font-size: 13px; }
+  header .spacer { flex: 1; }
+  .opts { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; }
+  .opts label { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+  .opts input[type=checkbox] { accent-color: #2563eb; }
+  .opts input[type=text], .opts select, .opts input[type=password] {
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 13px;
+    background: #fff; color: var(--text); max-width: 180px;
+  }
+  #chat {
+    flex: 1; overflow-y: auto; padding: 20px; max-width: 860px; width: 100%; margin: 0 auto;
+  }
+  .msg { display: flex; margin-bottom: 16px; }
+  .msg.user { justify-content: flex-end; }
+  .bubble {
+    max-width: 78%; padding: 10px 14px; border-radius: 12px;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .msg.user .bubble { background: var(--user-bg); border: 1px solid #cdddfd; }
+  .msg.assistant .bubble {
+    background: var(--assistant); border: 1px solid var(--assistant-border);
+    box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  .thinking {
+    margin: 0 0 8px; padding: 8px 10px; background: #f7f8fa;
+    border-left: 3px solid #c9a227; border-radius: 0 6px 6px 0;
+    font-size: 12.5px; color: var(--muted); white-space: pre-wrap; word-break: break-word;
+    max-height: 220px; overflow-y: auto;
+  }
+  .thinking summary { cursor: pointer; font-weight: 600; user-select: none; }
+  .msg.meta { justify-content: center; }
+  .msg.meta .bubble {
+    background: transparent; border: none; color: var(--muted); font-size: 12px; padding: 2px 0;
+  }
+  .msg.error .bubble { background: var(--red-bg); border: 1px solid #f3c1c1; color: var(--red); }
+  #inputBar {
+    border-top: 1px solid var(--border); background: var(--card); padding: 12px 20px;
+  }
+  #inputWrap { max-width: 860px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; }
+  textarea {
+    flex: 1; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+    font: inherit; resize: none; max-height: 160px; outline: none; background: #fff;
+  }
+  textarea:focus { border-color: #2563eb; }
+  .btn {
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    padding: 8px 18px; border-radius: 9px; cursor: pointer; font-size: 14px;
+  }
+  .btn:hover { background: #eef1f5; }
+  .btn.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+  .btn.primary:hover { background: #1d4ed8; }
+  .btn.primary:disabled { opacity: .5; cursor: not-allowed; }
+  details.raw { margin-top: 6px; }
+  details.raw summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+  pre.raw {
+    background: #1c2733; color: #d6e2f0; padding: 10px; border-radius: 8px;
+    font-size: 12px; overflow-x: auto; max-height: 300px; overflow-y: auto;
+    margin: 6px 0 0;
+  }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OpenAI API 测试</h1>
+  <a href="/ui/">← 状态面板</a>
+  <span class="spacer"></span>
+  <div class="opts">
+    <label>模型
+      <select id="model"><option>加载中…</option></select>
+    </label>
+    <label><input type="checkbox" id="stream" checked> stream</label>
+    <label>thread_id
+      <input type="text" id="threadId" placeholder="留空 = 无状态">
+    </label>
+    <label>mode
+      <select id="mode">
+        <option value="">无</option>
+        <option value="fast">fast（快速）</option>
+        <option value="expert">expert（专家）</option>
+        <option value="image">image（识图）</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="deepThink"> 深度思考</label>
+    <label><input type="checkbox" id="search"> 智能搜索</label>
+    <label>API Key
+      <input type="password" id="apiKey" placeholder="可选">
+    </label>
+  </div>
+</header>
+
+<div id="chat">
+  <div class="msg meta"><div class="bubble">输入消息开始测试本地 OpenAI 兼容接口（POST /v1/chat/completions）</div></div>
+</div>
+
+<div id="inputBar">
+  <div id="inputWrap">
+    <textarea id="input" rows="2" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+    <button class="btn primary" id="send">发送</button>
+    <button class="btn" id="clear">清空</button>
+  </div>
+  <div class="hint" id="hint"></div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let history = [];       // [{role, content}]
+let rawLog = [];        // [{req, res|error}]
+let streaming = false;
+
+const apiKeyEl = $("#apiKey");
+apiKeyEl.value = localStorage.getItem("aiw2api_api_key") || "";
+apiKeyEl.addEventListener("change", () =>
+  localStorage.setItem("aiw2api_api_key", apiKeyEl.value));
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function nl2br(s) { return esc(s); }
+
+function addMsg(role, content, opts = {}) {
+  const chat = $("#chat");
+  const div = document.createElement("div");
+  div.className = "msg " + (opts.error ? "error" : role);
+  let inner = `<div class="bubble">`;
+  if (opts.thinking && opts.thinking.trim()) {
+    inner += `<details class="thinking"><summary>💭 思考过程</summary>${nl2br(opts.thinking)}</details>`;
+  }
+  inner += nl2br(content) + `</div>`;
+  div.innerHTML = inner;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+function addMeta(text) {
+  const chat = $("#chat");
+  const div = document.createElement("div");
+  div.className = "msg meta";
+  div.innerHTML = `<div class="bubble">${esc(text)}</div>`;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function showRaw(title) {
+  const chat = $("#chat");
+  const div = document.createElement("div");
+  div.className = "msg meta";
+  div.innerHTML = `<details class="raw"><summary>${esc(title)}</summary><pre class="raw"></pre></details>`;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div.querySelector("pre");
+}
+
+async function loadModels() {
+  try {
+    const r = await fetch("/v1/models");
+    const data = await r.json();
+    const sel = $("#model");
+    sel.innerHTML = "";
+    for (const m of data.data || []) {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.textContent = m.id + (m.owned_by ? `  (${m.owned_by})` : "");
+      sel.appendChild(opt);
+    }
+    const stored = localStorage.getItem("aiw2api_model");
+    if (stored && [...sel.options].some((o) => o.value === stored)) sel.value = stored;
+    if (!sel.value && sel.options.length) sel.value = sel.options[0].value;
+  } catch (e) {
+    $("#model").innerHTML = `<option>模型列表加载失败: ${esc(e.message)}</option>`;
+  }
+}
+
+function buildBody(content) {
+  const body = {
+    model: $("#model").value,
+    messages: [...history, { role: "user", content }],
+    stream: $("#stream").checked,
+  };
+  const tid = $("#threadId").value.trim();
+  if (tid) body.thread_id = tid;
+  const mode = $("#mode").value;
+  if (mode) body.mode = mode;
+  if ($("#deepThink").checked) body.deep_think = true;
+  if ($("#search").checked) body.search = true;
+  return body;
+}
+
+function headers() {
+  const h = { "Content-Type": "application/json" };
+  const key = apiKeyEl.value.trim();
+  if (key) h["Authorization"] = "Bearer " + key;
+  return h;
+}
+
+function errMsg(body) {
+  if (body && body.error && body.error.message) return body.error.message;
+  if (body && body.detail) return JSON.stringify(body.detail);
+  return "HTTP 错误";
+}
+
+async function sendNonStream(body) {
+  const res = await fetch("/v1/chat/completions", {
+    method: "POST", headers: headers(), body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(errMsg(data));
+  rawLog.push({ req: body, res: data });
+  const msg = data.choices && data.choices[0] && data.choices[0].message;
+  const content = msg ? msg.content : "";
+  const th = msg ? msg.reasoning_content : null;
+  if (th && !content) {
+    // 长思考被稳定判定截断（完整() 返回时正文未生成）→ 明确提示
+    addMsg("assistant", "（思考过程已完整输出，但正文未生成——可能因思考过长被结束判定截断，请重试）", { thinking: th });
+  } else {
+    addMsg("assistant", content || "（空回复）", { thinking: th });
+  }
+  if (data.thread_id) addMeta(`thread_id: ${data.thread_id}`);
+}
+
+async function sendStream(body) {
+  const res = await fetch("/v1/chat/completions", {
+    method: "POST", headers: headers(), body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let data = null;
+    try { data = await res.json(); } catch {}
+    throw new Error(errMsg(data));
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let fullContent = "";
+  let fullThinking = "";
+  let thinkBox = null;
+  const bubbleDiv = addMsg("assistant", "");
+  const bubble = bubbleDiv.querySelector(".bubble");
+  // 正文独立容器：流式更新只写这里，绝不触碰思考块（textContent 整体覆盖会删掉 thinking）
+  const contentBox = document.createElement("div");
+  contentBox.className = "content";
+  bubble.appendChild(contentBox);
+  let gotThreadId = false;
+
+  const ensureThinkBox = () => {
+    if (thinkBox) return thinkBox;
+    thinkBox = document.createElement("details");
+    thinkBox.className = "thinking";
+    thinkBox.open = true;
+    const s = document.createElement("summary");
+    s.textContent = "💭 思考过程";
+    thinkBox.appendChild(s);
+    bubble.insertBefore(thinkBox, contentBox);
+    return thinkBox;
+  };
+
+  const flushChunk = (delta) => {
+    if (!delta) return;
+    if (delta.reasoning_content) {
+      fullThinking += delta.reasoning_content;
+      ensureThinkBox().appendChild(document.createTextNode(delta.reasoning_content));
+    }
+    if (delta.content) {
+      fullContent += delta.content;
+      contentBox.textContent = fullContent;
+      $("#chat").scrollTop = $("#chat").scrollHeight;
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop();
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith("data:")) continue;
+      const payload = t.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      let obj;
+      try { obj = JSON.parse(payload); } catch { continue; }
+      if (obj.error) throw new Error(obj.error.message || "流错误");
+      const delta = obj.choices && obj.choices[0] && obj.choices[0].delta;
+      if (delta) flushChunk(delta);
+      if (obj.thread_id && !gotThreadId) {
+        gotThreadId = true;
+        addMeta(`thread_id: ${obj.thread_id}`);
+      }
+    }
+  }
+  // 收尾：思考块文本已逐步添加；若空则移除（避免空框）
+  if (thinkBox && !fullThinking) thinkBox.remove();
+  rawLog.push({ req: body, res: { content: fullContent, thinking: fullThinking } });
+  if (!fullContent && fullThinking) {
+    // 真实 DeepSeek 长思考时，稳定判定可能在正文开始前结束流（已知行为）→ 明确提示
+    contentBox.textContent = "（思考过程已完整输出，但正文未生成——可能因思考过长被结束判定截断，请重试）";
+  } else if (!fullContent && !fullThinking) {
+    contentBox.textContent = "（空回复）";
+  }
+}
+
+async function send() {
+  const text = $("#input").value.trim();
+  if (!text || streaming) return;
+  const body = buildBody(text);
+  history.push({ role: "user", content: text });
+  addMsg("user", text);
+  localStorage.setItem("aiw2api_model", body.model);
+  const tidUsed = body.thread_id || "";
+  if (tidUsed) addMeta(`thread_id: ${tidUsed}（绑定会话，续用只发最后一条）`);
+  $("#input").value = "";
+  $("#send").disabled = true;
+  streaming = true;
+  try {
+    if (body.stream) await sendStream(body);
+    else await sendNonStream(body);
+    $("#hint").textContent = "";
+  } catch (e) {
+    addMsg("error", "请求失败: " + e.message);
+    rawLog.push({ req: body, error: e.message });
+    $("#hint").textContent = "提示：503 = 未登录；429 = 队列满/thread 超限；409 = thread 冲突或失效";
+  } finally {
+    streaming = false;
+    $("#send").disabled = false;
+    $("#input").focus();
+  }
+}
+
+$("#send").onclick = send;
+$("#clear").onclick = () => {
+  history = [];
+  $("#chat").innerHTML = `<div class="msg meta"><div class="bubble">已清空。${$("#threadId").value.trim() ? "（thread_id 仍保留，可继续原会话）" : ""}</div></div>`;
+};
+$("#input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+$("#threadId").addEventListener("change", () => { history = []; });
+$("#threadId").addEventListener("input", (e) => {
+  $("#hint").textContent = e.target.value.trim()
+    ? "已启用会话绑定：首次请求创建会话并注入全部历史，后续 resume 只发最后一条"
+    : "";
+});
+$("#mode").addEventListener("change", (e) => {
+  $("#hint").textContent = e.target.value
+    ? "mode 仅在新对话创建时生效（会话页不可切换模式）"
+    : "";
+});
+
+loadModels();
+$("#input").focus();
+</script>
+</body>
+</html>

@@ -7,6 +7,7 @@ import json
 import logging
 import time
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import (
@@ -293,6 +294,56 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             return
         yield _sse({**meta, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
         yield "data: [DONE]\n\n"
+
+    # ---------------- admin：系统状态 ----------------
+
+    @router.get("/admin/status")
+    async def system_status(request: Request):
+        """聚合状态：服务信息 + 各 provider 认证状态 + 活跃 thread 会话。"""
+        cfg = registry.config
+        started_at = getattr(request.app.state, "started_at", time.monotonic())
+        providers = []
+        for name, p in registry.providers().items():
+            pcfg = p.cfg
+            state_file = Path(cfg.profiles_dir) / name / "state.json"
+            providers.append(
+                {
+                    "name": name,
+                    "driver": pcfg.driver or name,
+                    "enabled": pcfg.enabled,
+                    "url": pcfg.url,
+                    "logged_in": registry.login_status().get(name, False),
+                    "login_mode": pcfg.login.mode,
+                    "has_state_file": state_file.exists(),
+                    "models": [m.name for m in pcfg.models],
+                    "model_aliases": pcfg.model_aliases,
+                    "default_model": p.exposed_models[0] if p.exposed_models else None,
+                    "response_timeout": pcfg.response_timeout,
+                }
+            )
+        thread_list = threads.list() if threads is not None else []
+        return {
+            "server": {
+                "version": "0.1.0",
+                "uptime_seconds": round(time.monotonic() - started_at, 1),
+                "host": cfg.server.host,
+                "port": cfg.server.port,
+                "headless": cfg.browser.headless,
+                "status_check": cfg.browser.status_check,
+                "status_check_headless": cfg.browser.status_check_headless,
+                "thread_ttl": cfg.server.thread_ttl,
+                "max_threads": cfg.server.max_threads,
+                "thread_parallel": cfg.server.thread_parallel,
+                "thread_persist": cfg.server.thread_persist,
+                "api_keys_configured": bool(cfg.server.api_keys),
+            },
+            "providers": providers,
+            "threads": {
+                "active": threads.active_count() if threads is not None else 0,
+                "max": threads.max_threads if threads is not None else 0,
+                "list": thread_list,
+            },
+        }
 
     # ---------------- admin：会话绑定管理 ----------------
 
