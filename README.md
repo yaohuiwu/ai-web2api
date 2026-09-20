@@ -159,13 +159,15 @@ curl http://127.0.0.1:8001/v1/chat/completions \
   -d '{"model": "fake-r1", "messages": [{"role": "user", "content": "你好"}]}'
 ```
 
-**OpenAI SDK 端到端测试**（`tests/test_openai_compat.py`，16 个用例，自动起假页服务、无需登录）：
+**OpenAI SDK 真实 API 测试**（`tests/test_openai_compat.py`，16 个用例，跑**已启动的服务**、真登录 DeepSeek）：
 
 ```bash
-.venv/bin/python -m pytest tests/test_openai_compat.py -v
+.venv/bin/python -m ai_web2api.main                                    # 先起服务（默认 127.0.0.1:8000）
+.venv/bin/python -m pytest tests/test_openai_compat.py -v              # 另开终端
 ```
 
-覆盖：非流式/流式对话、多轮历史、`/v1/models`、模型别名（`gpt-4`）、未知模型 404、`thread_id` 绑定（`extra_body` + `X-Thread-Id` header）、三模式 + 深度思考/智能搜索开关（`extra_body`）、未知 mode 400、附件上传（`image_url` data URL，含多附件与 51 个超限 400）、流式 + 附件组合。
+服务未启动或未登录时整模块 skip；`AI_WEB2API_BASE_URL` 可指向别的端口。用例结束会 DELETE 掉自己新建的会话（不动你原有的会话）。
+覆盖：非流式/流式对话、多轮历史、`/v1/models`、模型别名（`gpt-4`）、未知模型 404、`thread_id` 绑定（create/resume 回忆上下文 + `X-Thread-Id` header）、深度思考开关（开 → `reasoning_content`，关 → 无）、`mode=expert` 预设、未知 mode 不再 400、附件上传（`image_url` data URL，含多附件与 51 个超限 400）、流式 + 附件组合。
 
 ## 配置
 
