@@ -10,7 +10,12 @@ server:
   cors_origins: ["*"]
 
 browser:
-  headless: false         # 首次登录需要看到浏览器窗口；登录完成后可改为 true
+  headless: true          # 静默运行（不弹浏览器窗口）；由 .env 覆盖：
+                          # 优先级 WEB2API_HEADLESS > DEEPSEEK_HEADLESS(<PROVIDER>_HEADLESS) > 本项
+                          # 需要看得见窗口（自动登录被验证码拦住时手动登录）：DEEPSEEK_HEADLESS=false 重启
+  # 页面语言必须 zh-CN：选择器文案（深度思考/开启新对话/密码登录）都是中文，
+  # Playwright 默认 en-US 时 DeepSeek 会渲染英文 UI → 这些选择器全部失配
+  locale: zh-CN
   login_check_interval: 300
   state_save_interval: 600
   # 定时状态检测：独立开关 + 默认 headless（即使主浏览器 headed 也不弹窗）
@@ -47,21 +52,24 @@ providers:
       login_check: []                    # 空 = 用 input 选择器判定登录
       new_chat_button:                   # 发送前点\"开启新对话\"，隔离账号历史会话（防上下文污染）
         - "text=开启新对话"
+        - "text=New chat"                # 兜底：万一 UI 渲染成英文
         - "div.ds-button:has-text(\"新对话\")"
-      # 三模式（radiogroup，2026-08 实测：div[role=radio]，仅新对话页存在；会话页无模式区不可切换）
-      mode_button:                       # API mode 值（fast/expert/image）→ 候选选择器
-        fast: ['div[role=radio]:has-text("快速模式")']
-        expert: ['div[role=radio]:has-text("专家模式")']
-        image: ['div[role=radio]:has-text("识图模式")']
-      mode_checked:                      # 判断当前选中的 radio
-        - 'div[role=radio][aria-checked="true"]'
-      # 开关（toggle，2026-08 实测：div.ds-toggle-button--m，选中态加 --selected class）
-      toggle_button:                     # API 字段名 → 候选选择器
-        deep_think: ['div.ds-toggle-button:has-text("深度思考")']
-        search: ['div.ds-toggle-button:has-text("智能搜索")']
+      # 模式区：2026-09 起 DeepSeek 把\"快速/专家/识图\"三模式合并为单一模式，
+      # 新对话页只剩两个开关（深度思考/智能搜索），请求体也只有 thinking_enabled /
+      # search_enabled（model_type 恒为 default）。故 mode_button 留空：API 的 mode
+      # 参数由驱动翻译成开关组合（fast=都关 / expert=都开 / image=都关，见
+      # DeepSeekProvider.MODE_PRESETS），未知 mode 只记日志不再报 400。
+      # 若旧版 UI 回归，填回：fast: ['div[role=radio]:has-text("快速模式")'] 等
+      mode_button: {}
+      mode_checked: []
+      # 开关（toggle，2026-09 实测：div.ds-toggle-button，选中态 --selected + aria-pressed=true）
+      toggle_button:                     # API 字段名 → 候选选择器（中英文各一份）
+        deep_think: ['div.ds-toggle-button:has-text("深度思考")', 'div.ds-toggle-button:has-text("DeepThink")']
+        search: ['div.ds-toggle-button:has-text("智能搜索")', 'div.ds-toggle-button:has-text("Search")']
       toggle_checked:                    # 判断开关已开
         - '.ds-toggle-button--selected'
-      upload_input:                      # 附件上传入口（input[type=file]，2026-08 实测）
+        - 'div.ds-toggle-button[aria-pressed="true"]'
+      upload_input:                      # 附件上传入口（input[type=file]；模式合并后任何会话/模式都可用）
         - 'input[type=file]'
     model_aliases:                       # 客户端（llama_index 等）默认模型名 → 本 provider 模型
       gpt-4: deepseek-web

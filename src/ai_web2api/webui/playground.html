@@ -169,14 +169,13 @@
     </label>
     <label>mode
       <select id="mode">
-        <option value="">无</option>
-        <option value="fast">fast（快速）</option>
-        <option value="expert">expert（专家）</option>
-        <option value="image">image（识图）</option>
+        <option value="">默认</option>
+        <option value="fast">fast（思考关 + 搜索关）</option>
+        <option value="expert">expert（思考开 + 搜索开）</option>
       </select>
     </label>
-    <label><input type="checkbox" id="deepThink"> 深度思考</label>
-    <label><input type="checkbox" id="search"> 智能搜索</label>
+    <label><input type="checkbox" id="deepThink" checked> 深度思考</label>
+    <label><input type="checkbox" id="search" checked> 智能搜索</label>
     <label>API Key
       <input type="password" id="apiKey" placeholder="可选">
     </label>
@@ -387,13 +386,15 @@ function buildBody(content) {
     model: $("#model").value,
     messages: [...history, { role: "user", content }],
     stream: $("#stream").checked,
+    // 开关显式发送：DeepSeek 三模式合并后它们就是唯一的输出控制项
+    // （新版页面默认两者都开，与这里的勾选默认值一致）
+    deep_think: $("#deepThink").checked,
+    search: $("#search").checked,
   };
   const tid = $("#threadId").value.trim();
   if (tid) body.thread_id = tid;
   const mode = $("#mode").value;
   if (mode) body.mode = mode;
-  if ($("#deepThink").checked) body.deep_think = true;
-  if ($("#search").checked) body.search = true;
   return body;
 }
 
@@ -562,16 +563,24 @@ $("#input").addEventListener("keydown", (e) => {
 $("#threadId").addEventListener("change", () => { history = []; });
 $("#threadId").addEventListener("input", (e) => {
   const tid = e.target.value.trim();
-  // mode 是页面级参数（DeepSeek 会话页无模式区），绑定会话后不可切换 → 明确禁用
-  $("#mode").disabled = !!tid;
-  $("#mode").title = tid ? "mode 仅新会话可选（绑定 thread 后不可切换）" : "";
+  // mode 在新版 UI 里等价于开关组合（服务端把 fast/expert 翻译成 深度思考/智能搜索），
+  // 开关每次请求都能改 → 绑定 thread 后依旧可切换，不再禁用
   $("#hint").textContent = tid
-    ? "已启用会话绑定：首次请求创建会话并注入全部历史，后续 resume 只发最后一条；深度思考/智能搜索可随时切换，mode 仅新会话可选"
+    ? "已启用会话绑定：首次请求创建会话并注入全部历史，后续 resume 只发最后一条；深度思考/智能搜索可随时切换"
     : "";
 });
 $("#mode").addEventListener("change", (e) => {
-  $("#hint").textContent = e.target.value
-    ? "mode 将在新对话创建时生效（已绑定会话时不可切换）"
+  // mode 预设同步到开关：避免"mode=fast 但深度思考还勾着"这种矛盾参数
+  const v = e.target.value;
+  if (v === "fast") {
+    $("#deepThink").checked = false;
+    $("#search").checked = false;
+  } else if (v === "expert") {
+    $("#deepThink").checked = true;
+    $("#search").checked = true;
+  }
+  $("#hint").textContent = v
+    ? "mode 预设已套用到开关（fast = 思考关 + 搜索关，expert = 都开）；每次请求都可切换"
     : "";
 });
 
@@ -607,7 +616,7 @@ function switchThread(tid, loaded = true) {
   if (streaming) return;
   const el = $("#threadId");
   el.value = tid;
-  el.dispatchEvent(new Event("input")); // 触发 mode 禁用 + hint 更新
+  el.dispatchEvent(new Event("input")); // 触发 hint 更新
   history = [];
   // 暂不保存历史消息：切换后聊天区清空，新消息将续用该会话
   $("#chat").innerHTML =

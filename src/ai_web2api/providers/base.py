@@ -209,7 +209,8 @@ class BaseProvider(abc.ABC):
             user 消息，不注入历史、不点新对话。
 
         mode/deep_think/search：Web 端选项（通用值，provider 映射自己的 UI）。
-        mode 仅新会话（create/无状态）生效；resume 时忽略（会话页不可切换模式）。
+        mode 由 provider 决定语义：有模式区的 UI → 仅新会话可点 radio，resume 忽略；
+        无模式区的 UI（新版 DeepSeek 三模式合一）→ 翻译成开关组合，每次请求可生效。
         deep_think/search 每次请求生效；页面无对应开关时忽略。
 
         注意：实现必须是 async generator（含 yield），因此这里用普通 def 声明。

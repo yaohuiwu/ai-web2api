@@ -92,7 +92,11 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = False
     thread_id: str | None = None  # 会话绑定：同 id 复用同一 Web 页面多轮；缺省 = 无状态新会话
     # Web 端选项（provider 通用，OpenAI 原生客户端用 extra_body 传）：
-    mode: str | None = None       # 模式：fast/expert/image 等（provider 映射自己的 UI）；仅新会话生效
+    mode: str | None = None       # 模式：fast/expert/image 等（provider 映射自己的 UI）。
+                                  # 旧版 DeepSeek UI = 三模式 radio（仅新会话生效）；
+                                  # 新版 UI 三模式合一 → 翻译成开关组合（fast=思考/搜索都关、
+                                  # expert=都开），每次请求都可生效；未知值忽略不报错
+
     deep_think: bool | None = None  # 深度思考开关（每次请求生效；None = 不改页面状态）
     search: bool | None = None      # 智能搜索开关（每次请求生效；None = 不改页面状态）
     # 以下字段在 Web 端不可控，收到不报错、仅忽略：

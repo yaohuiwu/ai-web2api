@@ -345,6 +345,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 "host": cfg.server.host,
                 "port": cfg.server.port,
                 "headless": cfg.browser.headless,
+                "locale": cfg.browser.locale,
                 "status_check": cfg.browser.status_check,
                 "status_check_headless": cfg.browser.status_check_headless,
                 "thread_ttl": cfg.server.thread_ttl,
@@ -405,8 +406,21 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         provider = registry.get_provider(name)
         page = await provider.browser.open_page(name)
         await page.goto(provider.cfg.url, wait_until="domcontentloaded", timeout=30000)
+        headless = registry.config.browser.headless
         hint = provider.cfg.login.hint or f"请在浏览器窗口完成登录后调用 /admin/{name}/login/status"
-        return {"status": "started", "provider": name, "hint": hint}
+        if headless:
+            # headless 下窗口不可见，手动登录会卡住 → 明确给出恢复办法（不要静默失败）
+            hint = (
+                "当前 browser.headless=true（窗口不可见，无法手动登录）。"
+                "手动登录请设 DEEPSEEK_HEADLESS=false 后重启服务，再调用本接口；"
+                f"或直接用已配置的自动登录：POST /admin/{name}/login/auto"
+            )
+        return {
+            "status": "started",
+            "provider": name,
+            "headless": headless,
+            "hint": hint,
+        }
 
     @router.get("/admin/{name}/login/status")
     async def login_status(name: str):

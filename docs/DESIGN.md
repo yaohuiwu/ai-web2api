@@ -124,8 +124,8 @@ class BaseProvider(ABC):
 | 发送 | 输入后按 `Enter` |
 | 助手回复节点 | 自定义元素 `dslc-reply-wrapper`，正文在 `dslc-markdown` |
 | 回复完成判定 | 最后一个含 `dslc-markdown` 的 reply 内 `button` 数量 ≥ 5（出现复制/点赞等操作按钮） |
-| 新建对话 | 点击导航区第一个 `img`（logo），回退为 `goto("https://chat.deepseek.com/")` |
-| 模式切换 | radio `快速模式` / `专家模式`；toggle `深度思考` / `智能搜索` |
+| 新建对话 | 导航区"开启新对话"（`text=开启新对话`） |
+| 模式 | 2026-09 起三模式（快速/专家/识图）合并为单一模式：新对话页只有 toggle `深度思考` / `智能搜索`，请求体只有 `thinking_enabled` / `search_enabled`（`model_type` 恒为 default）。API 的 `mode` 字段翻译成开关组合（见 `DeepSeekProvider.MODE_PRESETS`） |
 
 > 选择器集中在 `providers/deepseek.py` 顶部常量，DeepSeek 改版时只需更新常量。
 
@@ -182,7 +182,7 @@ textbox.fill(最终消息)  →  press Enter
 | `WEB2API_API_KEY` | 空 | 网关鉴权 key（可选） |
 | `WEB2API_DATA_DIR` | `~/.web2api` | storage_state 与 profile 存放目录 |
 | `DEEPSEEK_USERNAME` / `DEEPSEEK_PASSWORD` | 空 | 可选：自动登录凭据 |
-| `DEEPSEEK_HEADLESS` | `true` | 服务运行是否无头 |
+| `DEEPSEEK_HEADLESS` / `WEB2API_HEADLESS` | `true`（config.yaml） | 浏览器是否无头（覆盖 `browser.headless`，优先级 WEB2API_HEADLESS > `<PROVIDER>_HEADLESS` > YAML） |
 | `DEEPSEEK_TIMEOUT` | `120` | 单次回复等待超时（秒） |
 | `WEB2API_LOG_LEVEL` | `info` | 日志级别 |
 

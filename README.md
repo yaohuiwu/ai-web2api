@@ -15,14 +15,21 @@ uv sync                      # 安装依赖（创建 .venv）
 
 ### 1. 登录（首次必做）
 
-`config.yaml` 里 `browser.headless` 默认 `false`（登录需要看到浏览器窗口，登录完可改 `true`）：
+推荐方式：`config.yaml` 里配 `login.mode: auto` + `.env` 写 `DEEPSEEK_USERNAME/DEEPSEEK_PASSWORD`，
+服务启动时自动登录（无头，不弹窗口）。
+
+需要**手动**登录（自动登录被验证码/风控拦住）时，临时让窗口可见再重启：
 
 ```bash
-.venv/bin/python -m ai_web2api.main          # 启动服务
+DEEPSEEK_HEADLESS=false .venv/bin/python -m ai_web2api.main   # 或写进 .env 后重启
 curl -X POST http://127.0.0.1:8000/admin/deepseek/login/start    # 打开登录窗口
 # …… 在弹出的浏览器里完成登录（手机号验证码 / 密码）……
 curl http://127.0.0.1:8000/admin/deepseek/login/status           # 检测登录结果
 ```
+
+> `browser.headless` 默认 `true`（静默运行，聊天不再弹出浏览器窗口）。
+> 覆盖优先级：`WEB2API_HEADLESS` > `DEEPSEEK_HEADLESS`（即 `<PROVIDER>_HEADLESS`）> `config.yaml`。
+> headless 下 `login/start` 打开的窗口不可见，接口会直接返回提示而不是静默卡住。
 
 登录态自动保存到 `profiles/deepseek/state.json`，重启服务自动恢复（无需重复登录）。
 
@@ -91,27 +98,36 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 
 ### 2.6 Web 端选项：模式 + 开关（provider 通用）
 
-DeepSeek Web 端支持**三种模式**（快速/专家/识图）与**两个开关**（深度思考/智能搜索）。API 用通用字段（OpenAI SDK 用 `extra_body` 传），provider 各自映射自己的 UI：
+> **2026-09 UI 变更**：DeepSeek 把「快速模式 / 专家模式 / 识图模式」三个模式合并为**单一模式**，
+> 新对话页只剩两个开关（深度思考 / 智能搜索），请求体只有 `thinking_enabled` / `search_enabled`
+> （`model_type` 恒为 `default`）。API 的 `mode` 参数保留兼容：不再点 radio，而是**翻译成开关组合**。
+
+API 用通用字段（OpenAI SDK 用 `extra_body` 传），provider 各自映射自己的 UI：
 
 ```python
 resp = client.chat.completions.create(
     model="deepseek-web",
     messages=[{"role": "user", "content": "帮我看下这张图的代码"}],
     extra_body={
-        "mode": "image",        # fast / expert / image（新会话生效）
+        "mode": "expert",       # fast / expert / image 兼容值：翻译成开关组合（每次请求生效）
         "deep_think": True,     # 深度思考开关（每次请求生效）
         "search": False,        # 智能搜索开关（每次请求生效）
     })
 ```
 
-- `mode`：`fast`（快速模式）/ `expert`（专家模式）/ `image`（识图模式）。**仅新会话生效**（无状态请求或 thread 创建时）；thread 续用（resume/恢复）时页面已在会话页、无法切换模式，参数被忽略（会话模式以创建时为准）。未知值返回 400 `unsupported_mode`
-- `deep_think` / `search`：每次请求生效（已处于目标状态则不点击）。页面无对应开关时自动跳过（如专家模式会话页只有"深度思考"开关、无"智能搜索"）
+- `mode`（新版 UI 语义）：`fast` = 思考关 + 搜索关，`expert` = 都开，`image` = 都关（附件已不限模式）。
+  翻译只在该参数未显式给出时生效——`deep_think` / `search` 优先级更高；未知 mode 值忽略并记日志（不再 400）
+- `mode`（旧版 UI，`selectors.mode_button` 非空时）：仍按原语义点 radio，仅新会话生效，resume 时忽略；
+  未知值 400 `unsupported_mode`
+- `deep_think` / `search`：每次请求生效（已处于目标状态则不点击），thread 续用/恢复时同样可切换。
+  新版 UI 页面默认两个开关**都是开**；页面无对应开关时自动跳过
 - 开关是页面级 UI 状态：**并行 thread 同时使用不同开关参数可能互相影响**（同一浏览器 context 共享开关状态），固定设置时无影响；`thread_parallel: false` 可完全避免
-- 选择器全部配置化：`selectors.mode_button`（API 值 → 候选）、`mode_checked`、`toggle_button`（字段名 → 候选）、`toggle_checked`（见 config.yaml，2026-08 实测 DeepSeek UI）
+- 页面语言固定 `browser.locale: zh-CN`（选择器文案是中文；DeepSeek 按 `Accept-Language` 渲染 UI）——否则 Playwright 默认 en-US 会让「深度思考 / 开启新对话」等选择器全部失配
+- 选择器全部配置化：`selectors.mode_button`（API 值 → 候选，新版 UI 留空）、`mode_checked`、`toggle_button`（字段名 → 候选，中英文各一份）、`toggle_checked`（见 config.yaml）
 
 ### 2.7 附件上传（图片识别，provider 通用）
 
-DeepSeek 快速/识图模式支持上传附件（输入框左下方附件按钮，仅识别图片中的文字，最多 50 个、每个 100MB）。API 用 OpenAI 标准的多部分 `content` + `image_url` 表达（OpenAI SDK 原生支持）：
+DeepSeek 输入框左下角附件按钮任何会话都可用（三模式合并后不再限模式；仅识别图片中的文字，最多 50 个、每个 100MB）。API 用 OpenAI 标准的多部分 `content` + `image_url` 表达（OpenAI SDK 原生支持）：
 
 ```python
 resp = client.chat.completions.create(
@@ -130,7 +146,7 @@ resp = client.chat.completions.create(
 - 纯图片消息（无 text 部分）也可以发送（Web 端上传后即使输入框为空也能发送）
 - 服务端把附件解码为临时文件 → 通过页面 `input[type=file]` 上传 → 随消息发送；`selectors.upload_input` 配置化（找不到上传入口 → 400 `attachments_error`）
 - 限制：**最多 50 个、每个最大 100MB**，超限 400 `attachments_error`（与 Web 端 tooltips 一致）
-- 附件仅作用于本次请求的 user 消息（thread 续用时注入的历史为纯文本，图片不会重放）；expert 模式等无上传入口的页面收到附件参数 → 400
+- 附件仅作用于本次请求的 user 消息（thread 续用时注入的历史为纯文本，图片不会重放）；页面找不到上传入口（如后续 UI 再改版）→ 400
 
 ### 3. 自测（不需要登录）
 
@@ -160,7 +176,8 @@ server:
   host: 0.0.0.0
   port: 8000
 browser:
-  headless: false          # 首次登录用 false，之后可改 true
+  headless: true           # 静默运行（不弹窗口）；可用 .env 覆盖：WEB2API_HEADLESS > DEEPSEEK_HEADLESS
+  locale: zh-CN            # 页面语言（决定 DeepSeek UI 文案 / 中文选择器是否匹配）
   login_check_interval: 300  # 定时检测登录态间隔（秒）
   status_check: true         # 定时状态检测总开关
   status_check_headless: true  # 检测用独立 headless 浏览器，不弹出/占用主浏览器窗口（默认开）
@@ -246,8 +263,9 @@ curl http://127.0.0.1:8000/admin/deepseek/login/status         # 确认 logged_i
 失败不阻塞启动（验证码/风控时改用 `login/start` 手动登录一次）。已有 state.json 时直接恢复，
 不会重复登录。
 
-注意：登录页按浏览器语言渲染（中文选择器需 zh-CN 语言环境）；若触发验证码/风控卡在登录页，
-改用 `login/start` 手动登录一次即可（登录态落盘后重启自动恢复）。
+注意：登录页按浏览器语言渲染，服务已固定 `browser.locale: zh-CN`（并显式发送
+`Accept-Language`），中文选择器（"密码登录"/"请输入手机号/邮箱地址"）才匹配；若触发验证码/风控卡在
+登录页，改用 `login/start` 手动登录一次即可（登录态落盘后重启自动恢复）。
 
 ## 新增一个 Web AI
 

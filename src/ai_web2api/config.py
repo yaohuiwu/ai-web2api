@@ -1,12 +1,29 @@
-"""配置加载：YAML → Pydantic 校验。"""
+"""配置加载：YAML → Pydantic 校验 → 环境变量覆盖。"""
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import BaseModel, BeforeValidator, Field, field_validator
+
+logger = logging.getLogger(__name__)
+
+# 环境变量里的布尔字面量（.env 常见写法）
+_TRUTHY = {"1", "true", "yes", "on", "y", "t"}
+_FALSY = {"0", "false", "no", "off", "n", "f"}
+
+
+def _parse_bool(raw: str) -> bool:
+    v = raw.strip().lower()
+    if v in _TRUTHY:
+        return True
+    if v in _FALSY:
+        return False
+    raise ValueError(f"不是布尔值: {raw!r}")
 
 
 def _norm_selectors(v: Any) -> list[str]:
@@ -28,8 +45,9 @@ class SelectorsConfig(BaseModel):
     login_check: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 存在即已登录（空 = 用 input）
     new_chat_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 每次请求前点"新建对话"（可选）
 
-    # 模式选择（radiogroup）：API mode 值 → 候选列表（DeepSeek: fast/expert/image → 快速/专家/识图）。
-    # 通常只在"新对话页"存在；会话页无模式区（不可切换）。
+    # 模式选择（radiogroup）：API mode 值 → 候选列表（旧版 UI：快速/专家/识图）。
+    # 留空 = 该 provider 的 UI 已无模式区（新版 DeepSeek 三模式合一），
+    # 此时 mode 值由驱动翻译成开关组合（见 DeepSeekProvider.MODE_PRESETS）。
     mode_button: dict[str, list[str]] = {}
     mode_checked: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 判断当前选中的 radio（如 div[role=radio][aria-checked="true"]）
 
@@ -98,6 +116,9 @@ class BrowserConfig(BaseModel):
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
     )
+    # 页面语言：DeepSeek 按 Accept-Language 决定 UI 语言，选择器文案（深度思考/开启新对话、
+    # 登录页"密码登录"等）全是中文 → 必须固定 zh-CN，否则 Playwright 默认 en-US 时全部失配。
+    locale: str = "zh-CN"
     viewport: dict = Field(default_factory=lambda: {"width": 1440, "height": 900})
     default_timeout: float = 30.0
     login_check_interval: float = 300.0  # 后台刷新登录态间隔（秒）
@@ -138,9 +159,46 @@ class AppConfig(BaseModel):
         return v
 
 
+def apply_env_overrides(cfg: AppConfig) -> AppConfig:
+    """用环境变量覆盖 YAML 配置（.env 里配的开关必须真的生效）。
+
+    目前支持 headless 开关，优先级：``WEB2API_HEADLESS`` >
+    ``<PROVIDER>_HEADLESS``（如 ``DEEPSEEK_HEADLESS``）> config.yaml。
+
+    背景：``.env.example`` 一直文档化 ``DEEPSEEK_HEADLESS=true``，但配置加载只读
+    YAML，导致设了无头仍弹出浏览器窗口。
+    """
+    candidates = ["WEB2API_HEADLESS"] + [
+        f"{p.name.upper()}_HEADLESS" for p in cfg.providers
+    ]
+    for name in candidates:
+        raw = os.environ.get(name)
+        if raw is None or not raw.strip():
+            continue
+        try:
+            val = _parse_bool(raw)
+        except ValueError:
+            logger.warning("环境变量 %s=%r 不是布尔值，忽略", name, raw)
+            continue
+        if val != cfg.browser.headless:
+            logger.info(
+                "browser.headless: %s → %s（环境变量 %s）", cfg.browser.headless, val, name
+            )
+        else:
+            logger.info("browser.headless=%s（环境变量 %s）", val, name)
+        return cfg.model_copy(
+            update={"browser": cfg.browser.model_copy(update={"headless": val})}
+        )
+    logger.info(
+        "browser.headless=%s（来自 config.yaml；未设置 WEB2API_HEADLESS / <PROVIDER>_HEADLESS）",
+        cfg.browser.headless,
+    )
+    return cfg
+
+
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"配置文件不存在: {p}")
     raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    return AppConfig.model_validate(raw)
+    return apply_env_overrides(AppConfig.model_validate(raw))

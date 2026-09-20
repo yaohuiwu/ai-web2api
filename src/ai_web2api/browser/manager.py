@@ -62,6 +62,14 @@ class BrowserManager:
 
     # ---------- Context ----------
 
+    @staticmethod
+    def _accept_language(locale: str) -> str:
+        """locale → Accept-Language（zh-CN → zh-CN,zh;q=0.9）。"""
+        base = (locale or "").split("-")[0].strip()
+        if not base or base == locale:
+            return locale or "zh-CN"
+        return f"{locale},{base};q=0.9"
+
     def state_path(self, provider: str) -> Path:
         return self._profiles_dir / provider / "state.json"
 
@@ -73,6 +81,11 @@ class BrowserManager:
         kwargs: dict = {
             "user_agent": self._cfg.user_agent,
             "viewport": self._cfg.viewport,
+            "locale": self._cfg.locale,
+            # 显式 Accept-Language：页面 UI 语言（以及中文选择器）由它决定
+            "extra_http_headers": {
+                "Accept-Language": self._accept_language(self._cfg.locale)
+            },
         }
         if state.exists():
             kwargs["storage_state"] = str(state)

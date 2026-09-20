@@ -160,7 +160,14 @@ class ProviderRegistry:
                         if state is not None:
                             kwargs["storage_state"] = state
                         ctx = await browser.new_context(
-                            user_agent=self.config.browser.user_agent, **kwargs
+                            user_agent=self.config.browser.user_agent,
+                            locale=self.config.browser.locale,
+                            extra_http_headers={
+                                "Accept-Language": BrowserManager._accept_language(
+                                    self.config.browser.locale
+                                )
+                            },
+                            **kwargs,
                         )
                         try:
                             page = await ctx.new_page()

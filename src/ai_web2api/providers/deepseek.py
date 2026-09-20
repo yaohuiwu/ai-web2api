@@ -85,6 +85,15 @@ class DeepSeekProvider(BaseProvider):
     # 服务端保存用户会话不回收 → thread 持久化恢复可靠）
     session_url_pattern = r"/a/chat/s/([0-9a-fA-F-]{8,})"
 
+    # 旧版 UI 的三模式（快速/专家/识图）在新版 UI 已合并为单一模式，请求体只剩
+    # thinking_enabled / search_enabled 两个开关。这里把旧 mode 值翻译成开关组合，
+    # 让老客户端（和 playground 的 mode 预设）继续可用；显式 deep_think/search 参数优先。
+    MODE_PRESETS: dict[str, dict[str, bool]] = {
+        "fast": {"deep_think": False, "search": False},
+        "expert": {"deep_think": True, "search": True},
+        "image": {"deep_think": False, "search": False},
+    }
+
     async def generate(
         self,
         messages: list[dict],
@@ -179,14 +188,34 @@ class DeepSeekProvider(BaseProvider):
     ) -> None:
         """发送前把请求参数映射到页面 UI（模式 radio / 开关 toggle）。
 
-        - mode：仅新会话（create/无状态）可设；resume 时页面在会话页，无模式区，忽略。
+        - 页面有模式区（``selectors.mode_button`` 非空，旧版 UI）：mode → 点 radio；
+          仅新会话（create/无状态）可设，resume 时会话页无模式区，忽略。
+        - 页面无模式区（新版 UI：三模式合一）：mode → MODE_PRESETS 翻译成开关组合，
+          显式 deep_think/search 参数优先（None 才用预设）。
         - deep_think/search：每次请求按参数设置（已是目标态则跳过）；页面无对应开关时忽略。
         """
         cfg = self.cfg
         sels = cfg.selectors
         if mode:
-            if not can_set_mode:
-                # resume：会话页无模式区（DeepSeek 实测），忽略并提示
+            if not sels.mode_button:
+                # 新版 UI：无模式选择（快速/专家/识图合并），mode 只能翻译成开关
+                preset = self.MODE_PRESETS.get(mode)
+                if preset is None:
+                    logger.warning(
+                        "[%s] mode=%r 未知（新版 UI 已无模式区），忽略；可用预设: %s",
+                        self.name, mode, list(self.MODE_PRESETS),
+                    )
+                else:
+                    if deep_think is None:
+                        deep_think = preset["deep_think"]
+                    if search is None:
+                        search = preset["search"]
+                    logger.info(
+                        "[%s] mode=%s → 新版 UI 开关预设 %s（显式参数优先）",
+                        self.name, mode, preset,
+                    )
+            elif not can_set_mode:
+                # resume：会话页无模式区（旧版 UI 实测），忽略并提示
                 logger.info("[%s] mode=%s ignored (resume: 会话页不可切换模式)", self.name, mode)
             else:
                 cands = sels.mode_button.get(mode, [])
@@ -213,27 +242,62 @@ class DeepSeekProvider(BaseProvider):
         if search is not None:
             await self._set_toggle(page, "search", sels.toggle_button.get("search", []), search)
 
-    async def _set_toggle(self, page: Page, field: str, cands: list[str], want_on: bool) -> None:
-        """设置开关到目标状态（已是目标态则跳过）；UI 无此开关时忽略（如被模式隐藏）。"""
+    async def _set_toggle(self, page: Page, field: str, cands: list[str], want_on: bool) -> bool:
+        """设置开关到目标状态；点击后读回校验，不一致重试一次，仍不一致显式告警。
+
+        读回校验不能省：开关点击被 UI 吞掉（重渲染、动画中、遮罩）或状态读错时，
+        旧实现静默返回 → 调用方看起来就是"勾了没生效"。校验+重试可修正两个方向的
+        误判（漏点 / 读错），失败也留下 WARNING 而不是静默。
+
+        - 页面无此开关（UI 未渲染或该模式没有）→ 记日志并返回 False
+        - 返回 True = 页面已确认处于目标状态
+        """
         if not cands:
-            return
+            return False
         sel = await extractor.first_match(page, cands)
         if sel is None:
-            logger.info("[%s] toggle %s=%s skipped: 页面无此开关（可能被当前模式隐藏）", self.name, field, want_on)
-            return
+            logger.info(
+                "[%s] toggle %s=%s skipped: 页面无此开关（未渲染或已下线）",
+                self.name, field, want_on,
+            )
+            return False
+        for attempt in range(2):
+            is_on = await self._is_checked(page, sel, self.cfg.selectors.toggle_checked)
+            if is_on == want_on:
+                if attempt:
+                    logger.info(
+                        "[%s] toggle %s 重试后确认 %s", self.name, field,
+                        "on" if want_on else "off",
+                    )
+                else:
+                    logger.info(
+                        "[%s] toggle %s already %s", self.name, field, "on" if want_on else "off"
+                    )
+                return True
+            logger.info(
+                "[%s] toggle %s -> %s%s", self.name, field, "on" if want_on else "off",
+                "（重试）" if attempt else "",
+            )
+            try:
+                await page.locator(sel).first.click()
+            except Exception as e:  # 元素被遮罩/移除等 → 不静默
+                logger.warning("[%s] toggle %s 点击失败: %s", self.name, field, e)
+                return False
+            await page.wait_for_timeout(800)  # 等 toggle 状态渲染
         is_on = await self._is_checked(page, sel, self.cfg.selectors.toggle_checked)
-        if is_on == want_on:
-            logger.info("[%s] toggle %s already %s", self.name, field, "on" if want_on else "off")
-            return
-        logger.info("[%s] toggle %s -> %s", self.name, field, "on" if want_on else "off")
-        await page.locator(sel).first.click()
-        await page.wait_for_timeout(800)  # 等 toggle 状态渲染
+        if is_on != want_on:
+            logger.warning(
+                "[%s] toggle %s 未生效：期望 %s，页面读回 %s（点击被 UI 吞掉或状态选择器失配）",
+                self.name, field, "on" if want_on else "off", "on" if is_on else "off",
+            )
+            return False
+        return True
 
     MAX_ATTACHMENTS = 50   # DeepSeek tooltip：最多 50 个
     MAX_ATTACH_BYTES = 100 * 1024 * 1024  # 每个最大 100MB
 
     async def _upload_attachments(self, page: Page, attachments: list[dict] | None) -> None:
-        """发送前把请求附件上传到输入框（DeepSeek：仅快速/识图模式支持，仅识别图片文字）。
+        """发送前把请求附件上传到输入框（DeepSeek：三模式合并后任何会话都能上传）。
 
         - data URL → base64 解码写临时文件；http(s) URL → 下载后上传
         - 上传入口：selectors.upload_input（默认 input[type=file]），找不到 → 400
@@ -249,8 +313,8 @@ class DeepSeekProvider(BaseProvider):
         sel = await extractor.first_match(page, sels)
         if sel is None:
             raise AttachmentError(
-                'provider "%s" 当前页面/模式不支持附件上传（未找到上传入口 input[type=file]），'
-                "DeepSeek 仅快速/识图模式支持" % self.name,
+                f'provider "{self.name}" 当前页面未找到附件上传入口'
+                "（upload_input 选择器均未匹配，检查配置或页面是否已改版）",
                 provider=self.name,
             )
         paths: list[str] = []
