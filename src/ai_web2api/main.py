@@ -65,6 +65,14 @@ def _lan_ip() -> str | None:
         return None
 
 
+# 启动时打印的入口：(显示名, 路径)
+_ENDPOINTS = (
+    ("管理界面", "/ui/"),
+    ("Playground", "/ui/playground.html"),
+    ("OpenAI API", "/v1"),
+)
+
+
 def usable_hosts(host: str) -> list[tuple[str, str]]:
     """把监听地址翻成浏览器真能打开的地址。
 
@@ -83,16 +91,14 @@ def usable_hosts(host: str) -> list[tuple[str, str]]:
 
 
 def log_ui_urls(host: str, port: int) -> None:
-    """启动后打印可点击的地址（管理界面 / Playground / API）。"""
+    """启动后打印可点击的地址（管理界面 / Playground / API）。
+
+    一条日志一个地址：整行太长会在终端里折行，链接就没法直接点/复制了。
+    """
     for h, tag in usable_hosts(host):
         base = f"http://{h}:{port}"
-        logger.info(
-            "%s：管理界面 %s/ui/ · Playground %s/ui/playground.html · OpenAI API %s/v1",
-            tag,
-            base,
-            base,
-            base,
-        )
+        for label, path in _ENDPOINTS:
+            logger.info("%s（%s）：%s%s", label, tag, base, path)
 
 
 def serve(cfg) -> None:  # type: ignore[no-untyped-def]

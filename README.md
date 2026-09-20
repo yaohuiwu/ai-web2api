@@ -19,11 +19,15 @@ uv sync                      # 安装依赖（创建 .venv）
 .venv/bin/python -m ai_web2api.main
 ```
 
-启动后会直接打印**能点开的地址**（`0.0.0.0` 只是"监听所有网卡"，不是可访问的主机名）：
+启动后会直接打印**能点开的地址**，一条一个（`0.0.0.0` 只是"监听所有网卡"，不是可访问的主机名）：
 
 ```
-INFO ai_web2api: 本机：管理界面 http://127.0.0.1:8000/ui/ · Playground http://127.0.0.1:8000/ui/playground.html · OpenAI API http://127.0.0.1:8000/v1
-INFO ai_web2api: 局域网：管理界面 http://192.168.1.5:8000/ui/ · Playground http://192.168.1.5:8000/ui/playground.html · OpenAI API http://192.168.1.5:8000/v1
+INFO ai_web2api: 管理界面（本机）：http://127.0.0.1:8000/ui/
+INFO ai_web2api: Playground（本机）：http://127.0.0.1:8000/ui/playground.html
+INFO ai_web2api: OpenAI API（本机）：http://127.0.0.1:8000/v1
+INFO ai_web2api: 管理界面（局域网）：http://192.168.1.5:8000/ui/      # 手机/其他机器用
+INFO ai_web2api: Playground（局域网）：http://192.168.1.5:8000/ui/playground.html
+INFO ai_web2api: OpenAI API（局域网）：http://192.168.1.5:8000/v1
 ```
 
 端口被占用时只打印一行人话（`启动失败：0.0.0.0:8000 无法监听（Address already in use），端口可能已被占用`），不再甩 uvicorn 的 traceback。

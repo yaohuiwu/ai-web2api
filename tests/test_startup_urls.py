@@ -37,9 +37,24 @@ def test_logged_lines_contain_usable_urls(monkeypatch, caplog) -> None:
     monkeypatch.setattr("ai_web2api.main._lan_ip", lambda: "192.168.1.23")
     with caplog.at_level(logging.INFO, logger="ai_web2api"):
         log_ui_urls("0.0.0.0", 8000)
-    text = "\n".join(r.getMessage() for r in caplog.records)
+    messages = [r.getMessage() for r in caplog.records]
+    text = "\n".join(messages)
     assert "http://127.0.0.1:8000/ui/" in text
     assert "http://127.0.0.1:8000/ui/playground.html" in text
     assert "http://127.0.0.1:8000/v1" in text
     assert "http://192.168.1.23:8000/ui/" in text
     assert "0.0.0.0" not in text
+
+
+def test_one_url_per_line(monkeypatch, caplog) -> None:
+    """一条日志一个地址，别把三个链接挤成一行（终端里会折行，链接就没法点了）。"""
+    monkeypatch.setattr("ai_web2api.main._lan_ip", lambda: "192.168.1.23")
+    with caplog.at_level(logging.INFO, logger="ai_web2api"):
+        log_ui_urls("0.0.0.0", 8000)
+    messages = [r.getMessage() for r in caplog.records]
+    assert len(messages) == 6  # 2 个入口地址 × 3 条
+    for msg in messages:
+        assert msg.count("http://") == 1
+        assert "http://" in msg and (msg.endswith("/ui/") or msg.endswith(".html") or msg.endswith("/v1"))
+        assert len(msg) < 80
+    assert messages[0] == "管理界面（本机）：http://127.0.0.1:8000/ui/"
