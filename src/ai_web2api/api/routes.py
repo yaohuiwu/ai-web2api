@@ -425,9 +425,13 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
     @router.get("/admin/{name}/login/status")
     async def login_status(name: str):
         provider = registry.get_provider(name)
+        was = registry.login_status().get(name, False)
         ok = await provider.check_login()
+        if ok and not was:
+            # 刚从不登录变登录（多为手动登录完成）→ 登录态已变，必须落盘
+            provider.browser.mark_state_dirty(name)
         if ok:
-            await provider.browser.save_state(name)
+            await provider.browser.save_state(name)  # 已登录且未过期时不写
         registry.set_login_status(name, ok)
         return {"provider": name, "logged_in": ok}
 
@@ -446,6 +450,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         ctx = await provider.browser.get_context(name)
         # playwright 的 dict 形式使用 camelCase 字段名，与 CookieItem.model_dump() 一致
         await ctx.add_cookies([c.model_dump() for c in payload.cookies])  # type: ignore[arg-type]
+        # 注入即变更：必须落盘（不受"已登录未过期就不写"规则约束）
+        provider.browser.mark_state_dirty(name)
         await provider.browser.save_state(name)
         ok = await provider.check_login()
         registry.set_login_status(name, ok)

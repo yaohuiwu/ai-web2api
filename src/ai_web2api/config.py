@@ -122,7 +122,7 @@ class BrowserConfig(BaseModel):
     viewport: dict = Field(default_factory=lambda: {"width": 1440, "height": 900})
     default_timeout: float = 30.0
     login_check_interval: float = 300.0  # 后台刷新登录态间隔（秒）
-    state_save_interval: float = 600.0   # 后台定期保存 storage_state 间隔（秒）
+    state_expiry_margin: float = 86400.0  # 登录态剩余有效期低于该值才落盘 state.json（秒）；未过期不重复写
     status_check: bool = True            # 定时状态检测总开关（关掉后后台不再访问页面）
     status_check_headless: bool = True   # 定时检测用独立 headless 浏览器（不弹窗口，默认开）
 

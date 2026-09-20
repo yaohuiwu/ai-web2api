@@ -152,6 +152,8 @@ class BaseProvider(abc.ABC):
             deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
                 if await first_match(page, self.login_check_selectors) is not None:
+                    # 刚登录成功 → 登录态已变，必须落盘（save_state 的"按需"规则之外）
+                    self.browser.mark_state_dirty(self.name)
                     await self.browser.save_state(self.name)
                     return {"ok": True, "already_logged_in": False}
                 await page.wait_for_timeout(1000)

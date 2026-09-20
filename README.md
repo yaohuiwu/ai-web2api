@@ -181,6 +181,8 @@ browser:
   headless: true           # 静默运行（不弹窗口）；可用 .env 覆盖：WEB2API_HEADLESS > DEEPSEEK_HEADLESS
   locale: zh-CN            # 页面语言（决定 DeepSeek UI 文案 / 中文选择器是否匹配）
   login_check_interval: 300  # 定时检测登录态间隔（秒）
+  state_expiry_margin: 86400 # 登录态剩余有效期低于该值才落盘 state.json（秒）
+                             # 已登录且未过期就不写盘：只有「登录态刚变化 / 还没落盘 / cookie 快过期」才 save
   status_check: true         # 定时状态检测总开关
   status_check_headless: true  # 检测用独立 headless 浏览器，不弹出/占用主浏览器窗口（默认开）
 profiles_dir: profiles     # 登录态持久化目录
@@ -282,6 +284,9 @@ curl http://127.0.0.1:8000/admin/deepseek/login/status         # 确认 logged_i
 - 数学公式（KaTeX）尽力还原，复杂排版可能失真
 - 无 API key 鉴权（本地使用）；对外部署请自行加反代/鉴权
 - Web 端改版会导致选择器失效，用 `/admin/{p}/debug/dom` 排查并更新配置
+- 停止服务：Ctrl+C 会给**整个进程组**发信号，Playwright 的 node 驱动同时被打掉，浏览器已无法优雅关闭
+  → 服务打一条 WARNING（`browser.close 失败（驱动可能已退出，忽略）`）后正常退出，不会报
+  `Application shutdown failed`；登录态早已按需落盘，不影响下次启动
 - 账号风控风险：请自用，控制频率
 - llama_index.llms.openai 兼容：role 支持 `developer`/`tool`/`function`（`developer` 自动映射为
   `system`），`content` 支持多部分列表（提取 text 部分），`tool_calls` 等字段自动忽略；

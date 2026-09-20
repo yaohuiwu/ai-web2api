@@ -35,6 +35,24 @@ logger = logging.getLogger("ai_web2api")
 
 CONFIG_PATH = os.environ.get("AI_WEB2API_CONFIG", "config.yaml")
 
+# 收尾噪声：Ctrl+C 把 Playwright 的 node 驱动一起打掉后，它内部 future 会抛这些异常，
+# 都属于"驱动已经不在了"，不影响收尾（登录态该落盘的早落了）。
+_CLOSED_HINTS = (
+    "Connection closed while reading from the driver",
+    "Target page, context or browser has been closed",
+    "unable to perform operation on <WriteUnixTransport closed=True",
+)
+
+
+def _quiet_shutdown_exception_handler(loop: asyncio.AbstractEventLoop, context: dict) -> None:
+    """关停阶段把 Playwright 的"连接已关闭"类未取回异常降到 DEBUG，其余照旧。"""
+    exc = context.get("exception")
+    text = f"{context.get('message', '')} · {exc!r}"
+    if any(h in text for h in _CLOSED_HINTS):
+        logger.debug("忽略 Playwright 收尾异常：%s", text[:200])
+        return
+    loop.default_exception_handler(context)
+
 
 def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
     cfg = load_config(config_path)
@@ -52,8 +70,21 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
             yield
         finally:
             bg.cancel()
-            await threads.close_all()
-            await browser.stop()
+            # 关停阶段：Playwright 驱动可能已被 Ctrl+C 打掉，噪声日志降到 DEBUG
+            try:
+                asyncio.get_running_loop().set_exception_handler(_quiet_shutdown_exception_handler)
+            except Exception:  # noqa: BLE001
+                pass
+            # 等后台任务真正结束：它还可能在用浏览器/独立 playwright 实例
+            await asyncio.gather(bg, return_exceptions=True)
+            try:
+                await threads.close_all()
+            except Exception:  # noqa: BLE001
+                logger.warning("关闭会话时出错（继续收尾）", exc_info=True)
+            try:
+                await browser.stop()
+            except Exception:  # noqa: BLE001
+                logger.warning("关闭浏览器时出错（继续收尾）", exc_info=True)
 
     app = FastAPI(title="ai-web2api", version="0.1.0", lifespan=lifespan)
     if cfg.server.cors_origins:
@@ -153,14 +184,21 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
                 )
 
     async def _background_loop():
-        """定期刷新登录态 + 定期保存 storage_state + 回收空闲 thread 会话。"""
+        """定期刷新登录态 + （必要时）保存 storage_state + 回收空闲 thread 会话。"""
         while True:
             try:
                 await asyncio.sleep(cfg.browser.login_check_interval)
+                before = registry.login_status()
                 await registry.refresh_login_status()
+                after = registry.login_status()
                 for name in registry.providers():
-                    if registry.login_status().get(name):
-                        await browser.save_state(name)
+                    if not after.get(name):
+                        continue
+                    if not before.get(name):
+                        # 刚从不登录变登录（可能后台自动登录/页面恢复）→ 必须落盘
+                        browser.mark_state_dirty(name)
+                    # 已登录且登录态未过期时这里什么都不写（save_state 内部判定）
+                    await browser.save_state(name)
                 await threads.cleanup()
             except asyncio.CancelledError:
                 raise
