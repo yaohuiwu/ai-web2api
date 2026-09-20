@@ -411,6 +411,17 @@ function errMsg(body) {
   return "HTTP 错误";
 }
 
+// 服务端为无 thread_id 的请求自动分配会话：写回输入框，后续消息复用同一会话
+// （否则每条消息都会被当成新会话 → thread_id 每轮都变，上下文无法延续）
+function rememberThreadId(tid) {
+  if (!tid) return;
+  const el = $("#threadId");
+  if (!el || el.value.trim()) return;   // 元素缺失 / 用户已显式填了 thread_id → 不覆盖
+  el.value = tid;
+  el.dispatchEvent(new Event("input"));  // 触发 hint 更新
+  refreshThreads();                      // 左侧列表立即高亮该会话
+}
+
 async function sendNonStream(body) {
   const res = await fetch("/v1/chat/completions", {
     method: "POST", headers: headers(), body: JSON.stringify(body),
@@ -427,7 +438,10 @@ async function sendNonStream(body) {
   } else {
     addMsg("assistant", content || "（空回复）", { thinking: th });
   }
-  if (data.thread_id) addMeta(`thread_id: ${data.thread_id}`);
+  if (data.thread_id) {
+    addMeta(`thread_id: ${data.thread_id}`);
+    rememberThreadId(data.thread_id);
+  }
 }
 
 async function sendStream(body) {
@@ -497,6 +511,7 @@ async function sendStream(body) {
       if (obj.thread_id && !gotThreadId) {
         gotThreadId = true;
         addMeta(`thread_id: ${obj.thread_id}`);
+        rememberThreadId(obj.thread_id);
       }
     }
   }

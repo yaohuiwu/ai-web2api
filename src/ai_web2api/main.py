@@ -73,7 +73,20 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
     # Web 管理界面：状态面板 + OpenAI API 测试页
     webui_dir = Path(__file__).resolve().parent / "webui"
     if webui_dir.is_dir():
-        app.mount("/ui", StaticFiles(directory=webui_dir, html=True), name="ui")
+
+        class _NoStoreStatic(StaticFiles):
+            """给 /ui 的静态文件加 no-store：改完页面普通刷新即生效。
+
+            没有缓存头时浏览器会启发式缓存 playground.html —— 页面开着不刷新
+            就永远跑旧 JS，改动静默失效（表现为"改了没用"）。
+            """
+
+            async def get_response(self, path: str, scope):  # type: ignore[no-untyped-def]
+                resp = await super().get_response(path, scope)
+                resp.headers["Cache-Control"] = "no-store, must-revalidate"
+                return resp
+
+        app.mount("/ui", _NoStoreStatic(directory=webui_dir, html=True), name="ui")
 
         @app.get("/", include_in_schema=False)
         async def root():
