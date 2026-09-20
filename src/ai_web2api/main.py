@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import socket
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -52,6 +53,68 @@ def _quiet_shutdown_exception_handler(loop: asyncio.AbstractEventLoop, context: 
         logger.debug("忽略 Playwright 收尾异常：%s", text[:200])
         return
     loop.default_exception_handler(context)
+
+
+def _lan_ip() -> str | None:
+    """本机对外的 IP（UDP connect 只做路由选择，不发包）。拿不到就返回 None。"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
+def usable_hosts(host: str) -> list[tuple[str, str]]:
+    """把监听地址翻成浏览器真能打开的地址。
+
+    `0.0.0.0`/`::` 只是"监听所有网卡"，不是主机名 —— 打印 http://0.0.0.0/ui 
+    点不开，所以换成 127.0.0.1（本机）和局域网 IP（手机/其他机器）。
+    """
+    if host in {"0.0.0.0", "::", "*", ""}:
+        hosts = [("127.0.0.1", "本机")]
+        lan = _lan_ip()
+        if lan:
+            hosts.append((lan, "局域网"))
+        return hosts
+    if host == "::1":
+        return [("[::1]", "本机")]
+    return [(host, "本机")]
+
+
+def log_ui_urls(host: str, port: int) -> None:
+    """启动后打印可点击的地址（管理界面 / Playground / API）。"""
+    for h, tag in usable_hosts(host):
+        base = f"http://{h}:{port}"
+        logger.info(
+            "%s：管理界面 %s/ui/ · Playground %s/ui/playground.html · OpenAI API %s/v1",
+            tag,
+            base,
+            base,
+            base,
+        )
+
+
+def serve(cfg) -> None:  # type: ignore[no-untyped-def]
+    """先自己 bind 再交给 uvicorn。
+
+    端口被占用时给一句人话（而不是 uvicorn 的 traceback），也保证打印出来的链接
+    一定真的能打开 —— uvicorn 是先跑 lifespan 再 bind 的，在 lifespan 里打印会撒谎。
+    """
+    family = socket.AF_INET6 if ":" in cfg.server.host else socket.AF_INET
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((cfg.server.host, cfg.server.port))
+    except OSError as exc:
+        raise SystemExit(
+            f"启动失败：{cfg.server.host}:{cfg.server.port} 无法监听（{exc.strerror}），"
+            f"端口可能已被占用"
+        ) from exc
+    log_ui_urls(cfg.server.host, cfg.server.port)
+    uvicorn.Server(
+        uvicorn.Config(app, host=cfg.server.host, port=cfg.server.port)
+    ).run(sockets=[sock])
 
 
 def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
@@ -212,5 +275,4 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    cfg = app.state.config
-    uvicorn.run(app, host=cfg.server.host, port=cfg.server.port)
+    serve(app.state.config)
