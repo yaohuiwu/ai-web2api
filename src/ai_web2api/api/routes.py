@@ -148,6 +148,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 kwargs["search"] = req.search
             if attachments:
                 kwargs["attachments"] = attachments
+            if req.options:
+                kwargs["options"] = req.options
 
             if req.stream:
 
@@ -228,6 +230,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             opts["search"] = req.search
         if attachments:
             opts["attachments"] = attachments
+        if req.options:
+            opts["options"] = req.options
 
         if req.stream:
             return StreamingResponse(

@@ -209,13 +209,14 @@ class BaseProvider(abc.ABC):
         deep_think: bool | None = None,
         search: bool | None = None,
         attachments: list[dict] | None = None,
+        options: dict | None = None,
     ) -> tuple[str, str | None]:
         """非流式：返回 (content, reasoning_content)。"""
         chunks = [c async for c in self.generate(
             messages, model,
             thread_mode=thread_mode, thread_page=thread_page,
             mode=mode, deep_think=deep_think, search=search,
-            attachments=attachments,
+            attachments=attachments, options=options,
         )]
         content = "".join(c.text for c in chunks if c.kind == "content")
         thinking = "".join(c.text for c in chunks if c.kind == "thinking")
@@ -233,6 +234,7 @@ class BaseProvider(abc.ABC):
         deep_think: bool | None = None,
         search: bool | None = None,
         attachments: list[dict] | None = None,
+        options: dict | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """打开新 Tab → 注入上下文 → 发送 → 增量产出响应。
 
@@ -247,6 +249,8 @@ class BaseProvider(abc.ABC):
         mode 由 provider 决定语义：有模式区的 UI → 仅新会话可点 radio，resume 忽略；
         无模式区的 UI（新版 DeepSeek 三模式合一）→ 翻译成开关组合，每次请求可生效。
         deep_think/search 每次请求生效；页面无对应开关时忽略。
+        options：provider 自定义选项透传（不经 schema，如 Qwen 的 web_search），
+        默认忽略，驱动可在 `_apply_extra_options` 里消费。
 
         注意：实现必须是 async generator（含 yield），因此这里用普通 def 声明。
         """

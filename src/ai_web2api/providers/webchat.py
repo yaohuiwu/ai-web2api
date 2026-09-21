@@ -91,6 +91,7 @@ class WebChatProvider(BaseProvider):
         deep_think: bool | None = None,
         search: bool | None = None,
         attachments: list[dict] | None = None,
+        options: dict | None = None,
     ) -> AsyncIterator[StreamChunk]:
         cfg = self.cfg
         resume = thread_mode == "resume"
@@ -108,7 +109,7 @@ class WebChatProvider(BaseProvider):
             # 发送前应用模型/模式/开关（在记录容器数量之前，避免 UI 重渲染影响增量判定）
             await self._apply_model(page, model, can_set=not resume)
             await self._apply_options(
-                page, mode, deep_think, search, can_set_mode=not resume
+                page, mode, deep_think, search, can_set_mode=not resume, options=options
             )
 
             # 发送前上传附件（图片等）：写入输入框，发送时随消息带上
@@ -179,6 +180,7 @@ class WebChatProvider(BaseProvider):
         deep_think: bool | None,
         search: bool | None,
         can_set_mode: bool,
+        options: dict | None = None,
     ) -> None:
         """发送前把请求参数映射到页面 UI。
 
@@ -186,6 +188,7 @@ class WebChatProvider(BaseProvider):
         - 页面无模式区：mode → ``MODE_PRESETS`` 翻译成开关组合，显式参数优先。
         - ``deep_think`` / ``search``：每次请求按参数设开关，页面无对应开关时忽略。
         - 模型选择：见 :meth:`_apply_model`（默认无操作，子类/配置启用）。
+        - ``options``：provider 自定义选项，交给 :meth:`_apply_extra_options`。
         """
         cfg = self.cfg
         sels = cfg.selectors
@@ -248,6 +251,12 @@ class WebChatProvider(BaseProvider):
             await self._set_toggle(
                 page, "search", sels.toggle_button.get("search", []), search
             )
+        if options:
+            await self._apply_extra_options(page, options)
+
+    async def _apply_extra_options(self, page: Page, options: dict) -> None:
+        """provider 自定义选项（默认忽略）；子类按需覆写。"""
+        return None
 
     async def _set_toggle(self, page: Page, field: str, cands: list[str], want_on: bool) -> bool:
         """设置开关到目标状态；点击后读回校验，不一致重试一次，仍不一致显式告警。

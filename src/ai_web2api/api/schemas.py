@@ -105,6 +105,8 @@ class ChatCompletionRequest(BaseModel):
     top_p: float | None = None
     stop: Any = None
     n: int | None = None
+    # provider 自定义选项透传（客户端用 extra_body）：默认忽略，驱动按需消费
+    options: dict[str, Any] = Field(default_factory=dict)
 
 
 class ResponseMessage(BaseModel):
