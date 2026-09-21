@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from playwright.async_api import Page
 
@@ -111,6 +112,28 @@ async def first_match(page: Page, selectors: list[str]) -> str | None:
         if await count_matches(page, s) > 0:
             return s
     return None
+
+
+async def wait_first_match(
+    page: Page,
+    selectors: list[str],
+    *,
+    timeout: float = 15.0,
+    poll: float = 0.3,
+) -> str | None:
+    """轮询等待候选列表里任一选择器出现；超时返回 None。
+
+    SPA 在 ``domcontentloaded`` 之后才异步渲染 DOM，直接 ``first_match``
+    会拿到空的登录表单/聊天页。用这个函数给渲染留出时间。
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        sel = await first_match(page, selectors)
+        if sel is not None:
+            return sel
+        if time.monotonic() >= deadline:
+            return None
+        await page.wait_for_timeout(poll * 1000)
 
 
 async def extract_markdown(page: Page, selector: str | None, index: int | None = -1) -> str:

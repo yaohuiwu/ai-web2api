@@ -11,7 +11,7 @@ from typing import AsyncIterator, Literal
 
 from playwright.async_api import Page
 
-from ..browser.extractor import first_match
+from ..browser.extractor import first_match, wait_first_match
 from ..browser.manager import BrowserManager
 from ..config import ProviderConfig
 from ..core.errors import NotLoggedInError
@@ -82,11 +82,9 @@ class BaseProvider(abc.ABC):
         page = await self.browser.open_page(self.name)
         try:
             await page.goto(self.cfg.url, wait_until="domcontentloaded", timeout=30000)
-            sel = await first_match(page, self.login_check_selectors)
-            if sel is None:
-                return False
-            await page.wait_for_selector(sel, timeout=8000)
-            return True
+            # 聊天页是 SPA，输入框在 domcontentloaded 后才渲染，需轮询等待
+            sel = await wait_first_match(page, self.login_check_selectors, timeout=8.0)
+            return sel is not None
         except Exception:
             return False
         finally:
@@ -118,21 +116,36 @@ class BaseProvider(abc.ABC):
         page = await self.browser.open_page(self.name)
         try:
             await page.goto(cfg.url, wait_until="domcontentloaded", timeout=30000)
+
+            lp = cfg.login.page
+            # SPA 在 domcontentloaded 后才渲染 DOM：等「已登录（聊天输入框）」
+            # 或「登录表单（账号+密码输入框）」任一出现，再往下判断。
+            appeared = await wait_first_match(
+                page,
+                [*self.login_check_selectors, *lp.username, *lp.password],
+                timeout=15.0,
+            )
+            if appeared is None:
+                return {
+                    "ok": False,
+                    "reason": "页面 15s 内未渲染出登录表单/聊天页（可能被风控/验证码页拦截），请手动登录",
+                    "url": page.url,
+                }
+
             # 已登录则幂等返回
             sel = await first_match(page, self.login_check_selectors)
             if sel is not None:
                 await page.wait_for_timeout(800)
                 return {"ok": True, "already_logged_in": True}
 
-            lp = cfg.login.page
             # 若默认是验证码 tab，先切到"密码登录"
             tab_sel = await first_match(page, lp.password_tab)
             if tab_sel is not None:
                 await page.locator(tab_sel).first.click()
                 await page.wait_for_timeout(800)
 
-            user_sel = await first_match(page, lp.username)
-            pwd_sel = await first_match(page, lp.password)
+            user_sel = await wait_first_match(page, lp.username, timeout=5.0)
+            pwd_sel = await wait_first_match(page, lp.password, timeout=5.0)
             if user_sel is None or pwd_sel is None:
                 return {
                     "ok": False,
@@ -141,6 +154,9 @@ class BaseProvider(abc.ABC):
                 }
             await page.locator(user_sel).first.fill(creds["username"])
             await page.locator(pwd_sel).first.fill(creds["password"])
+            # React 受控输入：填完等一拍让状态提交（否则立刻点提交可能带上旧值），
+            # 也能降低被风控判定为“机器快速填表”的概率。
+            await page.wait_for_timeout(800)
 
             submit_sel = await first_match(page, lp.submit)
             if submit_sel is not None:
@@ -233,10 +249,10 @@ class BaseProvider(abc.ABC):
         page = await self.browser.open_page(self.name, init_scripts=self.init_scripts())
         await page.goto(self.cfg.url, wait_until="domcontentloaded", timeout=30000)
         try:
-            sel = await first_match(page, self.login_check_selectors)
+            # 聊天页是 SPA，输入框在 domcontentloaded 后才渲染，需轮询等待
+            sel = await wait_first_match(page, self.login_check_selectors, timeout=15.0)
             if sel is None:
                 raise TimeoutError("no login_check selector matched")
-            await page.wait_for_selector(sel, timeout=10000)
         except Exception:
             await page.close()
             raise NotLoggedInError(
