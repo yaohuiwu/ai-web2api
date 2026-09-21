@@ -112,6 +112,19 @@ class BaseProvider(ABC):
 - 网页对话是「单会话」模型：每个 Provider 内部用 `asyncio.Lock` 串行化请求，并发请求排队；
 - 每次请求前点击 logo 新建对话 → 保证 API 语义的**无状态**（不同请求互不串上下文）。
 
+### 4.3 会话历史持久化（SQLite）
+会话元数据与消息历史统一落盘到 `profiles/threads.db`（SQLite，WAL），替代早期的
+`profiles/<provider>/threads.json`：
+
+- `threads(thread_id PK, provider, model, title, url_id, created_at, updated_at)` —— 会话元数据；
+  `url_id` 即绑定页的 provider 会话 id（DeepSeek `/a/chat/s/<uuid>`），重启后 `goto` 恢复；
+- `messages(id PK, thread_id FK→threads ON DELETE CASCADE, role, content, reasoning, created_at)`
+  —— 每轮 user/assistant（含思考）；
+- 实现见 `core/store.py`（同步 + `threading.Lock`，异步方用 `asyncio.to_thread` 调用）。写入为
+  best-effort：失败仅告警，不影响请求结果；
+- 启动时若存在旧 `threads.json`，迁移进库后**删除**（幂等）；
+- `server.thread_persist: false` 时全部落库关闭（与旧行为一致）。
+
 ---
 
 ## 5. DeepSeek 网页实现要点
@@ -166,6 +179,9 @@ textbox.fill(最终消息)  →  press Enter
 | `GET /v1/models` | 列出当前 provider 的模型 |
 | `POST /v1/chat/completions` | 对话，`stream=true` 走 SSE |
 | `GET /healthz` | 健康检查（含 provider 就绪状态） |
+| `GET /admin/threads` | 会话列表（内存活跃 + DB 已落库） |
+| `GET /admin/threads/{id}/messages` | 会话历史消息（user/assistant + 思考） |
+| `DELETE /admin/threads/{id}` | 强杀会话并删除历史 |
 
 ### 6.2 鉴权
 可选：配置 `server.api_keys`（config.yaml）或环境变量 `WEB2API_API_KEY`（逗号分隔多 key）后，

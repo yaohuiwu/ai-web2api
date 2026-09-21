@@ -164,7 +164,7 @@ input.addEventListener("keydown", (e) => {
       扩展 `tests/test_openai_compat.py`（有登录时才跑）。（提交）
 - [x] **Step 4**：`playground.html` 修复 IME 误发送 + 静态断言测试。（提交）
 - [x] **Step 5**：`playground.html` 历史消息渲染 + 刷新按钮 + 去掉轮询。（提交）
-- [ ] **Step 6**：回归验证（Docker 起服务，多轮对话 / 切换 / 重启 / 中文输入法），
+- [x] **Step 6**：回归验证（Docker 起服务，多轮对话 / 切换 / 重启 / 中文输入法），
       更新 `docs/DESIGN.md` 与 `README.md`。（提交）
 
 ---
@@ -179,7 +179,18 @@ input.addEventListener("keydown", (e) => {
 
 ---
 
-## 8. 非目标 / 暂不做
+## 8. 验证记录（2026-09）
+
+- 单元/单元集成测试：`tests/test_thread_store.py`、`tests/test_threads_persistence.py`、
+  `tests/test_history_endpoint.py`（假页端到端）、`tests/test_playground_ime.py`、
+  `tests/test_playground_history.py` 全部通过。
+- Docker：重建容器后日志确认 `threads.json（2 条）→ threads.db 迁移完成` 且文件被删除；
+  `GET /admin/threads` 返回 DB 中的会话（`loaded=false`）；真实一轮对话后
+  `GET /admin/threads/{id}/messages` 返回 user+assistant；`--force-recreate` 重建容器后历史仍在。
+
+---
+
+## 9. 非目标 / 暂不做
 
 - 附件内容入库（本次只存文本 + 思考）。
 - 多进程 / 多 worker 共享 DB 的并发方案。

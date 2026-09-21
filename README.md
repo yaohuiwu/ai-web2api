@@ -18,7 +18,7 @@ docker compose logs -f        # 看启动日志，会打印可点击的 UI/API �
 
 打开 `http://127.0.0.1:8000/ui/`。要点：
 
-- 登录态 / 会话持久化在命名卷 `web2api-profiles`，**容器重建不丢登录**；`docker compose down -v` 才会清空
+- 登录态 / 会话与历史消息持久化在命名卷 `web2api-profiles`（登录态 `state.json`、会话+消息 SQLite `threads.db`），**容器重建不丢登录、不丢历史**；`docker compose down -v` 才会清空
 - 容器内必须监听 `0.0.0.0`（`config.yaml` 默认已是），宿主用 `${WEB2API_PUBLISH_PORT:-8000}` 映射
 - 改选择器/配置：改 `config.yaml` 后 `docker compose up -d` 重建，或放开 compose 里 `./config.yaml:/app/config.yaml:ro` 挂载直接生效
 - 容器内无可见窗口，手动登录用 cookies 导入：
@@ -134,10 +134,11 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 - 也支持 `X-Thread-Id` header；OpenAI SDK 传非标准字段用 `extra_body={"thread_id": "..."}`（或 `extra_headers={"X-Thread-Id": "..."}`）
 - 同一 `thread_id` 串行执行；不同 thread 并行（`server.thread_parallel: false` 可退回全局串行）
 - 页面空闲超过 `server.thread_ttl`（默认 900s）自动回收；活跃会话上限 `server.max_threads`（默认 8，超限 429）
-- 管理：`GET /admin/threads`（列表）、`DELETE /admin/threads/{id}`（强杀，客户端下次同 id 请求自动重建）
+- 管理：`GET /admin/threads`（列表）、`GET /admin/threads/{id}/messages`（历史消息）、`DELETE /admin/threads/{id}`（强杀并删除历史，客户端下次同 id 请求自动重建）
+- Playground（`/ui/playground.html`）左侧会话列表来自该库：点会话即从 `GET /admin/threads/{id}/messages` 回填历史；列表为**手动刷新**（不再定时轮询）；输入框回车在输入法（IME）组词时不会误发送
 - 同一 thread 切换 model 会报 409（创建时绑定 provider+model）
 - 页面忙（上一请求未完成，新消息被 Web 端排队）→ 20s 内返回 409 `thread_busy` 并销毁会话（配置 `thread_busy_timeout`），客户端稍后重试即自动重建；上一请求未释放（客户端中断）→ 60s 内返回 504 `thread_timeout` 并销毁。请求均**有界**，不会无限挂起
-- **跨重启持久化**（`server.thread_persist: true`，默认开）：每次请求完成后，服务端把绑定页的 DeepSeek 会话 id（URL 末段 `/a/chat/s/<uuid>`）落盘到 `profiles/<provider>/threads.json`。服务重启后，同 `thread_id` 的请求会自动 `goto` 该会话 URL 恢复——**多轮记忆跨重启保持**（DeepSeek 不删用户会话）。TTL 空闲回收/服务关闭**保留**恢复能力；`DELETE /admin/threads/{id}`、页面失效/超时/忙错误**清除**（下次同 id 开全新会话）。恢复时切换 model 同样 409
+- **跨重启持久化**（`server.thread_persist: true`，默认开）：会话元数据与消息历史统一落盘到 SQLite（`profiles/threads.db`）——每次请求完成后写入本轮 user/assistant（含思考），并记录绑定页的 DeepSeek 会话 id（URL 末段 `/a/chat/s/<uuid>`）。服务重启后，同 `thread_id` 的请求会自动 `goto` 该会话 URL 恢复——**多轮记忆跨重启保持**（DeepSeek 不删用户会话）。TTL 空闲回收/服务关闭**保留**；`DELETE /admin/threads/{id}`、页面失效/超时/忙错误**删除**（含历史，下次同 id 开全新会话）。恢复时切换 model 同样 409。旧版 `profiles/<provider>/threads.json` 在启动时自动迁移进库并删除
 
 ### 2.6 Web 端选项：模式 + 开关（provider 通用）
 
@@ -288,8 +289,9 @@ providers:                 # 也支持 list 写法
 | POST | `/admin/{p}/login/logout` | 清除登录态 |
 | GET | `/admin/{p}/debug/dom?selector=…` | 调试：返回页面元素 HTML（排查选择器失效） |
 | POST | `/admin/{p}/debug/probe` | 调试：发测试消息并 dump 响应区 DOM（确定新 UI 容器选择器） |
-| GET | `/admin/threads` | 会话绑定：活跃会话列表 |
-| DELETE | `/admin/threads/{id}` | 会话绑定：强杀会话（同 id 下次请求自动重建） |
+| GET | `/admin/threads` | 会话绑定：会话列表（活跃 + 已落库） |
+| GET | `/admin/threads/{id}/messages` | 会话绑定：历史消息（user/assistant + 思考） |
+| DELETE | `/admin/threads/{id}` | 会话绑定：强杀会话并删除历史（同 id 下次请求自动重建） |
 
 ### 自动登录（login.mode=auto）
 
