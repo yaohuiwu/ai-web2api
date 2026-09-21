@@ -22,9 +22,9 @@ def test_chatgpt_driver_registered():
 def test_chatgpt_session_url_pattern():
     m = re.search(
         ChatGPTProvider.session_url_pattern or "",
-        "https://chatgpt.com/c/6710abcd-1234-4abc-9def-0123456789ab",
+        "https://chatgpt.com/c/WEB:8d21d588-1b2c-4052-9a1b-d3c47ab6434c",
     )
-    assert m and m.group(1) == "6710abcd-1234-4abc-9def-0123456789ab"
+    assert m and m.group(1) == "WEB:8d21d588-1b2c-4052-9a1b-d3c47ab6434c"
 
 
 def test_chatgpt_config_valid():
@@ -42,6 +42,6 @@ def test_chatgpt_config_valid():
     assert c.selectors.stop_button and "stop-button" in c.selectors.stop_button[0]
     assert c.selectors.response_container
     assert c.selectors.model_menu.trigger
-    assert c.selectors.attachment_menu.file_input == ["input[type=\"file\"]"]
+    assert "#upload-files" in c.selectors.attachment_menu.file_input
     # 模型对外名统一 -web 后缀
     assert c.models and all(m.name.endswith("-web") for m in c.models)

@@ -23,5 +23,5 @@ class ChatGPTProvider(WebChatProvider):
     """chatgpt.com 驱动。"""
 
     name = "chatgpt"
-    # 会话 URL: chatgpt.com/c/<uuid>
-    session_url_pattern = r"/c/([0-9a-fA-F-]{8,})"
+    # 会话 URL: chatgpt.com/c/<uuid>（新 UI 常见 `WEB:<uuid>` 前缀）
+    session_url_pattern = r"/c/([0-9A-Za-z:_-]{8,})"

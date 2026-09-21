@@ -208,8 +208,8 @@ providers:
         - '[data-message-author-role="assistant"] .markdown'
       thinking_container: []    # o 系列思考结构待实测
       login_check:              # 登录后才有的账号入口
-        - '[data-testid="profile-button"]'
-        - 'button[aria-label*="Account"]'
+        - '[data-testid="accounts-profile-button"]'
+        - '[aria-label="Open profile menu"]'
       new_chat_button:
         - 'a[data-testid="create-new-chat-button"]'
         - '[aria-label="New chat"]'
@@ -223,7 +223,7 @@ providers:
         item:
           - '[role="menuitem"]:has-text("Add photos & files")'
           - '[role="menuitem"]:has-text("Upload")'
-        file_input: ['input[type="file"]']
+        file_input: ['#upload-files', 'input[type="file"]']
     login:
       mode: manual
       hint: "ChatGPT 无密码登录；请用 python -m ai_web2api.cli login chatgpt 或 /ui 导入 state"
