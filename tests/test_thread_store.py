@@ -125,3 +125,38 @@ def test_migrate_does_not_overwrite_existing(tmp_path: Path):
     assert got is not None
     assert got["url_id"] == "new-url"
     assert got["title"] == "db-标题"
+
+
+def test_messages_attachments_roundtrip(tmp_path: Path):
+    st = _store(tmp_path)
+    st.upsert_thread("t1", "deepseek", title="t")
+    atts = [{"type": "image", "mime": "image/png", "name": "a.png", "data": "AAA"}]
+    st.append_messages("t1", [("user", "看图", None, atts), ("assistant", "好的", None)])
+    msgs = st.get_messages("t1")
+    assert msgs[0]["attachments"] == atts
+    assert msgs[1]["attachments"] is None
+
+
+def test_migrate_adds_attachments_column(tmp_path: Path):
+    import sqlite3
+
+    db = tmp_path / "threads.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE threads (thread_id TEXT PRIMARY KEY, provider TEXT NOT NULL, model TEXT,"
+        " title TEXT, url_id TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL)"
+    )
+    conn.execute(
+        "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL,"
+        " role TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', reasoning TEXT, created_at REAL NOT NULL)"
+    )
+    conn.execute("INSERT INTO threads VALUES ('t1','deepseek',NULL,NULL,NULL,0,0)")
+    conn.execute("INSERT INTO messages (thread_id, role, content, created_at) VALUES ('t1','user','old',0)")
+    conn.commit()
+    conn.close()
+
+    st = ThreadStore(db)  # 打开时自动补 attachments 列
+    assert st.get_messages("t1")[0]["content"] == "old"
+    assert st.get_messages("t1")[0]["attachments"] is None
+    st.append_messages("t1", [("user", "新", None, [{"name": "x"}])])
+    assert st.get_messages("t1")[1]["attachments"] == [{"name": "x"}]

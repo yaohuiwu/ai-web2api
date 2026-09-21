@@ -185,14 +185,22 @@ class BaseProvider(abc.ABC):
             # 等加载遮罩消失：否则 #splash-screen 会拦截后续点击（Qwen 实测）
             await self._wait_loading_gone(page, lp)
 
-            # 若默认是验证码 tab，先切到"密码登录"
-            tab_sel = await first_match(page, lp.password_tab)
-            if tab_sel is not None:
-                await page.locator(tab_sel).first.click()
-                await page.wait_for_timeout(800)
+            # 默认可能是“验证码登录”tab → 切到“密码登录”（Qwen 实测）：
+            # 点一次后等密码框；没出来就再点一次（点击可能被重渲染吞掉）。
+            for _ in range(2):
+                if await first_match(page, lp.password) is not None:
+                    break
+                tab_sel = await first_match(page, lp.password_tab)
+                if tab_sel is None:
+                    break
+                try:
+                    await page.locator(tab_sel).first.click()
+                except Exception:  # noqa: BLE001
+                    pass
+                await wait_first_match(page, lp.password, timeout=6.0)
 
-            user_sel = await wait_first_match(page, lp.username, timeout=5.0)
-            pwd_sel = await wait_first_match(page, lp.password, timeout=5.0)
+            user_sel = await wait_first_match(page, lp.username, timeout=8.0)
+            pwd_sel = await wait_first_match(page, lp.password, timeout=8.0)
             if user_sel is None or pwd_sel is None:
                 return await self._login_fail(
                     page, f"登录页输入框未匹配（user={user_sel}, pwd={pwd_sel}）"

@@ -138,6 +138,21 @@ async def _stream_fc(
     yield "data: [DONE]\n\n"
 
 
+def _history_attachments(atts: list[dict] | None) -> list[dict] | None:
+    """附件→历史存储形态（data 过大时只留元信息，避免 DB 膨胀）。"""
+    if not atts:
+        return None
+    out = []
+    for a in atts:
+        item = {"type": a.get("type", "image"), "mime": a.get("mime"), "name": a.get("name")}
+        if a.get("url"):
+            item["url"] = a["url"]
+        elif a.get("data") and len(a["data"]) <= 2_000_000:
+            item["data"] = a["data"]
+        out.append(item)
+    return out or None
+
+
 def create_router(registry: ProviderRegistry, threads: ThreadManager | None = None) -> APIRouter:
     router = APIRouter()
     thread_parallel = threads is not None and registry.config.server.thread_parallel
@@ -214,7 +229,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                         )
                     await tm.persist(thread_id)
                     await tm.save_turn(
-                        thread_id, provider.name, resolved, user_text, content, thinking
+                        thread_id, provider.name, resolved, user_text, content, thinking,
+                        _history_attachments(attachments),
                     )
                 except asyncio.TimeoutError:
                     await tm.close(thread_id)
@@ -265,6 +281,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                             user_text,
                             "".join(content_parts),
                             "".join(thinking_parts) or None,
+                            _history_attachments(attachments),
                         )
                     finally:
                         session.lock.release()
@@ -284,7 +301,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 await tm.persist(thread_id)  # 正常完成 → 落盘会话 URL id（重启可恢复）
                 # 历史入库（best-effort）
                 await tm.save_turn(
-                    thread_id, provider.name, resolved, user_text, content, thinking
+                    thread_id, provider.name, resolved, user_text, content, thinking,
+                    _history_attachments(attachments),
                 )
             except asyncio.TimeoutError:
                 await tm.close(thread_id)  # 销毁：页面关闭强制打断挂起的 Playwright 调用

@@ -64,6 +64,7 @@ class AttachmentMenuConfig(BaseModel):
     """
 
     trigger: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
+    item: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 需先点菜单项才弹文件选择器（如 Qwen「上传附件」）
     file_input: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
     preview: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
 

@@ -44,7 +44,10 @@ def test_qwen_config_valid():
     # 实测校准后的选择器
     assert "button.send-button" in q.selectors.send_button
     assert ".response-message-content.phase-answer" in q.selectors.response_container
-    assert q.selectors.login_check == ["text=新建对话"]
+    assert ".user-profile-desktop" in q.selectors.login_check  # 侧栏收起时也能判定登录
+    assert q.selectors.attachment_menu.trigger == [".mode-select-open"]
+    assert q.selectors.attachment_menu.item  # “上传附件”菜单项 → 文件选择器
+    assert q.selectors.attachment_menu.preview == [".file-card-list"]
     assert q.thread_busy_timeout == 0  # 关闭忙检测（DOM 首帧可能 >20s）
     # 模型对外名统一 -web 后缀
     assert q.models and all(m.name.endswith("-web") for m in q.models)

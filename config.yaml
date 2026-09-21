@@ -132,7 +132,8 @@ providers:
       thinking_container:           # 实测：思考状态卡（内容为“已经完成思考”，非全文）
         - ".qwen-chat-thinking-status-card-content"
       stop_button: []
-      login_check:                  # 登录后才有的“新建对话”
+      login_check:                  # 登录后才有（侧栏可能收起，用账号头像更稳）
+        - ".user-profile-desktop"
         - "text=新建对话"
       new_chat_button:
         - "text=新建对话"
@@ -147,8 +148,13 @@ providers:
           - '.qwen-chat-v2-dropdown-menu-item:has-text("{label}")'
         current: [".qwen-thinking-selector .qwen-chat-v2-dropdown-menu-select-label"]
         labels: {auto: "自动", thinking: "思考", fast: "快速"}
-      attachment_menu:
-        file_input: ["input#filesUpload"]
+      attachment_menu:              # “+” → “上传附件” 菜单项 → 系统文件选择器
+        trigger: [".mode-select-open"]
+        item:
+          - '.qwen-chat-v2-dropdown-menu-item:has-text("上传附件")'
+          - 'text=上传附件'
+        file_input: ["input#filesUpload"]   # 兑底（部分场景可直接 set）
+        preview: [".file-card-list"]       # 上传完成的判定
     login:
       mode: auto
       url: https://chat.qwen.ai/auth

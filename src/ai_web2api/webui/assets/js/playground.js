@@ -506,10 +506,20 @@ function refreshThreads() {
     .catch(() => {});
 }
 
+function historyAtts(m) {
+  return (m.attachments || [])
+    .map((a) => ({
+      name: a.name || "image",
+      mime: a.mime || "",
+      dataUrl: a.data ? `data:${a.mime || "application/octet-stream"};base64,${a.data}` : (a.url || ""),
+    }))
+    .filter((a) => a.dataUrl);
+}
+
 function renderHistory(msgs) {
   for (const m of msgs) {
     if (m.role === "user") {
-      addMsg("user", m.content || "");
+      addMsg("user", m.content || "", { attachments: historyAtts(m) });
     } else {
       addMsg("assistant", m.content || "（空回复）", { thinking: m.reasoning || "" });
     }

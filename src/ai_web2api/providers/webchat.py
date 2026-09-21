@@ -406,9 +406,11 @@ class WebChatProvider(BaseProvider):
     async def _upload_attachments(self, page: Page, attachments: list[dict] | None) -> None:
         """发送前把请求附件上传到输入框。
 
-        - data URL → base64 解码写临时文件；http(s) URL → 下载后上传
-        - 上传入口：``selectors.upload_input``（默认 ``input[type=file]``），找不到 → 400
-        - 上传完成后等预览出现（``ATTACH_PREVIEW_EXCLUDE`` 用于排除消息区旧图）
+        两种上传方式（配置决定）：
+        - ``attachment_menu.trigger`` + ``attachment_menu.item``：点开菜单 → 点菜单项 →
+          弹出系统文件选择器（``expect_file_chooser``）→ 设文件（如 Qwen「上传附件」）。
+        - 否则：定位文件 input（``attachment_menu.file_input`` / ``upload_input``）后 ``set_input_files``。
+        完成后等预览出现（``attachment_menu.preview`` 或通用 blob 图）。
         """
         if not attachments:
             return
@@ -418,65 +420,96 @@ class WebChatProvider(BaseProvider):
                 provider=self.name,
             )
         menu = self.cfg.selectors.attachment_menu
-        # 文件 input 候选：attachment_menu.file_input 优先，其次 upload_input
-        file_cands = menu.file_input or self.cfg.selectors.upload_input or ["input[type=file]"]
-        # 可选：先点开“+”菜单（有些站点展开后才渲染 input）
-        if menu.trigger:
-            trg = await extractor.first_match(page, menu.trigger)
-            if trg is not None:
-                try:
-                    await page.locator(trg).first.click()
-                    await page.wait_for_timeout(300)
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("[%s] attachment menu trigger click failed: %s", self.name, e)
-        sel = await extractor.wait_first_match(page, file_cands, timeout=self.ATTACH_INPUT_TIMEOUT)
-        if sel is None:
-            raise AttachmentError(
-                f'provider "{self.name}" 当前页面未找到附件上传入口'
-                "（attachment_menu.file_input / upload_input 均未匹配，检查配置或页面是否已改版）",
-                provider=self.name,
-            )
-        paths: list[str] = []
-        tmpdir: str | None = None
+        paths, tmpdir = await self._materialize_attachments(attachments)
         try:
-            import base64
-            import uuid
-
-            for att in attachments:
-                name = att.get("name", "image")
-                data = att.get("data")
-                if data:
+            # 可选：先点开菜单（如 Qwen 的 “+”/选择模式）
+            if menu.trigger:
+                trg = await extractor.first_match(page, menu.trigger)
+                if trg is not None:
                     try:
-                        raw = base64.b64decode(data)
-                    except Exception:
-                        raise AttachmentError(f"附件 {name} base64 解码失败", provider=self.name)
-                elif att.get("url"):
-                    raw = await asyncio.to_thread(self._download_attachment, att["url"])
-                else:
-                    raise AttachmentError(f"附件 {name} 缺少 data/url", provider=self.name)
-                if len(raw) > self.MAX_ATTACH_BYTES:
+                        await page.locator(trg).first.click()
+                        await page.wait_for_timeout(400)
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("[%s] attachment menu trigger click failed: %s", self.name, e)
+            if menu.item:
+                # 菜单项 → 系统文件选择器
+                item = await extractor.wait_first_match(
+                    page, menu.item, timeout=self.ATTACH_INPUT_TIMEOUT
+                )
+                if item is None:
                     raise AttachmentError(
-                        f"附件 {name} 超过上限 {self.MAX_ATTACH_BYTES // (1024 * 1024)}MB",
+                        f'provider "{self.name}" 附件菜单项未找到（attachment_menu.item 均未匹配）',
                         provider=self.name,
                     )
-                if tmpdir is None:
-                    tmpdir = os.path.join(
-                        tempfile.gettempdir(), f"aiw2a_{uuid.uuid4().hex[:8]}"
+                try:
+                    async with page.expect_file_chooser(timeout=10000) as fc:
+                        await page.locator(item).first.click()
+                    chooser = await fc.value
+                    await chooser.set_files(paths)
+                except Exception as e:  # noqa: BLE001
+                    raise AttachmentError(
+                        f'provider "{self.name}" 附件文件选择器未弹出：{e}', provider=self.name
+                    ) from None
+                logger.info(
+                    "[%s] upload %d attachment(s) via menu item %s", self.name, len(paths), item
+                )
+            else:
+                file_cands = (
+                    menu.file_input or self.cfg.selectors.upload_input or ["input[type=file]"]
+                )
+                sel = await extractor.wait_first_match(
+                    page, file_cands, timeout=self.ATTACH_INPUT_TIMEOUT
+                )
+                if sel is None:
+                    raise AttachmentError(
+                        f'provider "{self.name}" 当前页面未找到附件上传入口'
+                        "（attachment_menu.file_input / upload_input 均未匹配，检查配置或页面是否已改版）",
+                        provider=self.name,
                     )
-                    os.makedirs(tmpdir, exist_ok=True)
-                safe_name = os.path.basename(name) or "image"  # 防路径穿越
-                path = os.path.join(tmpdir, safe_name)
-                with open(path, "wb") as f:
-                    f.write(raw)
-                paths.append(path)
-            logger.info("[%s] upload %d attachment(s) via %s", self.name, len(paths), sel)
-            await page.locator(sel).first.set_input_files(paths)
+                logger.info("[%s] upload %d attachment(s) via %s", self.name, len(paths), sel)
+                await page.locator(sel).first.set_input_files(paths)
             await self._wait_attachment_ready(page, len(paths))
         finally:
             import shutil
 
             if tmpdir:
                 shutil.rmtree(tmpdir, ignore_errors=True)
+
+    async def _materialize_attachments(
+        self, attachments: list[dict]
+    ) -> tuple[list[str], str | None]:
+        """附件 → 临时文件路径（data URL 解码 / http(s) 下载）。"""
+        import base64
+        import uuid
+
+        paths: list[str] = []
+        tmpdir: str | None = None
+        for att in attachments:
+            name = att.get("name", "image")
+            data = att.get("data")
+            if data:
+                try:
+                    raw = base64.b64decode(data)
+                except Exception:
+                    raise AttachmentError(f"附件 {name} base64 解码失败", provider=self.name)
+            elif att.get("url"):
+                raw = await asyncio.to_thread(self._download_attachment, att["url"])
+            else:
+                raise AttachmentError(f"附件 {name} 缺少 data/url", provider=self.name)
+            if len(raw) > self.MAX_ATTACH_BYTES:
+                raise AttachmentError(
+                    f"附件 {name} 超过上限 {self.MAX_ATTACH_BYTES // (1024 * 1024)}MB",
+                    provider=self.name,
+                )
+            if tmpdir is None:
+                tmpdir = os.path.join(tempfile.gettempdir(), f"aiw2a_{uuid.uuid4().hex[:8]}")
+                os.makedirs(tmpdir, exist_ok=True)
+            safe_name = os.path.basename(name) or "image"  # 防路径穿越
+            path = os.path.join(tmpdir, safe_name)
+            with open(path, "wb") as f:
+                f.write(raw)
+            paths.append(path)
+        return paths, tmpdir
 
     async def _wait_attachment_ready(self, page: Page, expected: int) -> None:
         """等输入框上方出现 ``expected`` 个预览。

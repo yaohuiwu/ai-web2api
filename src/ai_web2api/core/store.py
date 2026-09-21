@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS messages (
     role       TEXT NOT NULL,
     content    TEXT NOT NULL DEFAULT '',
     reasoning  TEXT,
+    attachments TEXT,
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, id);
@@ -60,8 +61,16 @@ class ThreadStore:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(_SCHEMA)
+            self._migrate()
             self._conn.commit()
         logger.info("thread store ready: %s", self._path)
+
+    def _migrate(self) -> None:
+        """轻量迁移：给旧库的 messages 表补 attachments 列。"""
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(messages)")}
+        if "attachments" not in cols:
+            self._conn.execute("ALTER TABLE messages ADD COLUMN attachments TEXT")
+            logger.info("thread store migrated: messages.attachments added")
 
     # ---------- 生命周期 ----------
 
@@ -137,37 +146,59 @@ class ThreadStore:
     def append_messages(
         self,
         thread_id: str,
-        entries: list[tuple[str, str, str | None]],
+        entries: list[tuple],
     ) -> int:
-        """追加消息：``entries`` = [(role, content, reasoning), ...]。
+        """追加消息。``entries`` 每项为 ``(role, content, reasoning)`` 或
+        ``(role, content, reasoning, attachments)``；``attachments`` 为可 JSON 序列化的列表。
 
         ``threads`` 行须已存在（``upsert_thread``），否则外键约束报错。
         """
         if not entries:
             return 0
         now = time.time()
-        rows = [
-            (thread_id, role, content or "", reasoning, now)
-            for role, content, reasoning in entries
-        ]
+        rows = []
+        for e in entries:
+            role, content, reasoning = e[0], e[1], e[2]
+            atts = e[3] if len(e) > 3 else None
+            rows.append(
+                (
+                    thread_id,
+                    role,
+                    content or "",
+                    reasoning,
+                    json.dumps(atts, ensure_ascii=False) if atts else None,
+                    now,
+                )
+            )
         with self._lock:
             self._conn.executemany(
-                "INSERT INTO messages (thread_id, role, content, reasoning, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO messages (thread_id, role, content, reasoning, attachments, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 rows,
             )
             self._conn.commit()
         return len(rows)
 
     def get_messages(self, thread_id: str) -> list[dict]:
-        """按写入顺序（自增 id 升序）返回某会话的全部消息。"""
+        """按写入顺序（自增 id 升序）返回某会话的全部消息（含附件）。"""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT role, content, reasoning, created_at FROM messages "
+                "SELECT role, content, reasoning, attachments, created_at FROM messages "
                 "WHERE thread_id = ? ORDER BY id",
                 (thread_id,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        out: list[dict] = []
+        for r in rows:
+            d = dict(r)
+            if d.get("attachments"):
+                try:
+                    d["attachments"] = json.loads(d["attachments"])
+                except Exception:  # noqa: BLE001
+                    d["attachments"] = None
+            else:
+                d["attachments"] = None
+            out.append(d)
+        return out
 
     # ---------- 迁移 ----------
 

@@ -337,10 +337,11 @@ class ThreadManager:
         user_text: str,
         assistant_text: str,
         reasoning: str | None = None,
+        attachments: list | None = None,
     ) -> None:
         """把一轮对话（user + assistant）写入历史。
 
-        在请求正常完成后调用；写入前确保会话行存在（``title`` 保留，不覆盖）。
+        在请求正常完成后调用；``attachments`` 为本轮 user 消息的附件（可选，供回放）。
         受 ``server.thread_persist`` 开关控制。
         """
         if not self._persist:
@@ -351,7 +352,7 @@ class ThreadManager:
             self._store.append_messages(
                 thread_id,
                 [
-                    ("user", user_text or "", None),
+                    ("user", user_text or "", None, attachments),
                     ("assistant", assistant_text or "", reasoning),
                 ],
             )
