@@ -1,6 +1,6 @@
 # Function Calling（工具调用）接入设计 + 分步实现计划
 
-> 状态：**设计，待 review/批准**。批准后再改代码。
+> 状态：**已实现**（Step 1–9 均已落地并验证）。
 > 参考：`docs/REFERENCE_token-free-gateway.md`（其实现思路）。
 > 相关：`docs/DESIGN.md`。
 
@@ -189,18 +189,32 @@ POST /v1/chat/completions {messages, tools, tool_choice}
 
 ## 10. 分步实现计划（每步一提交、可验证、不破坏现有行为）
 
-- **Step 1 — schema/类型**：请求 `tools`/`tool_choice`、`role=tool`、响应 `tool_calls`/`finish_reason`、SSE delta；
-  `normalize_message` 保留工具字段。加 schema 单测。（提交）
-- **Step 2 — `tool_calling/parser.py`**（移植 + 单测）。（提交）
-- **Step 3 — `tool_calling/prompt.py` + `converter.py`**（移植 + 单测）。（提交）
-- **Step 4 — 非流式路由接入**：`prompt_override` 直发通道；`needs_fc` 判定；响应解析为 `tool_calls`。（提交）
-- **Step 5 — 流式路由接入**：带工具时缓冲正文 → 发 `tool_calls` delta。（提交）
-- **Step 6 — thread resume / 工具结果注入**（`build_resume_prompt`）。（提交）
-- **Step 7 — 集成测试（stub provider / 假页）+ 文档更新（README、DESIGN）**。（提交）
-- **Step 8 — Playground：工具调用可视化**：`tools` JSON 输入 + `tool_choice` + 渲染 `tool_calls`（含流式 delta 组装）。（提交）
-- **Step 9 — Playground：mock 工具自动执行闭环**：本地“执行”mock 工具 → 追加 `role=tool` 结果 → 自动再请求 → 显示最终回答（带轮次上限）。（提交）
+- [x] **Step 1 — schema/类型**：`d3541dc`
+- [x] **Step 2 — `tool_calling/parser.py` + 单测**：`c34531e`
+- [x] **Step 3 — `tool_calling/prompt.py` + `converter.py` + 单测**：`4d78bd8`
+- [x] **Step 4/5 — 路由接入（非流式 + 流式缓冲）**：`cbf1407`
+- [x] **Step 6 — thread resume / 工具结果注入**：`e7d4432`
+- [x] **Step 7 — 文档（README / DESIGN）**：`5da344d`
+- [x] **Step 8/9 — Playground 工具测试 UI + mock 自动执行闭环**：`f29d479`
 
-每步都跑：快速套件（默认）；Step 4–7 视情况跑一次 `-m slow`。
+### 实现位置
+
+| 关注点 | 文件 |
+|--------|------|
+| 请求/响应 schema（`tools`/`tool_choice`/`tool_calls`/`finish_reason`） | `api/schemas.py` |
+| 多格式解析 | `tool_calling/parser.py` |
+| 工具说明注入 | `tool_calling/prompt.py` |
+| tool_choice / 消息转录 / 响应解析 | `tool_calling/converter.py` |
+| 路由编排（`prompt_override`、`tool_calls` 响应、流式） | `api/routes.py`、`providers/base.py`、`providers/webchat.py` |
+| 总开关 | `server.function_calling`（`config.py`） |
+| 单测 | `tests/test_fc_schema.py`、`test_fc_parser.py`、`test_fc_converter.py`、`test_fc_routes.py` |
+| Playground | `webui/playground.html`、`assets/js/playground.js`、`assets/css/playground.css` |
+
+### 实测
+
+- 快速套件 **138 passed**；路由集成测试（stub provider）覆盖非流式/流式/工具结果回合/开关关闭。
+- **Playground 闭环 e2e**：工具调用卡 → mock 工具结果 → 最终回答，无 JS 报错。
+- **真实 DeepSeek**：`finish_reason=tool_calls`、`content=null`、`tool_calls[0].function.name=get_weather`、`arguments={"city":"东京"}`。
 
 ---
 
@@ -223,7 +237,7 @@ POST /v1/chat/completions {messages, tools, tool_choice}
 | 4 | 加 `server.function_calling` 全局总开关（默认 `true`；关掉=忽略 tools，用于防/避风控） ✅ |
 | 5 | 本次只在 DeepSeek 上验证（Qwen 同源） ✅ |
 
-批准后从 **Step 1** 开始实现。
+以上决策均已按方案实现（见 §10）。
 
 ---
 

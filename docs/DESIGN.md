@@ -234,7 +234,8 @@ textbox.fill(最终消息)  →  press Enter
 
 | 事项 | 现状 | 后续 |
 |------|------|------|
-| 多轮对话 | 无状态（每请求新对话） | 可按 `messages` 拼接完整对话文本 |
+| 多轮对话 | 无状态，或 `thread_id` 绑定复用同一页面 | — |
+| Function Calling | prompt 注入 + 输出解析（`tools`/`tool_choice`/流式/Playground 可测） | 依赖模型守格式（非 schema 强约束） |
 | 深度思考/搜索 | 可选参数映射 | 在请求扩展字段中透传 |
 | 速率限制 | 依赖网页端自身限流 | 可加 per-provider 队列 |
 | usage 统计 | 估算/空 | 通过 tokenizer 估算 |

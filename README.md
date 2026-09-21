@@ -399,9 +399,11 @@ curl http://127.0.0.1:8000/admin/deepseek/login/status         # 确认 logged_i
   `Application shutdown failed`；登录态早已按需落盘，不影响下次启动
 - 账号风控风险：请自用，控制频率
 - llama_index.llms.openai 兼容：role 支持 `developer`/`tool`/`function`（`developer` 自动映射为
-  `system`），`content` 支持多部分列表（提取 text 部分），`tool_calls` 等字段自动忽略；
+  `system`），`content` 支持多部分列表（提取 text 部分），并支持工具消息（`tool_calls`/`tool_call_id`）；
   注意 llama_index 客户端对非官方 OpenAI 模型名有校验与 tokenizer 限制（传 `max_tokens`
   可跳过 tokenizer 计数，老版本则无此问题）
+- Function Calling 是 **prompt 注入** 实现（见 2.8）：依赖模型按约定格式输出，偶发不守格式时会**当普通文本**返回；
+  带 `tools` 的流式请求是“先缓冲后发”；可用 `server.function_calling: false` 整体关闭
 
 ## 项目结构
 
@@ -411,8 +413,9 @@ src/ai_web2api/
 ├── config.py          # YAML → Pydantic 校验（兼容 list/dict 两种 provider 写法）
 ├── api/               # OpenAI 兼容路由、schema、SSE
 ├── browser/           # 浏览器管理（单实例多 Context + storage_state 持久化）、DOM→Markdown 提取
-├── providers/         # 驱动基类 + DeepSeek 实现 + 注册表
+├── providers/         # 驱动基类（WebChatProvider 通用引擎）+ DeepSeek/Qwen 实现 + 注册表
 ├── core/              # SerialGate、错误类型、ThreadManager、SQLite 历史（store.py）
+├── tool_calling/      # Function Calling：prompt 注入 / 输出解析 / 消息转录
 └── webui/             # 状态面板 + Playground，HTML/CSS/JS 已分离
     ├── index.html / playground.html    # 只留结构，引用下方 assets
     └── assets/{css,js}/                # base + 各页面 css/js；common.js 为公共工具
