@@ -140,11 +140,21 @@ providers:
 `/backend-api/f/conversation`（真正的对话接口）→ 页面能开、历史可见，但**生成失败**
 （页面显示 "Something went wrong while generating the response."）。
 
-**结论**：headless 自动化被 ChatGPT 反爬拦截（比 Cloudflare 更强一层）。**Docker headless 下当前不可用**。
+**结论（已实测确认）**：ChatGPT Sentinel **拦 headless、放行 headful**：
 
-### 可选解法（待定）
-- **A. 有头运行**：服务以有头启动（宿主 non-docker，或容器内 Xvfb+VNC）→ Sentinel 可能放行。
-- **B. CDP 连本机真实 Chrome**（参考 token-free-gateway）：最稳，但改造较大。
-- **C. 暂缓**：保留 provider 骨架，不启用。
+| 模式 | `/f/conversation` 403 | 结果 |
+|------|----------------------|------|
+| headless（宿主/容器） | 2 | 「Something went wrong」 |
+| **headed**（宿主） | **0** | ✅ `assistant='Pong 🏓'` |
 
-模型切换入口在当前 UI 未找到可靠选择器（`model_menu` 暂无匹配，`_apply_model` 会静默跳过）——若走 A/B 再补。
+→ **chatgpt 必须跑在 headed**。
+
+### 落地方式
+- **本地 non-docker**：`WEB2API_HEADLESS=false` 即可（直接有头）。
+- **Docker（推荐解法）**：镜像加 **Xvfb** 并以其为 DISPLAY 启动 **headful** Chromium（`headless=false`）。
+  - Sentinel 探测的是 headless 特征（无 window/screen/WebGL 等），**Xvfb 下的 headful 有真实窗口/屏幕属性 → 能过**；
+  - **不需要 VNC**（我们已经有 CLI/UI 导入登录态）。只需 Dockerfile 加 `xvfb` + 启动脚本 `Xvfb :99` 并设 `DISPLAY=:99`、`browser.headless=false`。
+
+> 注意：本项目是**单浏览器实例 + 全局 headless 开关**，所以开了有头就是所有 provider 都有头（Xvfb 下无窗口、无影响，且对其他站点反而更不易被风控）。
+
+模型切换入口当前 UI 未找到可靠选择器（`model_menu` 暂不生效，`_apply_model` 会静默跳过）——后续可再校。
