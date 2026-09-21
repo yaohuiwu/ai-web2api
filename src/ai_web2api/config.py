@@ -73,6 +73,8 @@ class SelectorsConfig(BaseModel):
     # 每个字段都是"候选列表"：按顺序取第一个在页面上匹配的选择器（UI 改版容错）
     input: Annotated[list[str], BeforeValidator(_norm_selectors)] = ["textarea#chat-input"]
     send_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 空 = 用回车发送
+    # 输入框是 contenteditable / React（如 ChatGPT）时用逐字输入——fill() 可能不生效
+    type_prompt: bool = False
     response_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = [".ds-markdown"]
     thinking_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
     stop_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 填了可加快"生成结束"判定

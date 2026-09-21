@@ -579,8 +579,14 @@ class WebChatProvider(BaseProvider):
         input_el = page.locator(input_sel).first
         logger.info("[%s] send: click input", self.name)
         await input_el.click()
-        logger.info("[%s] send: fill", self.name)
-        await input_el.fill(prompt)
+        if cfg.selectors.type_prompt:
+            # contenteditable / React 输入框：逐字输入（fill 可能不触发框架状态）
+            logger.info("[%s] send: type", self.name)
+            await input_el.fill("")
+            await input_el.press_sequentially(prompt, delay=15)
+        else:
+            logger.info("[%s] send: fill", self.name)
+            await input_el.fill(prompt)
         await page.wait_for_timeout(250)  # 等 UI 启用发送
         send_sel = await extractor.first_match(page, cfg.selectors.send_button)
         logger.info("[%s] send: button=%s", self.name, send_sel)

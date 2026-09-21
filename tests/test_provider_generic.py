@@ -122,3 +122,69 @@ async def test_auto_login_gives_up_after_retries():
     p.LOGIN_RETRY_DELAY = 0
     r = await p.auto_login()
     assert r["ok"] is False and p.calls == 3
+
+
+# ---- _send_prompt：type_prompt（contenteditable/React）vs fill ----
+
+class _Loc:
+    def __init__(self, page, sel):
+        self._page = page
+        self._sel = sel
+
+    @property
+    def first(self):
+        return self
+
+    async def count(self):
+        return 1 if self._sel in self._page.present else 0
+
+    async def click(self):
+        self._page.calls.append(("click", self._sel))
+
+    async def fill(self, t):
+        self._page.calls.append(("fill", t))
+
+    async def press_sequentially(self, t, delay=0):
+        self._page.calls.append(("type", t))
+
+
+class _Page:
+    def __init__(self, present=()):
+        self.present = set(present)
+        self.calls = []
+        self.keys = []
+
+    def locator(self, sel):
+        return _Loc(self, sel)
+
+    async def wait_for_timeout(self, ms):
+        return None
+
+    @property
+    def keyboard(self):
+        return self
+
+    async def press(self, k):
+        self.keys.append(k)
+
+
+@pytest.mark.asyncio
+async def test_send_prompt_type_mode():
+    cfg = ProviderConfig.model_validate(
+        {"name": "chatgpt", "url": "https://x", "models": [{"name": "m"}],
+         "selectors": {"input": ["#prompt-textarea"], "type_prompt": True, "send_button": []}}
+    )
+    p = WebChatProvider(cfg, _StubBrowser())
+    page = _Page(present={"#prompt-textarea"})
+    await p._send_prompt(page, "#prompt-textarea", "hello")
+    assert ("type", "hello") in page.calls
+    assert ("fill", "hello") not in page.calls
+    assert page.keys == ["Enter"]  # send_button 空 → 回车发送
+
+
+@pytest.mark.asyncio
+async def test_send_prompt_fill_mode_default():
+    p = _prov()  # 默认 type_prompt=False
+    page = _Page(present={"#prompt-textarea"})
+    await p._send_prompt(page, "#prompt-textarea", "hi")
+    assert ("fill", "hi") in page.calls and ("type", "hi") not in page.calls
