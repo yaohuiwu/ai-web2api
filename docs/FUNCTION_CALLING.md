@@ -197,6 +197,8 @@ POST /v1/chat/completions {messages, tools, tool_choice}
 - **Step 5 — 流式路由接入**：带工具时缓冲正文 → 发 `tool_calls` delta。（提交）
 - **Step 6 — thread resume / 工具结果注入**（`build_resume_prompt`）。（提交）
 - **Step 7 — 集成测试（stub provider / 假页）+ 文档更新（README、DESIGN）**。（提交）
+- **Step 8 — Playground：工具调用可视化**：`tools` JSON 输入 + `tool_choice` + 渲染 `tool_calls`（含流式 delta 组装）。（提交）
+- **Step 9 — Playground：mock 工具自动执行闭环**：本地“执行”mock 工具 → 追加 `role=tool` 结果 → 自动再请求 → 显示最终回答（带轮次上限）。（提交）
 
 每步都跑：快速套件（默认）；Step 4–7 视情况跑一次 `-m slow`。
 
@@ -222,3 +224,36 @@ POST /v1/chat/completions {messages, tools, tool_choice}
 | 5 | 本次只在 DeepSeek 上验证（Qwen 同源） ✅ |
 
 批准后从 **Step 1** 开始实现。
+
+---
+
+## 13. Playground 工具调用测试（端到端闭环）
+
+Playground 很适合做 FC 的"端到端自测"：它能扮演 OpenAI 客户端，本地“执行”工具，再回传结果。
+
+**UI（新增“工具”区块）**
+- `tools` JSON 文本框（预填示例，如 `get_weather`）；
+- `tool_choice` 下拉（auto / required / none）；
+- 开关“自动执行 mock 工具” + 内置 mock 注册表（如 `get_weather` 返回固定天气、`calc` 计算）。
+
+**发送**
+- 请求体带 `tools`（及 `tool_choice`）；走原有 `/v1/chat/completions`（stream 开/关都支持）。
+
+**渲染**
+- 非流式：`message.tool_calls` → 工具调用卡（函数名 + 参数 JSON）；
+- 流式：按 `delta.tool_calls[].index` 累积 `name`/`arguments`，结束后渲染同样的卡。
+
+**mock 自动执行闭环（核心）**
+1. 收到 `tool_calls` → 本地对每个 call 调用 mock 工具得到结果；
+2. 追加 `assistant(tool_calls)` 与 `tool(tool_call_id, result)` 到消息历史；
+3. 自动再发一次请求（仍带 `tools`）→ 显示最终回答；
+4. 循环上限（如 5 轮）防死循环；每步都在聊天区以“工具调用 / 工具结果 / 最终回答”卡片展示。
+
+**消息历史改造**
+- 现在 playground 只保存 user 文本；需升级为**保存完整 `messages`**（含 `assistant.tool_calls` 与 `tool` 结果），才能支持多轮工具往返。
+- 与 `thread_id` 共存：带工具也走 thread；工具结果回合的注入由后端 `build_resume_prompt` 处理。
+
+**验收**
+- 不传 tools：行为不变（逐字流）；
+- 传 tools 问“东京天气”：看到工具调用卡 → mock 结果 → 最终自然语言回答；
+- 流式与非流式都能显示 `tool_calls`。
