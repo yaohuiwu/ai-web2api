@@ -572,8 +572,23 @@ $("#clear").onclick = () => {
   history = [];
   $("#chat").innerHTML = `<div class="msg meta"><div class="bubble">已清空。${$("#threadId").value.trim() ? "（thread_id 仍保留，可继续原会话）" : ""}</div></div>`;
 };
-$("#input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+// IME（输入法）组词保护：中文/日文等组词时按回车是「选词上屏」，不应发送。
+// 部分 IME 确认候选词时 isComposing 已置 false → 再用 compositionend 时间戳兜底。
+const inputEl = $("#input");
+let composing = false;
+let composeEndedAt = 0;
+inputEl.addEventListener("compositionstart", () => { composing = true; });
+inputEl.addEventListener("compositionend", () => {
+  composing = false;
+  composeEndedAt = Date.now();
+});
+inputEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.shiftKey) return;
+  // 组词中（isComposing / keyCode 229 / composing）或刚结束组词 → 这次回车是选词
+  if (e.isComposing || e.keyCode === 229 || composing) return;
+  if (Date.now() - composeEndedAt < 80) return;
+  e.preventDefault();
+  send();
 });
 $("#threadId").addEventListener("change", () => { history = []; });
 $("#threadId").addEventListener("input", (e) => {
