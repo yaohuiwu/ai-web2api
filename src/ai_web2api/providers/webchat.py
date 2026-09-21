@@ -71,6 +71,7 @@ class WebChatProvider(BaseProvider):
     MAX_ATTACHMENTS: int | None = None
     MAX_ATTACH_BYTES: int = 100 * 1024 * 1024
     ATTACH_WAIT_SECONDS: float = 60.0
+    ATTACH_INPUT_TIMEOUT: float = 3.0  # 找文件 input 的等待上限（秒）
     ATTACH_PREVIEW_EXCLUDE: str = ""  # 预览计数时排除的容器（如消息区）
 
     # 下拉菜单 option 出现的等待上限（秒）
@@ -396,12 +397,23 @@ class WebChatProvider(BaseProvider):
                 f"附件数量 {len(attachments)} 超过上限 {self.MAX_ATTACHMENTS} 个",
                 provider=self.name,
             )
-        sels = self.cfg.selectors.upload_input or ["input[type=file]"]
-        sel = await extractor.first_match(page, sels)
+        menu = self.cfg.selectors.attachment_menu
+        # 文件 input 候选：attachment_menu.file_input 优先，其次 upload_input
+        file_cands = menu.file_input or self.cfg.selectors.upload_input or ["input[type=file]"]
+        # 可选：先点开“+”菜单（有些站点展开后才渲染 input）
+        if menu.trigger:
+            trg = await extractor.first_match(page, menu.trigger)
+            if trg is not None:
+                try:
+                    await page.locator(trg).first.click()
+                    await page.wait_for_timeout(300)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("[%s] attachment menu trigger click failed: %s", self.name, e)
+        sel = await extractor.wait_first_match(page, file_cands, timeout=self.ATTACH_INPUT_TIMEOUT)
         if sel is None:
             raise AttachmentError(
                 f'provider "{self.name}" 当前页面未找到附件上传入口'
-                "（upload_input 选择器均未匹配，检查配置或页面是否已改版）",
+                "（attachment_menu.file_input / upload_input 均未匹配，检查配置或页面是否已改版）",
                 provider=self.name,
             )
         paths: list[str] = []
@@ -447,7 +459,26 @@ class WebChatProvider(BaseProvider):
                 shutil.rmtree(tmpdir, ignore_errors=True)
 
     async def _wait_attachment_ready(self, page: Page, expected: int) -> None:
-        """等输入框上方出现 ``expected`` 个 blob 预览（排除消息区旧图）。"""
+        """等输入框上方出现 ``expected`` 个预览。
+
+        ``attachment_menu.preview`` 配了就用它计数；否则用通用 blob 图片计数
+        （排除 ``ATTACH_PREVIEW_EXCLUDE`` 容器里的旧图）。
+        """
+        preview = self.cfg.selectors.attachment_menu.preview
+        if preview:
+            deadline = time.monotonic() + self.ATTACH_WAIT_SECONDS
+            while time.monotonic() < deadline:
+                cnt = 0
+                for s in preview:
+                    try:
+                        cnt += await page.locator(s).count()
+                    except Exception:
+                        pass
+                if cnt >= expected:
+                    break
+                await page.wait_for_timeout(500)
+            await page.wait_for_timeout(800)
+            return
         ta = page.locator(
             self.cfg.selectors.input[0] if self.cfg.selectors.input else "textarea"
         ).first

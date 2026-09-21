@@ -55,10 +55,17 @@ class ModeMenuConfig(MenuConfig):
 
 
 class AttachmentMenuConfig(BaseModel):
-    """附件入口：可选先点 ``trigger`` 打开菜单，再 ``set_input_files(file_input)``。"""
+    """附件入口：可选先点 ``trigger`` 打开菜单，再 ``set_input_files(file_input)``。
+
+    - ``file_input``：文件 input（如 Qwen ``input#filesUpload``）；空则用
+      ``selectors.upload_input``。
+    - ``trigger``：需要先展开菜单才渲染 input 时配置；Qwen 的 input 已在 DOM，可留空。
+    - ``preview``：上传完成的判定选择器（空则用通用 blob 图片计数）。
+    """
 
     trigger: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
     file_input: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
+    preview: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
 
 
 class SelectorsConfig(BaseModel):
