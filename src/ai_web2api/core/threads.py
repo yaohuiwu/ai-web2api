@@ -3,20 +3,19 @@
 无状态模式每次请求开新 Tab；thread 模式把 Tab 常驻，续用时直接复用页面，
 模型靠页面自身历史保持上下文（"页面为准"，只发最后一条 user 消息）。
 
-thread 持久化：thread 绑定页的 provider 会话 id（如 DeepSeek 的
-``/a/chat/s/<uuid>``）落盘到 ``profiles/<provider>/threads.json``。
-服务重启后同 thread_id 请求可 ``goto`` 旧会话 URL 恢复——只要 DeepSeek
-不删用户会话，thread_id 不变就能在上次基础上继续生成。
-空闲回收（TTL）与服务关闭保留磁盘条目（页面关了但会话还在，可恢复）；
-显式销毁（DELETE / 页面失效 / 超时 / 忙）才删除。
+thread 持久化：会话元数据（provider 会话 id / model / 标题）与消息历史统一落盘到
+SQLite（``profiles/threads.db``，见 :mod:`ai_web2api.core.store`）。服务重启后
+同 thread_id 请求可 ``goto`` 旧会话 URL 恢复——只要 DeepSeek 不删用户会话，
+thread_id 不变就能在上次基础上继续生成。
+空闲回收（TTL）与服务关闭保留 DB 条目（页面关了但会话还在，可恢复）；
+显式销毁（DELETE / 页面失效 / 超时 / 忙）才删除（含历史消息）。
+旧的 ``profiles/<provider>/threads.json`` 启动时迁移进库并删除。
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
 import re
 import time
 from pathlib import Path
@@ -24,13 +23,13 @@ from typing import TYPE_CHECKING
 
 from ..browser import extractor
 from ..core.errors import QueueFullError, ThreadMismatchError
+from .store import ThreadStore
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
     from ..config import ServerConfig
     from ..providers.base import BaseProvider
-    from ..providers.registry import ProviderRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -93,14 +92,20 @@ class ThreadManager:
     def __init__(
         self,
         server: ServerConfig,
-        registry: ProviderRegistry,
         profiles_dir: Path,
     ) -> None:
         self._ttl = server.thread_ttl
         self._max = server.max_threads
         self._persist = server.thread_persist
         self._profiles_dir = Path(profiles_dir)
-        self._registry = registry
+        self._store = ThreadStore(self._profiles_dir / "threads.db")
+        if self._persist:
+            try:
+                migrated = self._store.migrate_from_json(self._profiles_dir)
+                if migrated:
+                    logger.info("threads.json → SQLite 迁移完成（%d 条）", migrated)
+            except Exception:  # noqa: BLE001
+                logger.warning("threads.json 迁移失败（继续启动）", exc_info=True)
         self._sessions: dict[str, ThreadSession] = {}
         self._lock = asyncio.Lock()  # 保护"检查上限 + 注册"（并发创建竞态）
         self._cleanup_lock = asyncio.Lock()
@@ -111,27 +116,28 @@ class ThreadManager:
         return self._sessions.get(thread_id)
 
     def list(self) -> list[dict]:
-        """内存活跃会话 + 磁盘持久化条目（重启后左侧列表不空）。
+        """内存活跃会话 + DB 持久化条目（重启后左侧列表不空）。
 
-        磁盘条目标记 loaded=false，点击切换后由下次请求触发恢复。
+        DB 条目标记 loaded=false，点击切换后由下次请求触发恢复。
         """
         out = [s.to_dict() for s in self._sessions.values()]
-        if self._persist:
-            seen = {d["thread_id"] for d in out}
-            for provider in self._registry.providers().values():
-                for tid, entry in self._load_urls(provider.name).items():
-                    if tid in seen:
-                        continue
-                    out.append(
-                        {
-                            "thread_id": tid,
-                            "provider": provider.name,
-                            "model": entry.get("model"),
-                            "first_message": entry.get("title", "") or "",
-                            "loaded": False,
-                        }
-                    )
-                    seen.add(tid)
+        seen = {d["thread_id"] for d in out}
+        for entry in self._store.list_threads():
+            tid = entry["thread_id"]
+            if tid in seen:
+                continue
+            out.append(
+                {
+                    "thread_id": tid,
+                    "provider": entry.get("provider") or "",
+                    "model": entry.get("model"),
+                    "first_message": entry.get("title") or "",
+                    "created_at": entry.get("created_at"),
+                    "updated_at": entry.get("updated_at"),
+                    "loaded": False,
+                }
+            )
+            seen.add(tid)
         return out
 
     def active_count(self) -> int:
@@ -141,51 +147,11 @@ class ThreadManager:
     def max_threads(self) -> int:
         return self._max
 
-    # ---------- 持久化（thread_id → provider 会话 URL id） ----------
+    # ---------- 持久化（SQLite：会话元数据 + 消息历史） ----------
 
-    def _persist_path(self, provider: str) -> Path:
-        return self._profiles_dir / provider / "threads.json"
-
-    def _load_urls(self, provider: str) -> dict[str, dict]:
-        """返回 {thread_id: {"url": str, "model": str | None, "title": str}}（兼容旧格式）。"""
-        try:
-            data = json.loads(self._persist_path(provider).read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-        out: dict[str, dict] = {}
-        for k, v in data.items():
-            if isinstance(v, str):
-                out[k] = {"url": v, "model": None, "title": ""}
-            elif isinstance(v, dict) and isinstance(v.get("url"), str):
-                out[k] = {
-                    "url": v["url"],
-                    "model": v.get("model"),
-                    "title": v.get("title", ""),
-                }
-        return out
-
-    def _save_urls(self, provider: str, urls: dict[str, dict]) -> None:
-        p = self._persist_path(provider)
-        try:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix(".tmp")
-            tmp.write_text(
-                json.dumps(urls, ensure_ascii=False, indent=1),
-                encoding="utf-8",
-            )
-            os.replace(tmp, p)
-        except Exception:  # noqa: BLE001
-            logger.exception("thread persist write failed for provider %s", provider)
-
-    def _discard_persisted(self, thread_id: str, provider: BaseProvider) -> None:
-        """会话废弃：删除磁盘持久化条目（下次同 id 请求将开全新会话）。"""
-        if not self._persist or not provider.session_url_pattern:
-            return
-        urls = self._load_urls(provider.name)
-        if thread_id in urls:
-            del urls[thread_id]
-            self._save_urls(provider.name, urls)
-            logger.info("thread %s removed from persistence (discarded)", thread_id)
+    def _entry(self, thread_id: str) -> dict | None:
+        """读取 DB 中的会话行（不存在返回 None）。"""
+        return self._store.get_thread(thread_id)
 
     # ---------- 生命周期 ----------
 
@@ -236,13 +202,21 @@ class ThreadManager:
                     "或通过 DELETE /admin/threads/{id} 释放",
                 )
             session = ThreadSession(thread_id, provider, page, model)
-            entry = self._load_urls(provider.name).get(thread_id, {})
-            session.url_id = entry.get("url")
+            entry = self._entry(thread_id) or {}
+            session.url_id = entry.get("url_id")
             if restored:
-                # 磁盘恢复：标题用持久化的第一句话（调用方参数忽略）
+                # DB 恢复：标题用持久化的第一句话（调用方参数忽略）
                 session.first_message = entry.get("title", "") or ""
             else:
                 session.first_message = first_message or ""
+                if self._persist:
+                    # 新建会话：先把元数据入库（左侧列表标题）
+                    self._store.upsert_thread(
+                        thread_id,
+                        provider.name,
+                        model=model,
+                        title=session.first_message or None,
+                    )
             self._sessions[thread_id] = session
             logger.info(
                 "thread %s %s (provider=%s, model=%s, active=%d/%d)",
@@ -262,7 +236,7 @@ class ThreadManager:
         返回 (page, restored)。恢复成功 = resume 语义（页面自带完整历史）。
         """
         if self._persist and provider.session_url_pattern:
-            entry = self._load_urls(provider.name).get(thread_id)
+            entry = self._entry(thread_id)
             if entry:
                 if entry["model"] is not None and entry["model"] != model:
                     raise ThreadMismatchError(
@@ -273,14 +247,14 @@ class ThreadManager:
                     provider.name, init_scripts=provider.init_scripts()
                 )
                 try:
-                    restore_url = f"{provider.cfg.url.rstrip('/')}/a/chat/s/{entry['url']}"
+                    restore_url = f"{provider.cfg.url.rstrip('/')}/a/chat/s/{entry['url_id']}"
                     await page.goto(restore_url, wait_until="domcontentloaded", timeout=30000)
                     await page.wait_for_timeout(2000)  # SPA 渲染会话页
                     sel = await extractor.first_match(page, provider.cfg.selectors.input)
                     if sel is not None:
                         logger.info(
                             "thread %s restored from url_id=%s (model=%s)",
-                            thread_id, entry["url"], model,
+                            thread_id, entry["url_id"], model,
                         )
                         return page, True
                     logger.warning(
@@ -313,22 +287,62 @@ class ThreadManager:
         url_id = session.sync_url()
         if not url_id:
             return
-        urls = self._load_urls(session.provider.name)
-        cur = urls.get(thread_id)
+        cur = self._entry(thread_id) or {}
         if (
-            cur
-            and cur["url"] == url_id
+            cur.get("url_id") == url_id
             and cur.get("model") == session.model
-            and cur.get("title", "") == session.first_message
+            and (cur.get("title") or "") == session.first_message
         ):
             return  # 无变化
-        urls[thread_id] = {
-            "url": url_id,
-            "model": session.model,
-            "title": session.first_message,
-        }
-        self._save_urls(session.provider.name, urls)
+        await asyncio.to_thread(
+            self._store.upsert_thread,
+            thread_id,
+            session.provider.name,
+            session.model,
+            session.first_message or None,
+            url_id,
+        )
         logger.info("thread %s persisted url_id=%s (model=%s)", thread_id, url_id, session.model)
+
+    async def save_turn(
+        self,
+        thread_id: str,
+        provider: str,
+        model: str,
+        user_text: str,
+        assistant_text: str,
+        reasoning: str | None = None,
+    ) -> None:
+        """把一轮对话（user + assistant）写入历史。
+
+        在请求正常完成后调用；写入前确保会话行存在（``title`` 保留，不覆盖）。
+        受 ``server.thread_persist`` 开关控制。
+        """
+        if not self._persist:
+            return
+
+        def _work() -> None:
+            self._store.upsert_thread(thread_id, provider, model=model)
+            self._store.append_messages(
+                thread_id,
+                [
+                    ("user", user_text or "", None),
+                    ("assistant", assistant_text or "", reasoning),
+                ],
+            )
+
+        await asyncio.to_thread(_work)
+
+    async def get_messages(self, thread_id: str) -> list[dict]:
+        """读取某会话的历史消息（按时间顺序）。"""
+        return await asyncio.to_thread(self._store.get_messages, thread_id)
+
+    def shutdown(self) -> None:
+        """关闭 DB 连接（服务退出时调用）。"""
+        try:
+            self._store.close()
+        except Exception:  # noqa: BLE001
+            logger.debug("thread store close failed", exc_info=True)
 
     async def close(self, thread_id: str, discard: bool = True) -> bool:
         """关闭页面并移除（幂等）。返回是否真的关掉了。
@@ -339,16 +353,19 @@ class ThreadManager:
           磁盘条目保留——重启后同 id 请求可恢复旧会话。
         """
         session = self._sessions.pop(thread_id, None)
-        if session is None:
-            return False
-        try:
-            await session.page.close()
-        except Exception:  # noqa: BLE001
-            logger.debug("thread %s page close failed", thread_id)
-        if discard:
-            self._discard_persisted(thread_id, session.provider)
+        closed = False
+        if session is not None:
+            try:
+                await session.page.close()
+            except Exception:  # noqa: BLE001
+                logger.debug("thread %s page close failed", thread_id)
+            closed = True
+        if discard and self._persist:
+            # 会话废弃：连历史消息一起删（DB 外键级联）
+            deleted = await asyncio.to_thread(self._store.delete_thread, thread_id)
+            closed = closed or deleted
         logger.info("thread %s closed (active=%d, discard=%s)", thread_id, len(self._sessions), discard)
-        return True
+        return closed
 
     async def cleanup(self) -> int:
         """回收空闲超过 TTL 的会话（仅关页面，保留持久化条目可恢复）。返回回收数量。"""

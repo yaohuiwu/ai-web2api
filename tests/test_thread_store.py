@@ -45,18 +45,17 @@ def test_upsert_preserves_fields_when_none(tmp_path: Path):
     assert got["url_id"] == "abc"
 
 
-def test_set_url_id_keeps_provider(tmp_path: Path):
+def test_upsert_with_url_id_keeps_provider_and_title(tmp_path: Path):
+    """persist() 走 upsert_thread 补 url_id：provider/title 不被弄丢。"""
     st = _store(tmp_path)
     st.upsert_thread("t1", "deepseek", model="m", title="标题")
-    assert st.set_url_id("t1", "uuid-1", model="deepseek-web") is True
+    st.upsert_thread("t1", "deepseek", model="deepseek-web", url_id="uuid-1")
     got = st.get_thread("t1")
     assert got is not None
-    assert got["provider"] == "deepseek"  # 不能被清空
+    assert got["provider"] == "deepseek"
     assert got["url_id"] == "uuid-1"
     assert got["model"] == "deepseek-web"
     assert got["title"] == "标题"  # 不传 title → 保留
-    # 不存在的行不命中
-    assert st.set_url_id("nope", "uuid-2") is False
 
 
 def test_messages_order_and_reasoning(tmp_path: Path):

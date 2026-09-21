@@ -127,7 +127,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
     cfg = load_config(config_path)
     browser = BrowserManager(cfg.browser, cfg.profiles_dir)
     registry = ProviderRegistry(cfg, browser)
-    threads = ThreadManager(cfg.server, registry, cfg.profiles_dir)
+    threads = ThreadManager(cfg.server, cfg.profiles_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -150,6 +150,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
                 await threads.close_all()
             except Exception:  # noqa: BLE001
                 logger.warning("关闭会话时出错（继续收尾）", exc_info=True)
+            threads.shutdown()
             try:
                 await browser.stop()
             except Exception:  # noqa: BLE001

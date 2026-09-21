@@ -102,33 +102,6 @@ class ThreadStore:
             )
             self._conn.commit()
 
-    def set_url_id(
-        self,
-        thread_id: str,
-        url_id: str,
-        model: str | None = None,
-        title: str | None = None,
-    ) -> bool:
-        """更新会话的 provider 会话 id（原 ``persist()``）。返回是否命中行。
-
-        只更新已有行（会话创建时已 ``upsert_thread``）；不碰 provider 列。
-        """
-        now = time.time()
-        with self._lock:
-            cur = self._conn.execute(
-                """
-                UPDATE threads
-                   SET url_id = ?,
-                       model  = COALESCE(?, model),
-                       title  = COALESCE(?, title),
-                       updated_at = ?
-                 WHERE thread_id = ?
-                """,
-                (url_id, model, title, now, thread_id),
-            )
-            self._conn.commit()
-            return cur.rowcount > 0
-
     def get_thread(self, thread_id: str) -> dict | None:
         with self._lock:
             row = self._conn.execute(
