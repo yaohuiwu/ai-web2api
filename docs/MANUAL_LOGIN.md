@@ -19,9 +19,13 @@
 # 在项目根、宿主上运行（用项目 .venv + Playwright）
 python -m ai_web2api.cli login qwen
 python -m ai_web2api.cli login deepseek --manual
-python -m ai_web2api.cli login qwen --import-url http://127.0.0.1:8000   # 登录完自动导入
-python -m ai_web2api.cli login                 # provider 省略 → server.default_provider 或第一个启用者
+python -m ai_web2api.cli login               # provider 省略 → server.default_provider 或第一个启用者
+python -m ai_web2api.cli login qwen --no-import        # 登录完只写 state，不自动导入
+python -m ai_web2api.cli login qwen --import-url http://127.0.0.1:8000   # 覆盖导入地址
 ```
+
+> **默认登录成功后自动导入本地服务**（地址由 `config.yaml` 的 `server.host/port` 推导，
+> `0.0.0.0` → `127.0.0.1`）。导入失败（服务没起）不会报错，只提示可直接用的 state 文件。
 
 参数：
 
@@ -31,8 +35,9 @@ python -m ai_web2api.cli login                 # provider 省略 → server.defa
 | `--manual` | 否 | 不自动填表，纯手动 |
 | `--timeout` | `600` | 等待"登录成功"的最长秒数 |
 | `--out` | `profiles/<p>/state.json` | state 输出路径 |
-| `--import-url` | 空 | 登录成功后 POST 到该服务的 `/admin/<p>/login/state` |
-| `--import-key` | `WEB2API_API_KEY` 环境 | 若服务启用了 API key（注：`/admin` 默认不鉴权，通常不需要） |
+| `--import/--no-import` | **导入** | 登录成功后自动 POST 给服务；`--no-import` 关闭 |
+| `--import-url` | 本地（由 config 推导） | 覆盖导入地址 |
+| `--import-key` | `WEB2API_API_KEY` 环境 | 若服务启用 API key（`/admin` 默认不鉴权，通常不需要） |
 
 ## 3. 登录流程（CLI）
 
@@ -47,7 +52,8 @@ python -m ai_web2api.cli login                 # provider 省略 → server.defa
     4) 非 --manual 且有凭据 → 逐字输入账号/密码（type，不用 fill）
     5) 打印提示："请在弹出的浏览器里完成验证码 / Google 登录 …"
     6) 轮询 login_check，命中 → 保存 storage_state 到 --out
-→ 可选：POST state 到 --import-url
+→ 默认：POST state 到本地服务的 /admin/<p>/login/state（--no-import 可关）
+  导入失败（服务未启动）→ 仅提示 state 文件路径与手动导入命令，不算失败
 ```
 
 要点：
@@ -99,9 +105,13 @@ python -m ai_web2api.cli login                 # provider 省略 → server.defa
 - **Step 4** — UI：手动登录提示 + 粘贴导入；文档（README「手动登录」、PROVIDER_QWEN 关联）。
 - （可选）**Step 5** — 登录成功日志/`/healthz` 复核；`--out` 覆盖已有 state 的备份策略。
 
-## 8. 待确认
+## 8. 已定 / 待确认
 
-1. 子命令模块名 `ai_web2api/cli.py`（`python -m ai_web2api.cli login …`）可以吗？
-2. 导入时是否**主动关闭该 provider 的活跃 thread 会话**（我倾向：关闭，避免旧页面残留）？
-3. UI 是否需要「粘贴 state.json 导入」文本框？（Docker 用户在别的机器跑脚本时需要；我倾向加）
-4. 是否保留现有 `POST /admin/{p}/login/cookies`？（保留）
+已定：
+- 子命令模块：`python -m ai_web2api.cli login …`。
+- **登录成功默认自动导入本地服务**（`--no-import` 关闭，`--import-url` 覆盖）。
+- 保留现有 `POST /admin/{p}/login/cookies`。
+
+我拟采用的默认（如无异议即按此开发）：
+1. 导入时**主动关闭该 provider 的活跃 thread 会话**（避免旧 context 页面残留）。
+2. UI 加「粘贴 `state.json` 导入」文本框（兜底：脚本在别的机器跑）。
