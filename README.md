@@ -213,7 +213,7 @@ resp = client.chat.completions.create(
 - 需要工具时：`content=null` + `finish_reason="tool_calls"`；**流式同样支持**（SSE `delta.tool_calls`）。
 - 带 `tools` 的**流式**请求是“先缓冲后发”（工具场景无法边流边发，避免把工具 JSON 当正文发出去）。
 - `tool_choice` 支持 `auto` / `none` / `required` / `{"type":"function","function":{"name":...}}`。
-- 同一 `thread_id` 的工具会话：**首轮必须带 `tools`**（工具说明只在首轮/新会话注入一次；后续 resume 复用页面上下文，不重复注入）。
+- 同一 `thread_id` 的工具会话：工具信息必须在**模型可见的上下文**里——**无状态 / thread 首次 create** 由当前请求的 `tools` 注入；**thread resume** 不重复注入、依赖页面历史。
 - 总开关 `server.function_calling`（默认 `true`）；设 `false` 会**完全忽略** `tools`（用于避免风控）。
 - **Playground 可直接测**：勾选「工具」→ 填 `tools` JSON → 提问；收到工具调用后会**本地执行 mock 工具**并自动续跑，展示最终回答。
 
