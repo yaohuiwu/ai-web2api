@@ -186,7 +186,10 @@
 <aside id="sidebar">
   <div class="sidebar-head">
     <h2>会话</h2>
-    <button class="btn" id="newChat" title="清空 thread_id，开始无状态新对话">＋ 新会话</button>
+    <span>
+      <button class="btn" id="refreshThreads" title="刷新会话列表">刷新</button>
+      <button class="btn" id="newChat" title="清空 thread_id，开始无状态新对话">＋ 新会话</button>
+    </span>
   </div>
   <div id="threadList"></div>
 </aside>
@@ -642,17 +645,38 @@ function refreshThreads() {
     .catch(() => {});
 }
 
-function switchThread(tid, loaded = true) {
+function renderHistory(msgs) {
+  for (const m of msgs) {
+    if (m.role === "user") {
+      addMsg("user", m.content || "");
+    } else {
+      addMsg("assistant", m.content || "（空回复）", { thinking: m.reasoning || "" });
+    }
+  }
+}
+
+async function switchThread(tid, loaded = true) {
   if (streaming) return;
   const el = $("#threadId");
   el.value = tid;
   el.dispatchEvent(new Event("input")); // 触发 hint 更新
   history = [];
-  // 暂不保存历史消息：切换后聊天区清空，新消息将续用该会话
-  $("#chat").innerHTML =
-    `<div class="msg meta"><div class="bubble">已切换到会话 <code>${esc(tid)}</code>（${
-      loaded ? "历史消息不保留，新消息将续用该会话" : "已保存的会话，发送消息将自动恢复并继续"
-    }）</div></div>`;
+  $("#chat").innerHTML = "";
+  addMeta(`已切换到会话 ${tid}`);
+  try {
+    // 从服务端拉历史消息（SQLite），切换后即可回看
+    const r = await fetch(`/admin/threads/${encodeURIComponent(tid)}/messages`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    const msgs = data.messages || [];
+    if (msgs.length) {
+      renderHistory(msgs);
+    } else {
+      addMeta(loaded ? "该会话暂无历史消息，新消息将续用该会话" : "已保存的会话，发送消息将自动恢复并继续");
+    }
+  } catch (e) {
+    addMeta(`历史加载失败：${e.message}`);
+  }
   refreshThreads();
 }
 
@@ -667,7 +691,7 @@ function newChat() {
 }
 
 $("#newChat").onclick = newChat;
-setInterval(refreshThreads, 5000);
+$("#refreshThreads").onclick = refreshThreads;
 
 loadModels();
 refreshThreads();

@@ -163,7 +163,7 @@ input.addEventListener("keydown", (e) => {
 - [x] **Step 3**：`api/routes.py` 完成消息落库 + `GET /admin/threads/{id}/messages`；
       扩展 `tests/test_openai_compat.py`（有登录时才跑）。（提交）
 - [x] **Step 4**：`playground.html` 修复 IME 误发送 + 静态断言测试。（提交）
-- [ ] **Step 5**：`playground.html` 历史消息渲染 + 刷新按钮 + 去掉轮询。（提交）
+- [x] **Step 5**：`playground.html` 历史消息渲染 + 刷新按钮 + 去掉轮询。（提交）
 - [ ] **Step 6**：回归验证（Docker 起服务，多轮对话 / 切换 / 重启 / 中文输入法），
       更新 `docs/DESIGN.md` 与 `README.md`。（提交）
 
