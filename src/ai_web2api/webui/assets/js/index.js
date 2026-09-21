@@ -77,7 +77,7 @@ function renderProviderDetail(p) {
         ([alias, target]) => `<span class="chip aliased" title="别名">${esc(alias)} → ${esc(target)}</span>`
       ),
     ].join("") || `<span class="muted">无</span>`;
-  const shot = p.login_error_screenshot
+  const shot = p.login_error_screenshot && !p.logged_in
     ? `<div class="p-shot">
          <div class="p-shot-head">⚠ 上次登录失败截图（${new Date((p.login_error_at || 0) * 1000).toLocaleString()}）</div>
          <a href="/admin/${encodeURIComponent(p.name)}/login/screenshot?t=${p.login_error_at || 0}" target="_blank" rel="noopener">
@@ -103,7 +103,7 @@ function renderProviderDetail(p) {
     <div class="actions">
       <button class="btn" onclick="actLoginStatus('${p.name}')">刷新登录状态</button>
       <button class="btn primary" onclick="actAutoLogin('${p.name}')">自动登录</button>
-      <button class="btn" onclick="actManualLogin('${p.name}')">手动登录/导入</button>
+      <button class="btn" onclick="actManualLogin('${p.name}')">导入登录态</button>
       <button class="btn" onclick="actScreenshot('${p.name}')">抓取截图</button>
       <button class="btn danger" onclick="actLogout('${p.name}')">退出登录</button>
     </div>
