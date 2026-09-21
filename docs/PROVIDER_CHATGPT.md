@@ -124,3 +124,27 @@ providers:
 3. `type_prompt` 选项：做成**配置项**（`selectors.type_prompt: true`）还是对 contenteditable 自动判断？（我倾向配置项，明确可控）
 4. 校准需要你**先手动登录一次**并导入 state（ChatGPT 无法自动登录）——可否？
 5. 若 headless 被 Cloudflare 拦，本期是否接受"用 CLI 重新登录刷新 cf_clearance"作为唯一手段（暂不做 CDP）？
+
+---
+
+## 9. 实测结果与阻塞（2026-09）
+
+**已完成**：
+- provider 注册 + 配置骨架；`/v1/models` 出现 `gpt-5-web` / `gpt-4o-web` / `o3-web`。
+- 手动登录：`python -m ai_web2api.cli login chatgpt` → 生成 state 并导入 → `/healthz` `chatgpt: true`。
+- 校准选择器：`login_check=[data-testid="accounts-profile-button"]`；输入 `#prompt-textarea`（contenteditable，`type_prompt: true`）；发送 `button[data-testid="send-button"]`；附件 `#upload-files`；会话 URL `/c/WEB:<uuid>`（已放宽正则）。
+- 发消息链路验证通过：用户消息 "ping" 正确出现在页面。
+
+**阻塞（关键）**：容器 headless 下，ChatGPT **Sentinel 反爬** 对下列请求返回 **403**：
+`/backend-api/sentinel/chat-requirements/prepare`、`/backend-api/sentinel/ping`、
+`/backend-api/f/conversation`（真正的对话接口）→ 页面能开、历史可见，但**生成失败**
+（页面显示 "Something went wrong while generating the response."）。
+
+**结论**：headless 自动化被 ChatGPT 反爬拦截（比 Cloudflare 更强一层）。**Docker headless 下当前不可用**。
+
+### 可选解法（待定）
+- **A. 有头运行**：服务以有头启动（宿主 non-docker，或容器内 Xvfb+VNC）→ Sentinel 可能放行。
+- **B. CDP 连本机真实 Chrome**（参考 token-free-gateway）：最稳，但改造较大。
+- **C. 暂缓**：保留 provider 骨架，不启用。
+
+模型切换入口在当前 UI 未找到可靠选择器（`model_menu` 暂无匹配，`_apply_model` 会静默跳过）——若走 A/B 再补。
