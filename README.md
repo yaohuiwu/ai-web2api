@@ -8,12 +8,36 @@
 
 ## 快速开始
 
+### 方式一：Docker Compose（推荐，镜像自带 Chromium）
+
+```bash
+cp .env.example .env          # 填 DEEPSEEK_USERNAME / DEEPSEEK_PASSWORD（可选，也可手动登录）
+docker compose up -d --build  # 首次会拉基础镜像并装依赖，约几分钟
+docker compose logs -f        # 看启动日志，会打印可点击的 UI/API 地址
+```
+
+打开 `http://127.0.0.1:8000/ui/`。要点：
+
+- 登录态 / 会话持久化在命名卷 `web2api-profiles`，**容器重建不丢登录**；`docker compose down -v` 才会清空
+- 容器内必须监听 `0.0.0.0`（`config.yaml` 默认已是），宿主用 `${WEB2API_PUBLISH_PORT:-8000}` 映射
+- 改选择器/配置：改 `config.yaml` 后 `docker compose up -d` 重建，或放开 compose 里 `./config.yaml:/app/config.yaml:ro` 挂载直接生效
+- 容器内无可见窗口，手动登录用 cookies 导入：
+  `curl -X POST http://127.0.0.1:8000/admin/deepseek/login/cookies -H 'Content-Type: application/json' -d '{"cookies":[...]}'`
+- 对外暴露时建议设 `WEB2API_API_KEY`（保护 `/v1/*`）并自行用反代限制 `/admin`
+
+```bash
+docker compose down          # 停止（保留登录态）
+docker compose down -v       # 停止并清空登录态
+```
+
+### 方式二：本地开发
+
 ```bash
 uv sync                      # 安装依赖（创建 .venv）
 .venv/bin/python -m playwright install chromium   # 安装浏览器
 ```
 
-### 0. 启动
+#### 0. 启动
 
 ```bash
 .venv/bin/python -m ai_web2api.main
@@ -219,11 +243,14 @@ providers:                 # 也支持 list 写法
         - "#chat-input"
       send_button: []              # 空 = 回车发送
       response_container:
-        - "[class*=markdown]"      # 新 UI 实测 ds-markdown 仍在
-        - ".ds-markdown"
+        # 只有正文容器（思考区内部也有裸 .ds-markdown，不能出现在候选里，
+        # 否则新容器探测会锁定思考区，正文永远提取不到）
+        - ".ds-markdown.ds-assistant-message-main-content"
+        - ".ds-assistant-message-main-content"
       thinking_container:
-        - "[class*=think]"
+        - ".ds-think-content"
         - ".ds-think"
+        - "[class*=think]"
       stop_button: []              # 填了可加快"生成结束"判定
       login_check: []              # 空 = 用 input 判定登录
     login:
@@ -301,7 +328,7 @@ curl http://127.0.0.1:8000/admin/deepseek/login/status         # 确认 logged_i
 - 多轮对话默认**无状态模式**：每次请求把完整历史拼成一条 prompt 注入新会话（借用 Web 端长上下文能力）；需要跨请求会话时用 `thread_id`（见上文 2.5，复用同一 Web 页面，历史以页面为准）
 - `max_tokens`/`top_p`/`stop` 等参数在 Web 端不可控，收到后忽略
 - 数学公式（KaTeX）尽力还原，复杂排版可能失真
-- 无 API key 鉴权（本地使用）；对外部署请自行加反代/鉴权
+- 鉴权可选：配 `server.api_keys`（或 `WEB2API_API_KEY`）后 `/v1/*` 需带 `Authorization: Bearer <key>`；`/ui`、`/admin` 不鉴权，对外部署请自行用反代限制 `/admin`
 - Web 端改版会导致选择器失效，用 `/admin/{p}/debug/dom` 排查并更新配置
 - 停止服务：Ctrl+C 会给**整个进程组**发信号，Playwright 的 node 驱动同时被打掉，浏览器已无法优雅关闭
   → 服务打一条 WARNING（`browser.close 失败（驱动可能已退出，忽略）`）后正常退出，不会报

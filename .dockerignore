@@ -1,0 +1,22 @@
+# 本地虚拟环境 / 缓存 / 输出
+.venv/
+__pycache__/
+*.py[oc]
+.pytest_cache/
+build/
+dist/
+wheels/
+*.egg-info/
+
+# 登录态等敏感数据（运行时用卷挂载，不进镜像）
+profiles/
+.env
+
+.git/
+.gitignore
+docs/
+
+# 编辑器
+.DS_Store
+.idea/
+.vscode/

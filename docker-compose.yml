@@ -1,0 +1,55 @@
+# 一键启动：docker compose up -d --build
+#
+#   - 镜像自带 Chromium（Playwright），无需在宿主安装浏览器
+#   - 登录态 / 会话持久化在命名卷 web2api-profiles，容器重建不丢登录
+#   - 自动登录凭据、headless 开关等放项目根 .env（compose 自动读取 env_file）
+#
+# 常用操作：
+#   docker compose logs -f            # 看启动日志（含可点击的 UI/API 地址）
+#   docker compose down               # 停止（保留登录态卷）
+#   docker compose down -v            # 停止并清空登录态（下次需重新登录）
+services:
+  ai-web2api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-web2api:latest
+    container_name: ai-web2api
+    restart: unless-stopped
+    # .env 提供 DEEPSEEK_USERNAME/DEEPSEEK_PASSWORD/DEEPSEEK_HEADLESS 等；缺失也能启动
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      # 让容器里打印/使用 0.0.0.0 监听，宿主才能访问 8000
+      AI_WEB2API_CONFIG: /app/config.yaml
+      WEB2API_HEADLESS: "${WEB2API_HEADLESS:-true}"
+      # 可选：设置后 /v1/* 需带 Authorization: Bearer <key>（逗号分隔多 key）
+      # WEB2API_API_KEY: "your-secret-key"
+    ports:
+      - "${WEB2API_PUBLISH_PORT:-8000}:8000"
+    volumes:
+      # 登录态 (state.json) 与 thread 持久化 (threads.json)
+      - web2api-profiles:/app/profiles
+      # 想改选择器不改镜像，可放开下面这行用宿主配置覆盖：
+      # - ./config.yaml:/app/config.yaml:ro
+    # Chromium 需要足够大 /dev/shm，否则容易崩（默认 64MB 太小）
+    shm_size: "1gb"
+    # 浏览器常驻内存，给宽松一点的上限/预留
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=5).status==200 else 1)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  web2api-profiles:

@@ -12,14 +12,14 @@ from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
+
+load_dotenv()  # 从 cwd 向上查找 .env（本地开发；Docker 用 compose env_file）
+if env_file := os.environ.get("AI_WEB2API_ENV_FILE"):
+    load_dotenv(env_file, override=True)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-
-# 项目根 .env（自动登录凭据 DEEPSEEK_USERNAME/DEEPSEEK_PASSWORD 等）
-load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
-load_dotenv()
 
 from .api.routes import create_router
 from .browser.manager import BrowserManager
@@ -163,6 +163,31 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+    if cfg.server.api_keys:
+
+        @app.middleware("http")
+        async def _api_key_guard(request: Request, call_next):
+            """可选网关鉴权：配置 server.api_keys 后 /v1/* 需带 Bearer key。
+
+            只保护 /v1/*（OpenAI 兼容面）；/ui、/admin、/healthz 保持开放，
+            本地管理界面无需先填 key（对外暴露请自行用反代限制 /admin）。
+            """
+            if request.url.path.startswith("/v1/"):
+                token = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+                if token not in cfg.server.api_keys:
+                    return JSONResponse(
+                        status_code=401,
+                        content={
+                            "error": {
+                                "message": "Invalid API key",
+                                "type": "authentication_error",
+                                "code": 401,
+                            }
+                        },
+                    )
+            return await call_next(request)
+
+        logger.info("API key 鉴权已启用（%d key，保护 /v1/*）", len(cfg.server.api_keys))
     app.include_router(create_router(registry, threads))
     app.state.registry = registry
     app.state.browser = browser

@@ -21,7 +21,7 @@ profiles_dir: /tmp/ai-web2api-fake-profiles
 providers:
   fake:
     driver: deepseek
-    url: file:///Users/yaohuiwu/SourceCode/AI/ai-web2api/tests/fake_chat.html
+    url: file://./tests/fake_chat.html
     models:
       - {name: fake-web}
       - {name: fake-r1}

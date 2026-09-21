@@ -51,6 +51,9 @@ def client() -> OpenAI:
     port = _free_port()
     cfg = yaml.safe_load(FAKE_CONFIG.read_text())
     cfg["server"]["port"] = port
+    # 临时配置写在 tests/ 下：URL 用绝对路径指向仓库假页（配置里的相对 file:// 是
+    # 相对 config.fake.yaml 所在目录，复制到别处后不再成立）
+    cfg["providers"]["fake"]["url"] = f"file://{ROOT / 'tests' / 'fake_chat.html'}"
     sel = cfg["providers"]["fake"]["selectors"]
     sel["mode_button"] = {}   # 新版 UI：无模式 radio
     sel["mode_checked"] = []

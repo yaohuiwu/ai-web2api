@@ -159,15 +159,8 @@ class AppConfig(BaseModel):
         return v
 
 
-def apply_env_overrides(cfg: AppConfig) -> AppConfig:
-    """用环境变量覆盖 YAML 配置（.env 里配的开关必须真的生效）。
-
-    目前支持 headless 开关，优先级：``WEB2API_HEADLESS`` >
-    ``<PROVIDER>_HEADLESS``（如 ``DEEPSEEK_HEADLESS``）> config.yaml。
-
-    背景：``.env.example`` 一直文档化 ``DEEPSEEK_HEADLESS=true``，但配置加载只读
-    YAML，导致设了无头仍弹出浏览器窗口。
-    """
+def _apply_headless_override(cfg: AppConfig) -> AppConfig:
+    """headless 开关：``WEB2API_HEADLESS`` > ``<PROVIDER>_HEADLESS`` > config.yaml。"""
     candidates = ["WEB2API_HEADLESS"] + [
         f"{p.name.upper()}_HEADLESS" for p in cfg.providers
     ]
@@ -196,9 +189,57 @@ def apply_env_overrides(cfg: AppConfig) -> AppConfig:
     return cfg
 
 
+def apply_env_overrides(cfg: AppConfig) -> AppConfig:
+    """用环境变量覆盖 YAML 配置（.env 里配的开关必须真的生效）。
+
+    支持的覆盖（与 ``.env.example`` 一一对应）：
+
+    - ``WEB2API_HEADLESS`` > ``<PROVIDER>_HEADLESS``（如 ``DEEPSEEK_HEADLESS``）
+      → ``browser.headless``
+    - ``WEB2API_API_KEY`` → ``server.api_keys``（支持逗号分隔多个 key）
+
+    host/port/profiles_dir 等其余项以 ``config.yaml`` 为准：``.env`` 会被自动加载，
+    若 env 也参与覆盖，则“换个 config 文件启动”（如 ``AI_WEB2API_CONFIG=config.fake.yaml``）
+    仍会被 ``.env`` 里的端口霸占，反而失去可预测性。Docker 部署直接挂 config.yaml。
+
+    背景：``.env.example`` 一直文档化这些变量，但配置加载只读 YAML，
+    导致设了无头仍弹窗口。
+    """
+    cfg = _apply_headless_override(cfg)
+
+    key = os.environ.get("WEB2API_API_KEY", "").strip()
+    if key:
+        # 逗号分隔多 key；保留 YAML 里已配的 key（取并集，去重保序）
+        keys = [k.strip() for k in key.split(",") if k.strip()]
+        merged = list(dict.fromkeys([*cfg.server.api_keys, *keys]))
+        logger.info("server.api_keys 被环境变量 WEB2API_API_KEY 覆盖（%d key）", len(merged))
+        cfg = cfg.model_copy(
+            update={"server": cfg.server.model_copy(update={"api_keys": merged})}
+        )
+    return cfg
+
+
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"配置文件不存在: {p}")
     raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    return apply_env_overrides(AppConfig.model_validate(raw))
+    cfg = AppConfig.model_validate(raw)
+    _resolve_relative_file_urls(cfg, p.resolve().parent)
+    return apply_env_overrides(cfg)
+
+
+def _resolve_relative_file_urls(cfg: AppConfig, base_dir: Path) -> None:
+    """把 ``file://./xxx`` 相对 URL 解析成绝对路径（相对配置文件所在目录）。
+
+    自测配置需指向仓库内的 ``tests/fake_chat.html``：写死绝对路径换机器就废，
+    且 Docker 构建上下文只挂当前目录 → 用相对配置文件的写法。
+    """
+    for provider in cfg.providers:
+        url = provider.url
+        if not url.startswith("file://"):
+            continue
+        rel = url[len("file://"):]
+        if rel.startswith("./") or not rel.startswith("/"):
+            target = (base_dir / rel).resolve()
+            provider.url = f"file://{target}"

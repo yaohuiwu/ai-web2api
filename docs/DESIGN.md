@@ -27,7 +27,7 @@
 └──────────────────────┬──────────────────────────────┘
                        │ HTTP (SSE 流式 / JSON)
 ┌──────────────────────▼──────────────────────────────┐
-│  FastAPI Server  (server.py)                        │
+│  FastAPI Server  (main.py / api/routes.py)           │
 │   /v1/models  /v1/chat/completions  /healthz        │
 │   Auth: Bearer 校验 (可选)                           │
 └──────────────────────┬──────────────────────────────┘
@@ -36,13 +36,13 @@
 │  BaseProvider (providers/base.py)                   │
 │  chat() / chat_stream() / login() / close()         │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────┐  │
-│  │ DeepSeekWeb  │  │   Mock       │  │  (未来)    │  │
+│  │ DeepSeekWeb  │  │ (未来)      │  │  (未来)    │  │
 │  │  (Playwright)│  │  (本地模拟)   │  │  Kimi/…   │  │
 │  └──────┬───────┘  └──────────────┘  └───────────┘  │
 └─────────┼───────────────────────────────────────────┘
           │ Playwright (async)
 ┌─────────▼───────────────────────────────────────────┐
-│  BrowserManager (browser.py)                        │
+│  BrowserManager (browser/manager.py)                │
 │  持久化上下文 + storage_state 登录态复用 + 请求串行锁  │
 └─────────────────────────────────────────────────────┘
 ```
@@ -51,13 +51,18 @@
 
 | 模块 | 职责 |
 |------|------|
-| `server.py` | OpenAI 兼容 HTTP 层：请求/响应模型、SSE 流式编码、鉴权、错误映射 |
-| `providers/base.py` | Provider 抽象基类：统一 `chat` / `chat_stream` / `login` / `close` 接口 |
-| `providers/deepseek.py` | DeepSeek 网页版实现：登录、新对话、输入、等待完成、提取回复 |
-| `providers/mock.py` | 本地模拟 Provider：无浏览器也能端到端验证服务与流式 |
-| `browser.py` | 浏览器生命周期：持久化上下文、storage_state、页面复用、并发串行化 |
-| `config.py` | 配置（环境变量 + `.env`） |
-| `cli.py` | `login` / `serve` / `providers` 子命令 |
+| `main.py` | FastAPI 入口：路由挂载、可选 API key 鉴权、后台登录态刷新、优雅关停 |
+| `api/schemas.py` | OpenAI 兼容请求/响应模型（含多部分 content → 附件提取） |
+| `api/routes.py` | `/v1/*` OpenAI 兼容路由、SSE 流式编码、`/admin/*` 登录与管理 |
+| `providers/base.py` | Provider 抽象基类：`generate` 流式接口 + 登录/串行队列/非流式聚合 |
+| `providers/deepseek.py` | DeepSeek 网页版实现：登录、输入、双轨响应提取（XHR SSE 主 + DOM 兜底） |
+| `providers/registry.py` | 模型名/别名 → Provider 路由；登录态检测（可用独立 headless 浏览器） |
+| `browser/manager.py` | 浏览器生命周期：单 Chromium + 每 provider 独立 Context + storage_state 持久化 |
+| `browser/extractor.py` | DOM → Markdown 提取、选择器候选匹配 |
+| `core/queue.py` | 每 provider 串行门（SerialGate） |
+| `core/threads.py` | 会话绑定（thread_id）生命周期 + 跨重启持久化 |
+| `core/errors.py` | 统一错误类型 → HTTP 状态码映射 |
+| `config.py` | YAML 配置加载 + 环境变量覆盖 |
 
 ---
 
@@ -88,7 +93,7 @@ class BaseProvider(ABC):
 1. 新建 `providers/kimi.py`，继承 `BaseProvider`；
 2. 实现 `ensure_ready`（含登录）、`chat` / `chat_stream`（选择器、等待完成策略）；
 3. 在 `providers/__init__.py` 的 `PROVIDERS` 注册表中登记；
-4. 配置 `WEB2API_PROVIDER=kimi` 即可切换，HTTP 层零改动。
+4. 配置新的 provider 段（`config.yaml`）即可切换/新增，HTTP 层零改动。
 
 ---
 
@@ -148,8 +153,8 @@ textbox.fill(最终消息)  →  press Enter
 - `assistant` 历史消息忽略（无状态 API 语义）。
 
 ### 5.4 完成判定与超时
-- 默认超时 120s（`DEEPSEEK_TIMEOUT`），由「回复操作按钮出现」判定完成；
-- 超时未完成 → 返回已有部分文本，响应中 `finish_reason="length"`（非流式）或正常结束（流式），并在日志告警。
+- 默认超时 180s（`provider.response_timeout`，config.yaml 可改）；优先由网络监听通道的 `event: close` 判定完成，不可用时降级 DOM 轮询（停止按钮消失 / 文本稳定窗口）；
+- 超时未完成 → 报 `504 response_timeout`，并已在客户端收到的流式增量不受影响。
 
 ---
 
@@ -163,7 +168,9 @@ textbox.fill(最终消息)  →  press Enter
 | `GET /healthz` | 健康检查（含 provider 就绪状态） |
 
 ### 6.2 鉴权
-可选：配置 `WEB2API_API_KEY` 后，所有 `/v1/*` 请求需带 `Authorization: Bearer <key>`，未配置则开放。
+可选：配置 `server.api_keys`（config.yaml）或环境变量 `WEB2API_API_KEY`（逗号分隔多 key）后，
+所有 `/v1/*` 请求需带 `Authorization: Bearer <key>`，未配置则开放。
+`/ui`、`/admin`、`/healthz` 不鉴权（本地管理用）；对外部署请用反代限制 `/admin`。
 
 ### 6.3 错误映射
 - 未登录 / 登录失败 → `401 {"error": {"message": "...", "type": "authentication_error"}}`
@@ -175,24 +182,26 @@ textbox.fill(最终消息)  →  press Enter
 
 ## 7. 配置项（环境变量 / .env）
 
+> 配置以 `config.yaml` 为准；下表只列**真正生效**的环境变量覆盖（见 `config.apply_env_overrides`）。
+> host / port / profiles_dir 等不提供 env 覆盖：`.env` 会被自动加载，若参与覆盖会导致
+> “换 config 文件启动”（如 `AI_WEB2API_CONFIG=config.fake.yaml`）仍被 `.env` 里的端口霸占。
+
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `WEB2API_PROVIDER` | `deepseek` | 激活的 provider |
-| `WEB2API_HOST` / `WEB2API_PORT` | `127.0.0.1` / `8000` | 服务监听 |
-| `WEB2API_API_KEY` | 空 | 网关鉴权 key（可选） |
-| `WEB2API_DATA_DIR` | `~/.web2api` | storage_state 与 profile 存放目录 |
-| `DEEPSEEK_USERNAME` / `DEEPSEEK_PASSWORD` | 空 | 可选：自动登录凭据 |
-| `DEEPSEEK_HEADLESS` / `WEB2API_HEADLESS` | `true`（config.yaml） | 浏览器是否无头（覆盖 `browser.headless`，优先级 WEB2API_HEADLESS > `<PROVIDER>_HEADLESS` > YAML） |
-| `DEEPSEEK_TIMEOUT` | `120` | 单次回复等待超时（秒） |
-| `WEB2API_LOG_LEVEL` | `info` | 日志级别 |
+| `AI_WEB2API_CONFIG` | `config.yaml` | 配置文件路径 |
+| `AI_WEB2API_ENV_FILE` | — | 额外加载的 .env（覆盖进程环境） |
+| `WEB2API_HEADLESS` / `<PROVIDER>_HEADLESS` | `true`（config.yaml） | 浏览器是否无头（优先级 WEB2API_HEADLESS > `<PROVIDER>_HEADLESS` > YAML） |
+| `WEB2API_API_KEY` | 空 | 网关鉴权 key（可选，逗号分隔多 key），仅保护 `/v1/*` |
+| `DEEPSEEK_USERNAME` / `DEEPSEEK_PASSWORD` | 空 | 可选：自动登录凭据（键名见 provider 的 `login.username_env/password_env`） |
+| `WEB2API_PUBLISH_PORT` | `8000` | 仅 Docker Compose：宿主映射端口 |
 
 ---
 
 ## 8. 验证方式
 
-1. **Mock 端到端**：`WEB2API_PROVIDER=mock` 启动服务，curl 验证 `/v1/models`、非流式、SSE 流式 —— 无需真实账号，CI 可用。
-2. **DeepSeek 真实链路**：`web2api login deepseek` 手动登录一次 → `web2api serve` → curl 验证真实回复。
-3. 提供 `web2api selftest` 子命令一键执行 1+2（带凭据时）。
+1. **假页端到端**：`AI_WEB2API_CONFIG=config.fake.yaml` 启动服务（指向 `tests/fake_chat.html`，无需真实账号/登录），curl 验证 `/v1/models`、非流式、SSE 流式 —— CI 可用。
+2. **DeepSeek 真实链路**：配 `.env` 凭据自动登录（或 `/admin/deepseek/login/start` 手动登录一次）→ 启动服务 → curl / OpenAI SDK 验证真实回复。
+3. **pytest**：`tests/test_openai_compat.py` 用官方 openai SDK 对**已启动的服务**跑真实用例；其余测试为纯单元/假页端到端。
 
 ---
 

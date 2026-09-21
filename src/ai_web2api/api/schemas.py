@@ -129,13 +129,6 @@ class ChatCompletionResponse(BaseModel):
     usage: dict[str, Any] = Field(default_factory=dict)
 
 
-class ModelInfo(BaseModel):
-    id: str
-    object: str = "model"
-    created: int = 0
-    owned_by: str = "ai-web2api"
-
-
 class CookieItem(BaseModel):
     name: str
     value: str

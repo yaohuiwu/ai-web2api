@@ -14,7 +14,7 @@ from fastapi.responses import (
     JSONResponse,
     StreamingResponse,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from ..browser import extractor
 from ..core.errors import (
@@ -30,26 +30,12 @@ from .schemas import (
     ChatCompletionChoice,
     ChatCompletionRequest,
     ChatCompletionResponse,
+    CookiesPayload,
     ResponseMessage,
     normalize_message,
 )
 
 logger = logging.getLogger(__name__)
-
-
-class CookieItem(BaseModel):
-    name: str
-    value: str
-    domain: str
-    path: str = "/"
-    expires: float | None = None
-    httpOnly: bool = False
-    secure: bool = False
-    sameSite: str | None = None
-
-
-class CookiesPayload(BaseModel):
-    cookies: list[CookieItem]
 
 
 class ProbePayload(BaseModel):
