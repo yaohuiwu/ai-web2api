@@ -132,7 +132,8 @@ class WebChatProvider(BaseProvider):
                 # 无状态 / create：完整历史拼单条 prompt 注入
                 prompt = build_prompt(messages)
             logger.info("[%s] sending prompt (%d chars): %.60r", self.name, len(prompt), prompt)
-            await self._reset_net_capture(page)
+            if self.net_enabled:
+                await self._reset_net_capture(page)
             await self._send_prompt(page, input_sel, prompt)
             logger.info("[%s] prompt sent, polling", self.name)
 
@@ -579,10 +580,16 @@ XMLHttpRequest.prototype.send = function (body) {{
 
     def init_scripts(self) -> list[str]:
         """默认：按 ``network.url_pattern`` 生成 XHR 监听；未配 → 不注入（走 DOM）。"""
-        net = self.cfg.network
-        if not net.capture or not net.url_pattern:
+        if not self.net_enabled:
             return []
-        return [self._net_init_js(net.url_pattern)]
+        assert self.cfg.network.url_pattern is not None
+        return [self._net_init_js(self.cfg.network.url_pattern)]
+
+    @property
+    def net_enabled(self) -> bool:
+        """是否启用网络抓取（未启用则全程走 DOM，不碰全局量）。"""
+        net = self.cfg.network
+        return bool(net.capture and net.url_pattern)
 
     # ---------- 响应读取：网络优先 + DOM 兜底 ----------
 
@@ -604,6 +611,10 @@ XMLHttpRequest.prototype.send = function (body) {{
         busy_timeout: float | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """双轨读取：网络监听为主，通道失效自动降级 DOM 轮询。"""
+        if not self.net_enabled:
+            async for chunk in self._poll_response_dom(page, md_before, th_before, busy_timeout):
+                yield chunk
+            return
         g, d = self.NET_GLOBAL, self.NET_GLOBAL_DONE
         try:
             injected = await page.evaluate(

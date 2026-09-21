@@ -33,11 +33,14 @@ def _prov(**extra) -> WebChatProvider:
 
 def test_no_network_config_no_scripts():
     assert _prov().init_scripts() == []
+    assert _prov().net_enabled is False
     assert _prov(network={"capture": False, "url_pattern": "/x"}).init_scripts() == []
 
 
 def test_generates_capture_script():
-    scripts = _prov(network={"url_pattern": "/api/v0/chat/completion"}).init_scripts()
+    p = _prov(network={"url_pattern": "/api/v0/chat/completion"})
+    assert p.net_enabled is True
+    scripts = p.init_scripts()
     assert len(scripts) == 1
     js = scripts[0]
     assert "XMLHttpRequest" in js
