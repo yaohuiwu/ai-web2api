@@ -192,6 +192,30 @@ resp = client.chat.completions.create(
 - 限制：**最多 50 个、每个最大 100MB**，超限 400 `attachments_error`（与 Web 端 tooltips 一致）
 - 附件仅作用于本次请求的 user 消息（thread 续用时注入的历史为纯文本，图片不会重放）；页面找不到上传入口（如后续 UI 再改版）→ 400
 
+### 2.8 Function Calling（工具调用）
+
+`/v1/chat/completions` 支持 OpenAI 原生 `tools` / `tool_choice`。网页端没有原生工具，服务端把工具定义**注入 prompt**，
+再把模型输出**解析回标准 `tool_calls`**（参考 token-free-gateway，见 `docs/FUNCTION_CALLING.md`）：
+
+```python
+resp = client.chat.completions.create(
+    model="deepseek-web",
+    messages=[{"role": "user", "content": "东京天气？"}],
+    tools=[{"type": "function", "function": {
+        "name": "get_weather", "description": "查天气",
+        "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}},
+    )],
+)
+# resp.choices[0].message.tool_calls → 标准 tool_calls（content=null, finish_reason="tool_calls"）
+# 客户端本地执行工具 → 以 role=tool 回传结果再请求 → 得到最终回答
+```
+
+- 需要工具时：`content=null` + `finish_reason="tool_calls"`；**流式同样支持**（SSE `delta.tool_calls`）。
+- 带 `tools` 的**流式**请求是“先缓冲后发”（工具场景无法边流边发，避免把工具 JSON 当正文发出去）。
+- `tool_choice` 支持 `auto` / `none` / `required` / `{"type":"function","function":{"name":...}}`。
+- 总开关 `server.function_calling`（默认 `true`）；设 `false` 会**完全忽略** `tools`（用于避免风控）。
+- **Playground 可直接测**：勾选「工具」→ 填 `tools` JSON → 提问；收到工具调用后会**本地执行 mock 工具**并自动续跑，展示最终回答。
+
 ### 3. 自测（不需要登录）
 
 #### 3.1 pytest
@@ -237,6 +261,7 @@ server:
   host: 0.0.0.0
   port: 8000
   default_provider: deepseek   # 常见 OpenAI 模型名(gpt-4 等)兜底别名挂给谁；空 = 首个启用 provider
+  function_calling: true       # 工具调用总开关；false = 完全忽略 tools（避免注入工具提示触发网页端风控）
 browser:
   headless: true           # 静默运行（不弹窗口）；可用 .env 覆盖：WEB2API_HEADLESS > DEEPSEEK_HEADLESS
   locale: zh-CN            # 页面语言（决定 DeepSeek UI 文案 / 中文选择器是否匹配）

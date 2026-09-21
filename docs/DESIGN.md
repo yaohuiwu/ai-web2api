@@ -192,6 +192,15 @@ textbox.fill(最终消息)  →  press Enter
 - 请求参数错误 → `400`
 - 流式中断 → SSE 正常结束并附 `error` chunk（OpenAI 兼容约定）
 
+### 6.4 Function Calling（工具调用）
+网页端只有文本框、无原生工具 → 服务端采用 **Prompt 注入 + 输出解析回填**（详细计划见 `docs/FUNCTION_CALLING.md`）：
+
+- 请求带 `tools`/`tool_choice` 时：协议层（`tool_calling/`）把工具定义 + 角色转录拼成一段 prompt，
+  通过 `prompt_override` 交给驱动直发（驱动仍“文本进、文本出”，**不限 provider**）。
+- 响应：模型文本经多格式容错解析 → 标准 `tool_calls`（`content=null`、`finish_reason="tool_calls"`）。
+- 流式带工具：**先缓冲后发**（先攒满正文再解析，避免工具 JSON 被当成正文流出）。
+- 总开关 `server.function_calling`（false = 忽略 tools）。
+
 ---
 
 ## 7. 配置项（环境变量 / .env）
