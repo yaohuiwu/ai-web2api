@@ -85,3 +85,40 @@ async def test_stuck_loading_true_on_empty_body():
 @pytest.mark.asyncio
 async def test_stuck_loading_false_when_ready():
     assert await _stuck_prov()._page_stuck_loading(_StuckPage(splash_visible=False, body="新建对话")) is False
+
+
+class _LoginStub(WebChatProvider):
+    def __init__(self, cfg, fail_times: int):
+        super().__init__(cfg, browser=None)  # type: ignore[arg-type]
+        self.calls = 0
+        self.fail_times = fail_times
+
+    async def _auto_login_once(self) -> dict:
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            return {"ok": False, "reason": "transient"}
+        return {"ok": True, "already_logged_in": False}
+
+
+@pytest.mark.asyncio
+async def test_auto_login_retries_until_success():
+    cfg = ProviderConfig.model_validate(
+        {"name": "qwen", "url": "https://x", "models": [{"name": "m"}],
+         "login": {"mode": "auto", "retries": 3}}
+    )
+    p = _LoginStub(cfg, fail_times=2)
+    p.LOGIN_RETRY_DELAY = 0
+    r = await p.auto_login()
+    assert r["ok"] is True and p.calls == 3 and r.get("attempts") == 3
+
+
+@pytest.mark.asyncio
+async def test_auto_login_gives_up_after_retries():
+    cfg = ProviderConfig.model_validate(
+        {"name": "qwen", "url": "https://x", "models": [{"name": "m"}],
+         "login": {"mode": "auto", "retries": 3}}
+    )
+    p = _LoginStub(cfg, fail_times=99)
+    p.LOGIN_RETRY_DELAY = 0
+    r = await p.auto_login()
+    assert r["ok"] is False and p.calls == 3

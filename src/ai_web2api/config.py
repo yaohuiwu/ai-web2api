@@ -118,6 +118,7 @@ class LoginConfig(BaseModel):
     mode: Literal["manual", "cookies", "auto"] = "manual"
     hint: str = ""
     url: str | None = None  # 登录页 URL（与聊天页不同时用，如 Qwen 的 /auth；空 = 用 provider.url）
+    retries: int = 3  # 自动登录失败时的重试次数（网页登录首发可能静默无效）
     # auto 模式：.env 中凭据的键名
     username_env: str = "DEEPSEEK_USERNAME"
     password_env: str = "DEEPSEEK_PASSWORD"

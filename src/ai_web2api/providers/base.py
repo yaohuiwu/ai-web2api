@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+import asyncio
 import logging
 import os
 import time
@@ -61,6 +62,9 @@ class BaseProvider(abc.ABC):
     # thread 持久化用：从页面 URL 提取 provider 会话 id 的正则（如 DeepSeek
     # /a/chat/s/<uuid>）。None = 该 provider 不支持会话恢复（不落盘）。
     session_url_pattern: str | None = None
+
+    # 自动登录重试之间的等待（秒）；测试可置 0
+    LOGIN_RETRY_DELAY: float = 1.5
 
     def __init__(self, cfg: ProviderConfig, browser: BrowserManager):
         self.cfg = cfg
@@ -141,6 +145,28 @@ class BaseProvider(abc.ABC):
         return {"username": (u or "").strip(), "password": (p or "").strip()}
 
     async def auto_login(self) -> dict:
+        """自动登录（带重试）。
+
+        网页登录首发提交可能静默无效（React 受控输入 / 风险校验 / 重渲染）——重试通常即成功。
+        重试次数取 ``login.retries``（默认 3）。成功且发生重试时附 ``attempts``。
+        """
+        attempts = max(1, int(getattr(self.cfg.login, "retries", 3) or 1))
+        result: dict = {}
+        for i in range(attempts):
+            result = await self._auto_login_once()
+            if result.get("ok"):
+                if i:
+                    result["attempts"] = i + 1
+                return result
+            if i + 1 < attempts:
+                logger.info(
+                    "[%s] 自动登录第 %d/%d 次失败：%s；重试…",
+                    self.name, i + 1, attempts, result.get("reason", ""),
+                )
+                await asyncio.sleep(self.LOGIN_RETRY_DELAY)
+        return result
+
+    async def _auto_login_once(self) -> dict:
         """用 .env 中的账号密码自动登录（login.mode=auto）。
 
         流程：打开登录页 → （必要时切到密码 tab）→ 填账号/密码 → 提交 →
