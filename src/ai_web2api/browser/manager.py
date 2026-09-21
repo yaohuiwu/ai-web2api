@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -41,6 +42,8 @@ class BrowserManager:
         self._contexts: dict[str, BrowserContext] = {}
         # 登录态"变了"的标记（登录成功/注入 cookie）→ 下次 save_state 必须落盘
         self._state_dirty: set[str] = set()
+        # 上次落盘时的 cookie 指纹（name+value 哈希）→ 轮换后即使未过期也能落盘
+        self._cookie_fp: dict[str, str] = {}
 
     # ---------- 生命周期 ----------
 
@@ -152,6 +155,7 @@ class BrowserManager:
         ctx = await self._browser.new_context(**kwargs)
         ctx.set_default_timeout(self._cfg.default_timeout * 1000)
         self._contexts[provider] = ctx
+        self._cookie_fp[provider] = await self._cookie_fingerprint(provider)  # 基线
         logger.info("context created for provider %s (state restored=%s)", provider, state.exists())
         return ctx
 
@@ -167,6 +171,7 @@ class BrowserManager:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("context close skipped for %s: %s", provider, exc)
         self._state_dirty.discard(provider)
+        self._cookie_fp.pop(provider, None)
         logger.info("context reset for provider %s", provider)
 
     def mark_state_dirty(self, provider: str) -> None:
@@ -212,20 +217,36 @@ class BrowserManager:
         now = time.time() if now is None else now
         return (expiry - now) < self._cfg.state_expiry_margin
 
+    async def _cookie_fingerprint(self, provider: str) -> str | None:
+        """当前 context 的 cookie 指纹（name+value 排序后哈希）；无 context 返回 None。"""
+        ctx = self._contexts.get(provider)
+        if ctx is None:
+            return None
+        try:
+            cookies = await ctx.cookies()
+        except Exception:  # noqa: BLE001
+            return None
+        core = sorted((c.get("name", ""), c.get("value", "")) for c in cookies)
+        return hashlib.sha1(json.dumps(core, ensure_ascii=False).encode()).hexdigest()
+
     async def save_state(self, provider: str, *, force: bool = False) -> bool:
         """写 storage_state（默认只在该写的时候写，返回是否真的写了）。
 
-        ``force=True`` 用于调用方明确知道变了、必须落盘的场合（如刚注入 cookie）。
+        除“脏标记 / 首次 / 快过期”外，**cookie 指纹变化**（如会话 token 轮换）也会写盘，
+        避免重启后丢掉轮换后的新 cookie（会话型 cookie 无 expires，旧规则不会重写）。
         """
-        if not force and not self.state_needs_save(provider):
-            logger.debug("state save skipped for provider %s（已登录且未过期）", provider)
-            return False
         ctx = self._contexts.get(provider)
         if not ctx:
+            return False
+        fp = await self._cookie_fingerprint(provider)
+        changed = fp is not None and fp != self._cookie_fp.get(provider)
+        if not force and not changed and not self.state_needs_save(provider):
+            logger.debug("state save skipped for provider %s（无变化）", provider)
             return False
         path = self.state_path(provider)
         path.parent.mkdir(parents=True, exist_ok=True)
         await ctx.storage_state(path=str(path))
+        self._cookie_fp[provider] = fp
         self._state_dirty.discard(provider)
         logger.info("state saved for provider %s", provider)
         return True
@@ -259,6 +280,7 @@ class BrowserManager:
                 await ctx.clear_cookies()
             except Exception:
                 pass
+        self._cookie_fp.pop(provider, None)
         path = self.state_path(provider)
         if path.exists():
             path.unlink()
