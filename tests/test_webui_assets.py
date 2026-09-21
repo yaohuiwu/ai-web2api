@@ -33,3 +33,10 @@ def test_referenced_assets_exist():
 def test_shared_assets_present():
     for rel in ("assets/css/base.css", "assets/js/common.js"):
         assert (WEBUI / rel).is_file(), f"缺少共享资源 {rel}"
+
+
+def test_markdown_renders_images_and_autolinks():
+    js = (WEBUI / "assets/js/markdown.js").read_text(encoding="utf-8")
+    assert 'class="md-img"' in js, "markdown 未渲染图片（![](url) → <img>）"
+    assert "referrerpolicy" in js, "图片未带 referrerpolicy（外站图可能 403）"
+    assert "裸 URL 自动链接" in js, "未把裸 URL 自动变成链接（DeepSeek 思考引用）"
