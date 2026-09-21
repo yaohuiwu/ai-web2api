@@ -6,7 +6,11 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 WEBUI = Path(__file__).resolve().parent.parent / "src" / "ai_web2api" / "webui"
 HTML_FILES = ("index.html", "playground.html")
@@ -40,3 +44,33 @@ def test_markdown_renders_images_and_autolinks():
     assert 'class="md-img"' in js, "markdown 未渲染图片（![](url) → <img>）"
     assert "referrerpolicy" in js, "图片未带 referrerpolicy（外站图可能 403）"
     assert "裸 URL 自动链接" in js, "未把裸 URL 自动变成链接（DeepSeek 思考引用）"
+
+
+_JS_PROBE = r"""
+global.esc = (s) => String(s ?? "");
+eval(require("fs").readFileSync(process.argv[2], "utf8"));
+const U = "https://images.example.com/a_b_c/d_e/f?purpose=fullsize";
+const out = md("![](" + U + ")");
+if (!out.includes('src="' + U + '"')) throw new Error("image URL corrupted: " + out);
+if (out.includes("<em>")) throw new Error("emphasis leaked into URL: " + out);
+if (!out.includes('target="_blank"')) throw new Error("attr corrupted: " + out);
+const link = md("见 https://example.com/a_b_c 与 `https://x_y_z`");
+if (!link.includes('href="https://example.com/a_b_c"')) throw new Error("autolink broken: " + link);
+if (!link.includes("<code>https://x_y_z</code>")) throw new Error("code should not link: " + link);
+console.log("ok");
+"""
+
+
+def test_markdown_does_not_corrupt_urls(tmp_path):
+    """回归：URL 里的下划线不能被斜体规则误伤（图片 src 被拆坏会显示不出来）。"""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node 不可用")
+    script = tmp_path / "probe.js"
+    script.write_text(_JS_PROBE, encoding="utf-8")
+    subprocess.run(
+        [node, str(script), str(WEBUI / "assets/js/markdown.js")],
+        check=True,
+        capture_output=True,
+        text=True,
+    )

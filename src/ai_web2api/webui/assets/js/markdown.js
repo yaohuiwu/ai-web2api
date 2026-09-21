@@ -1,28 +1,31 @@
 // 轻量 markdown 渲染（自包含，无 CDN 依赖；先 esc 防 XSS，再解析标记）
 function mdInline(s) {
   s = esc(s);
-  // 行内代码：先用占位符保护，避免其中的 URL/标记被二次解析
-  const codes = [];
-  s = s.replace(/`([^`\n]+)`/g, (m, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
-  // 图片：![](url) 必须在链接之前（其内部含 [](url)）；包一层 <a> 便于点开大图
+  // 生成的 HTML 用占位符暂存：避免后续强调/下划线规则误伤 URL 与属性
+  // （图片 URL 常含 `_`，旧实现会把 src 拆坏 → 图片加载失败被当“丢失”）
+  const store = [];
+  const stash = (html) => { store.push(html); return `\u0000${store.length - 1}\u0000`; };
+  // 行内代码
+  s = s.replace(/`([^`\n]+)`/g, (m, c) => stash(`<code>${c}</code>`));
+  // 图片：![](url) 必须在链接之前（其内部含 [](url)）；包 <a> 便于点开大图
   s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g,
-    (m, alt, u) => `<a class="md-img" href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer"></a>`);
+    (m, alt, u) => stash(`<a class="md-img" href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer"></a>`));
   // 链接：仅 http(s) 白名单
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
-    (m, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`);
+    (m, t, u) => stash(`<a href="${u}" target="_blank" rel="noopener">${t}</a>`));
   // 裸 URL 自动链接（前面是行首/空白/(/> ；不会碰到已有 href/src/锚文本）
   s = s.replace(/(^|[\s(>])(https?:\/\/[^\s<)"']+)/g,
-    (m, pre, u) => `${pre}<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
-  // 换行 → <br>（在图片/链接之后，避免把标签拆开）
+    (m, pre, u) => `${pre}${stash(`<a href="${u}" target="_blank" rel="noopener">${u}</a>`)}`);
+  // 换行 → <br>
   s = s.replace(/\n/g, "<br>");
-  // 粗体 / 斜体 / 删除线
+  // 粗体 / 斜体 / 删除线（此时只剩纯文本 + 占位符）
   s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
   s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
   s = s.replace(/(^|[^_])_([^_\n]+)_/g, "$1<em>$2</em>");
   s = s.replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
-  // 还原行内代码
-  s = s.replace(/\u0000(\d+)\u0000/g, (m, i) => `<code>${codes[Number(i)]}</code>`);
+  // 还原暂存的 HTML
+  s = s.replace(/\u0000(\d+)\u0000/g, (m, i) => store[Number(i)]);
   return s;
 }
 
