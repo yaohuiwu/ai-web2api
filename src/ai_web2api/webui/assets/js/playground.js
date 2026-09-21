@@ -2,6 +2,8 @@
 let messages = [];      // 完整 OpenAI messages（含 assistant.tool_calls / role=tool）
 let rawLog = [];        // [{req, res|error}]
 let streaming = false;
+let pendingAttachments = [];   // 待发送附件 [{name, mime, dataUrl}]
+const MAX_ATT_MB = 20;
 
 const apiKeyEl = $("#apiKey");
 apiKeyEl.value = localStorage.getItem("aiw2api_api_key") || "";
@@ -33,7 +35,16 @@ function addMsg(role, content, opts = {}) {
   if (opts.thinking && opts.thinking.trim()) {
     inner += `<details class="thinking"><summary>💭 思考过程</summary>${md(opts.thinking)}</details>`;
   }
-  inner += md(content) + `</div>`;
+  inner += md(content);
+  if (opts.attachments && opts.attachments.length) {
+    inner +=
+      `<div class="att-thumbs">` +
+      opts.attachments
+        .map((a) => `<a class="att-thumb" href="${a.dataUrl}" target="_blank" rel="noopener">${attMedia(a)}</a>`)
+        .join("") +
+      `</div>`;
+  }
+  inner += `</div>`;
   div.innerHTML = inner;
   chat.appendChild(div);
   chat.scrollTop = chat.scrollHeight;
@@ -62,6 +73,59 @@ function addToolResultMsg(name, result) {
     `<pre>${esc(result)}</pre></div>`;
   chat.appendChild(div);
   chat.scrollTop = chat.scrollHeight;
+}
+
+// ---------- 附件（图片/视频）----------
+function attMedia(a) {
+  return (a.mime || "").startsWith("video/")
+    ? `<video src="${a.dataUrl}" muted playsinline></video>`
+    : `<img src="${a.dataUrl}" alt="${esc(a.name)}">`;
+}
+
+function addAttachment(file) {
+  if (!file) return;
+  if (file.size > MAX_ATT_MB * 1024 * 1024) {
+    $("#hint").textContent = `附件 ${file.name} 超过 ${MAX_ATT_MB}MB，已跳过`;
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    pendingAttachments.push({
+      name: file.name,
+      mime: file.type || "application/octet-stream",
+      dataUrl: reader.result,
+    });
+    renderAttachments();
+  };
+  reader.readAsDataURL(file);
+}
+
+function renderAttachments() {
+  const box = $("#attachments");
+  if (!pendingAttachments.length) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = pendingAttachments
+    .map(
+      (a, i) =>
+        `<div class="att">${attMedia(a)}<span class="att-name">${esc(a.name)}</span>` +
+        `<button class="att-del" data-i="${i}" title="移除">×</button></div>`
+    )
+    .join("");
+  box.querySelectorAll(".att-del").forEach((b) => {
+    b.onclick = () => {
+      pendingAttachments.splice(Number(b.dataset.i), 1);
+      renderAttachments();
+    };
+  });
+}
+
+function clearAttachments() {
+  pendingAttachments = [];
+  renderAttachments();
 }
 
 function addMeta(text) {
@@ -103,10 +167,20 @@ function currentTools() {
   }
 }
 
-function buildBody() {
+function buildBody(attachParts) {
+  // 附件只附着在“本轮”最后一条 user 消息上；历史保持文本，避免每轮重复上传
+  const msgs = messages.map((m, i) => {
+    if (attachParts && attachParts.length && i === messages.length - 1 && m.role === "user") {
+      return {
+        role: "user",
+        content: [{ type: "text", text: String(m.content || "") }, ...attachParts],
+      };
+    }
+    return m;
+  });
   const body = {
     model: $("#model").value,
-    messages: [...messages],
+    messages: msgs,
     stream: $("#stream").checked,
     deep_think: $("#deepThink").checked,
     search: $("#search").checked,
@@ -286,12 +360,12 @@ async function sendStream(body) {
 }
 
 // 一轮请求 + （可选）工具自动执行闭环
-async function dispatchLoop() {
+async function dispatchLoop(firstAttachments = null) {
   $("#send").disabled = true;
   streaming = true;
   try {
     for (let round = 0; round < 6; round++) {
-      const body = buildBody();
+      const body = buildBody(round === 0 ? firstAttachments : null);
       const result = body.stream ? await sendStream(body) : await sendNonStream(body);
       if (result.toolCalls && result.toolCalls.length) {
         messages.push({ role: "assistant", content: null, tool_calls: result.toolCalls });
@@ -321,14 +395,17 @@ async function dispatchLoop() {
 
 async function send() {
   const text = $("#input").value.trim();
-  if (!text || streaming) return;
-  messages.push({ role: "user", content: text });
-  addMsg("user", text);
+  if ((!text && !pendingAttachments.length) || streaming) return;
+  const atts = pendingAttachments.slice();
+  const parts = atts.map((a) => ({ type: "image_url", image_url: { url: a.dataUrl } }));
+  messages.push({ role: "user", content: text });   // 历史存文本，附件只发本轮
+  addMsg("user", text, { attachments: atts });
   localStorage.setItem("aiw2api_model", $("#model").value);
   const tid = $("#threadId").value.trim();
   if (tid) addMeta(`thread_id: ${tid}（绑定会话，续用只发最后一条）`);
   $("#input").value = "";
-  await dispatchLoop();
+  clearAttachments();
+  await dispatchLoop(parts);
 }
 
 $("#send").onclick = send;
@@ -477,6 +554,11 @@ $("#newChat").onclick = newChat;
 $("#refreshThreads").onclick = refreshThreads;
 
 setupToolsPanel();
+$("#attachBtn").onclick = () => $("#fileInput").click();
+$("#fileInput").addEventListener("change", (e) => {
+  for (const f of e.target.files) addAttachment(f);
+  e.target.value = "";
+});
 loadModels();
 refreshThreads();
 $("#input").focus();

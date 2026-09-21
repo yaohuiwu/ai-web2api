@@ -191,6 +191,7 @@ resp = client.chat.completions.create(
 - 服务端把附件解码为临时文件 → 通过页面 `input[type=file]` 上传 → 随消息发送；`selectors.upload_input` 配置化（找不到上传入口 → 400 `attachments_error`）
 - 限制：**最多 50 个、每个最大 100MB**，超限 400 `attachments_error`（与 Web 端 tooltips 一致）
 - 附件仅作用于本次请求的 user 消息（thread 续用时注入的历史为纯文本，图片不会重放）；页面找不到上传入口（如后续 UI 再改版）→ 400
+- **Playground**：点输入框左侧 📎 选择**图片/视频**（可多选），已选文件会以缩略图预览、可逐个移除；发送时作为 `image_url`（data URL）随消息发出。
 
 ### 2.8 Function Calling（工具调用）
 

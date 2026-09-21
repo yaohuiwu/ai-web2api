@@ -68,10 +68,13 @@
 </div>
 
 <div id="inputBar">
+  <div id="attachments" class="attachments" hidden></div>
   <div id="inputWrap">
+    <button class="btn" id="attachBtn" title="上传图片/视频">📎</button>
     <textarea id="input" rows="2" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
     <button class="btn primary" id="send">发送</button>
     <button class="btn" id="clear">清空</button>
+    <input type="file" id="fileInput" multiple accept="image/*,video/*" hidden>
   </div>
   <div class="hint" id="hint"></div>
 </div>
