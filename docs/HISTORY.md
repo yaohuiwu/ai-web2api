@@ -155,8 +155,8 @@ input.addEventListener("keydown", (e) => {
 
 ## 6. 分步计划（每步检查通过后单独提交）
 
-- [ ] **Step 0**：本计划写入 `docs/HISTORY.md`。（提交）
-- [ ] **Step 1**：新增 `core/store.py` + `tests/test_thread_store.py`（CRUD / 排序 /
+- [x] **Step 0**：本计划写入 `docs/HISTORY.md`。（提交）
+- [x] **Step 1**：新增 `core/store.py` + `tests/test_thread_store.py`（CRUD / 排序 /
       级联删除 / JSON 迁移）。独立可测，不接入业务。（提交）
 - [ ] **Step 2**：重构 `core/threads.py` 走 `ThreadStore`，启动迁移并删除 `threads.json`；
       补/改测试。（提交）
