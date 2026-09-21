@@ -181,6 +181,9 @@ input.addEventListener("keydown", (e) => {
 
 ## 8. 验证记录（2026-09）
 
+- **测试分层**：默认 `pytest` 只跑快速单测（约 1s，62 个）；假页 subprocess e2e（`test_mode_presets` /
+  `test_history_endpoint`）标 `slow`、真实服务用例（`test_openai_compat`）标 `live`，默认排除，
+  用 `pytest -m slow` / `pytest -m live` / `pytest -o addopts=""` 按需运行。
 - 单元/单元集成测试：`tests/test_thread_store.py`、`tests/test_threads_persistence.py`、
   `tests/test_history_endpoint.py`（假页端到端）、`tests/test_playground_ime.py`、
   `tests/test_playground_history.py` 全部通过。

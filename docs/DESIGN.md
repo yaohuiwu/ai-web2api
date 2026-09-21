@@ -217,7 +217,9 @@ textbox.fill(最终消息)  →  press Enter
 
 1. **假页端到端**：`AI_WEB2API_CONFIG=config.fake.yaml` 启动服务（指向 `tests/fake_chat.html`，无需真实账号/登录），curl 验证 `/v1/models`、非流式、SSE 流式 —— CI 可用。
 2. **DeepSeek 真实链路**：配 `.env` 凭据自动登录（或 `/admin/deepseek/login/start` 手动登录一次）→ 启动服务 → curl / OpenAI SDK 验证真实回复。
-3. **pytest**：`tests/test_openai_compat.py` 用官方 openai SDK 对**已启动的服务**跑真实用例；其余测试为纯单元/假页端到端。
+3. **pytest**：默认 `pytest` 只跑快速单测；慢的假页 subprocess e2e 标 `slow`、
+   依赖已启动真实服务的用例标 `live`，两者默认排除。`pytest -m slow` / `pytest -m live` /
+   `pytest -o addopts=""`（全部）按需运行。
 
 ---
 

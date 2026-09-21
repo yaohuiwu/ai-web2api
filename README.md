@@ -194,6 +194,19 @@ resp = client.chat.completions.create(
 
 ### 3. 自测（不需要登录）
 
+#### 3.1 pytest
+
+默认 `pytest` 只跑**快速单测**（几秒内）；起 subprocess/Playwright 的端到端用例（`slow`）与依赖真实服务的用例（`live`）默认用标记排除，按需显式运行：
+
+```bash
+.venv/bin/python -m pytest                 # 快速（默认，约 1s）
+.venv/bin/python -m pytest -m slow         # 假页 subprocess 端到端（test_mode_presets / test_history_endpoint）
+.venv/bin/python -m pytest -m live         # 需已启动且已登录的服务（test_openai_compat）
+.venv/bin/python -m pytest -o addopts=""   # 全部（含 slow + live）
+```
+
+#### 3.2 假聊天页
+
 仓库带一个假聊天页 + 假配置，把 DeepSeek 驱动完整跑一遍（含思考区提取、流式、Markdown 转换、超时/错误路径）：
 
 ```bash
@@ -203,11 +216,13 @@ curl http://127.0.0.1:8001/v1/chat/completions \
   -d '{"model": "fake-r1", "messages": [{"role": "user", "content": "你好"}]}'
 ```
 
-**OpenAI SDK 真实 API 测试**（`tests/test_openai_compat.py`，16 个用例，跑**已启动的服务**、真登录 DeepSeek）：
+#### 3.3 OpenAI SDK 真实 API 测试
+
+`tests/test_openai_compat.py`（16 个用例，标 `live`，跑**已启动的服务**、真登录 DeepSeek）：
 
 ```bash
 .venv/bin/python -m ai_web2api.main                                    # 先起服务（默认 127.0.0.1:8000）
-.venv/bin/python -m pytest tests/test_openai_compat.py -v              # 另开终端
+.venv/bin/python -m pytest -m live tests/test_openai_compat.py -v      # 另开终端
 ```
 
 服务未启动或未登录时整模块 skip；`AI_WEB2API_BASE_URL` 可指向别的端口。用例结束会 DELETE 掉自己新建的会话（不动你原有的会话）。

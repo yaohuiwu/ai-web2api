@@ -24,3 +24,16 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ai_web2api"]
+
+[tool.pytest.ini_options]
+# 默认只跑快速单测；「慢的（起 subprocess/Playwright 的 e2e）」与「依赖真实服务的」
+# 用例用标记默认排除，按需显式运行：
+#   pytest                  # 快速（默认）
+#   pytest -m slow          # 假页 subprocess 端到端
+#   pytest -m live          # 需已启动且已登录的服务
+#   pytest -o addopts=""    # 全部（含 slow + live）
+markers = [
+    "slow: 起 subprocess/Playwright 的端到端用例（较慢，默认排除）",
+    "live: 需要已启动且已登录的 ai-web2api 服务（默认排除）",
+]
+addopts = '-m "not slow and not live"'

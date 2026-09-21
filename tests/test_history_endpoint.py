@@ -23,6 +23,8 @@ ROOT = Path(__file__).resolve().parent.parent
 PYTHON = ROOT / ".venv" / "bin" / "python"
 FAKE_CONFIG = ROOT / "config.fake.yaml"
 
+pytestmark = pytest.mark.slow  # 起 subprocess + Playwright 的 e2e，默认排除
+
 
 def _free_port() -> int:
     with socket.socket() as s:

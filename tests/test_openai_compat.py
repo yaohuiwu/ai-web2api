@@ -39,6 +39,8 @@ PNG2_B64 = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwA
 DATA_URL = "data:image/png;base64," + PNG_B64
 DATA_URL_2 = "data:image/png;base64," + PNG2_B64
 
+pytestmark = pytest.mark.live  # 需要已启动且已登录的服务，默认排除
+
 
 def _get(path: str) -> dict:
     with urllib.request.urlopen(f"{BASE}{path}", timeout=10) as r:
