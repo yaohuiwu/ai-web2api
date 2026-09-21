@@ -100,7 +100,8 @@ class BaseProvider(abc.ABC):
         try:
             await page.goto(self.cfg.url, wait_until="domcontentloaded", timeout=30000)
             # 聊天页是 SPA，输入框在 domcontentloaded 后才渲染，需轮询等待
-            sel = await wait_first_match(page, self.login_check_selectors, timeout=8.0)
+            # （冷启动加载较慢，给足 15s，避免误报未登录）
+            sel = await wait_first_match(page, self.login_check_selectors, timeout=15.0)
             return sel is not None
         except Exception:
             return False
