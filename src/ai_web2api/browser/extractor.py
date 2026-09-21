@@ -32,6 +32,22 @@ _MD_JS = r"""
       if (child.nodeType === 1) walk(child, list);
     });
   };
+  const seenImgs = new Set();
+  const pushImg = (node, list) => {
+    const altRaw = node.getAttribute ? (node.getAttribute("alt") || "") : "";
+    let src = node.getAttribute ? (node.getAttribute("src") || node.src || "") : (node.src || "");
+    let alt = altRaw;
+    // ChatGPT 把原图 URL 塞进 alt（purpose=fullsize），src 是缩略图（purpose=inline）
+    // → 优先用原图；alt 是 URL 的一律清掉，避免 `![http...](http...)` 垃圾
+    if (/^https?:\/\//.test(alt)) {
+      if (src && !/purpose=inline/.test(src)) { alt = ""; }
+      else { src = alt; alt = ""; }
+    }
+    if (!src) { return; }
+    if (seenImgs.has(src)) { return; }
+    seenImgs.add(src);
+    list.push("![" + alt + "](" + src + ")");
+  };
   const walk = (node, list) => {
     const tag = node.tagName.toLowerCase();
     const cls = typeof node.className === "string" ? node.className : "";
@@ -90,7 +106,11 @@ _MD_JS = r"""
       return;
     }
     if (tag === "br") { list.push("\n"); return; }
-    if (tag === "img") { list.push("![" + (node.alt || "") + "](" + (node.src || "") + ")"); return; }
+    if (tag === "button") {   // UI 按钮（收藏/复制/重生成…）：只留图片，丢弃按钮文案
+      node.querySelectorAll("img").forEach((im) => pushImg(im, list));
+      return;
+    }
+    if (tag === "img") { pushImg(node, list); return; }
     if (["strong","b"].includes(tag)) { list.push("**" + node.textContent + "**"); return; }
     if (["em","i"].includes(tag)) { list.push("*" + node.textContent + "*"); return; }
     if (tag === "a") { list.push("[" + node.textContent + "](" + node.href + ")"); return; }
