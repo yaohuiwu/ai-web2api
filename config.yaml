@@ -182,3 +182,54 @@ providers:
     min_wait_before_stable: 10.0
     # 0 = 关闭忙检测：Qwen 走 DOM 兜底，首帧容器可能 >20s 才出现，否则误判"页面正忙"
     thread_busy_timeout: 0
+
+  # ChatGPT（chatgpt.com）。**无密码自动登录** → login.mode: manual，用 CLI/UI 导入 state。
+  # 选择器为候选值，需登录后实测校准（见 docs/PROVIDER_CHATGPT.md）。
+  chatgpt:
+    driver: chatgpt
+    url: https://chatgpt.com/
+    locale: en-US               # ChatGPT 默认英文 UI，选择器用英文 aria-label
+    session_url: "{base}/c/{id}"  # 会话 URL: chatgpt.com/c/<uuid>
+    models:
+      - {name: gpt-5-web,  ui_label: "GPT-5"}
+      - {name: gpt-4o-web, ui_label: "GPT-4o"}
+      - {name: o3-web,     ui_label: "o3"}
+    selectors:
+      input:                    # contenteditable（ProseMirror）
+        - "#prompt-textarea"
+        - "div.ProseMirror[contenteditable='true']"
+      type_prompt: true         # contenteditable/React → 逐字输入
+      send_button:
+        - 'button[data-testid="send-button"]'
+        - 'button[aria-label="Send prompt"]'
+      stop_button:              # 生成中用停止按钮判定结束（可靠）
+        - 'button[data-testid="stop-button"]'
+      response_container:
+        - '[data-message-author-role="assistant"] .markdown'
+      thinking_container: []    # o 系列思考结构待实测
+      login_check:              # 登录后才有的账号入口
+        - '[data-testid="profile-button"]'
+        - 'button[aria-label*="Account"]'
+      new_chat_button:
+        - 'a[data-testid="create-new-chat-button"]'
+        - '[aria-label="New chat"]'
+      model_menu:               # 顶部模型切换下拉
+        trigger: ['button[data-testid="model-switcher-dropdown-button"]']
+        option:
+          - '[role="menuitemradio"]:has-text("{label}")'
+          - '[role="option"]:has-text("{label}")'
+      attachment_menu:          # "+" → 上传/添加照片与文件
+        trigger: ['button[data-testid="composer-plus-btn"]', 'button[aria-label*="Add"]']
+        item:
+          - '[role="menuitem"]:has-text("Add photos & files")'
+          - '[role="menuitem"]:has-text("Upload")'
+        file_input: ['input[type="file"]']
+    login:
+      mode: manual
+      hint: "ChatGPT 无密码登录；请用 python -m ai_web2api.cli login chatgpt 或 /ui 导入 state"
+    queue: {max_size: 10, timeout: 60}
+    response_timeout: 180
+    poll_interval: 0.2
+    stable_polls: 20
+    min_wait_before_stable: 10.0
+    thread_busy_timeout: 0
