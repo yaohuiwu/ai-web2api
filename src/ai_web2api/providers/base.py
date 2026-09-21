@@ -78,8 +78,25 @@ class BaseProvider(abc.ABC):
     def login_check_selectors(self) -> list[str]:
         return self.cfg.selectors.login_check or self.cfg.selectors.input
 
+    @property
+    def locale(self) -> str:
+        """页面语言（provider 可覆盖；空则用全局 browser.locale）。"""
+        return self.cfg.locale or self.browser.default_locale
+
+    @property
+    def login_url(self) -> str:
+        """登录页 URL（provider 可单独指定，如 Qwen /auth；空则用聊天页 URL）。"""
+        return self.cfg.login.url or self.cfg.url
+
+    def session_url(self, url_id: str) -> str | None:
+        """thread 恢复 URL：由 ``provider.session_url`` 模板生成（未配返回 None）。"""
+        tpl = self.cfg.session_url
+        if not tpl:
+            return None
+        return tpl.format(base=self.cfg.url.rstrip("/"), id=url_id)
+
     async def check_login(self) -> bool:
-        page = await self.browser.open_page(self.name)
+        page = await self.browser.open_page(self.name, locale=self.locale)
         try:
             await page.goto(self.cfg.url, wait_until="domcontentloaded", timeout=30000)
             # 聊天页是 SPA，输入框在 domcontentloaded 后才渲染，需轮询等待
@@ -113,9 +130,9 @@ class BaseProvider(abc.ABC):
                     f"{cfg.login.password_env}（或 username / password）"
                 ),
             }
-        page = await self.browser.open_page(self.name)
+        page = await self.browser.open_page(self.name, locale=self.locale)
         try:
-            await page.goto(cfg.url, wait_until="domcontentloaded", timeout=30000)
+            await page.goto(self.login_url, wait_until="domcontentloaded", timeout=30000)
 
             lp = cfg.login.page
             # SPA 在 domcontentloaded 后才渲染 DOM：等「已登录（聊天输入框）」
@@ -246,7 +263,9 @@ class BaseProvider(abc.ABC):
 
         供无状态请求与 ThreadManager（会话绑定）共用。
         """
-        page = await self.browser.open_page(self.name, init_scripts=self.init_scripts())
+        page = await self.browser.open_page(
+            self.name, init_scripts=self.init_scripts(), locale=self.locale
+        )
         await page.goto(self.cfg.url, wait_until="domcontentloaded", timeout=30000)
         try:
             # 聊天页是 SPA，输入框在 domcontentloaded 后才渲染，需轮询等待

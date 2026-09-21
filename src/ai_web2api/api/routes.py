@@ -419,8 +419,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
     @router.post("/admin/{name}/login/start")
     async def login_start(name: str):
         provider = registry.get_provider(name)
-        page = await provider.browser.open_page(name)
-        await page.goto(provider.cfg.url, wait_until="domcontentloaded", timeout=30000)
+        page = await provider.browser.open_page(name, locale=provider.locale)
+        await page.goto(provider.login_url, wait_until="domcontentloaded", timeout=30000)
         headless = registry.config.browser.headless
         hint = provider.cfg.login.hint or f"请在浏览器窗口完成登录后调用 /admin/{name}/login/status"
         if headless:
@@ -462,7 +462,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
     @router.post("/admin/{name}/login/cookies")
     async def login_cookies(name: str, payload: CookiesPayload):
         provider = registry.get_provider(name)
-        ctx = await provider.browser.get_context(name)
+        ctx = await provider.browser.get_context(name, locale=provider.locale)
         # playwright 的 dict 形式使用 camelCase 字段名，与 CookieItem.model_dump() 一致
         await ctx.add_cookies([c.model_dump() for c in payload.cookies])  # type: ignore[arg-type]
         # 注入即变更：必须落盘（不受"已登录未过期就不写"规则约束）
@@ -485,7 +485,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
     async def debug_dom(name: str, selector: str, index: int = 0):
         """返回页面中匹配 selector 的元素 HTML，用于排查选择器失效。"""
         provider = registry.get_provider(name)
-        page = await provider.browser.open_page(name)
+        page = await provider.browser.open_page(name, locale=provider.locale)
         try:
             await page.goto(provider.cfg.url, wait_until="domcontentloaded", timeout=30000)
             result = await page.evaluate(
@@ -503,7 +503,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
     async def debug_probe(name: str, payload: ProbePayload):
         """发一条消息并 dump 响应区 DOM 结构（用于确定新 UI 的响应/思考容器选择器）。"""
         provider = registry.get_provider(name)
-        page = await provider.browser.open_page(name)
+        page = await provider.browser.open_page(name, locale=provider.locale)
         try:
             await page.goto(provider.cfg.url, wait_until="domcontentloaded", timeout=30000)
             input_sel = await extractor.first_match(page, provider.cfg.selectors.input)

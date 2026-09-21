@@ -92,18 +92,27 @@ class BrowserManager:
     def state_path(self, provider: str) -> Path:
         return self._profiles_dir / provider / "state.json"
 
-    async def get_context(self, provider: str) -> BrowserContext:
+    @property
+    def default_locale(self) -> str:
+        return self._cfg.locale
+
+    @property
+    def user_agent(self) -> str:
+        return self._cfg.user_agent
+
+    async def get_context(self, provider: str, locale: str | None = None) -> BrowserContext:
         if provider in self._contexts:
             return self._contexts[provider]
         assert self._browser is not None, "browser not started"
         state = self.state_path(provider)
+        loc = locale or self._cfg.locale
         kwargs: dict = {
             "user_agent": self._cfg.user_agent,
             "viewport": self._cfg.viewport,
-            "locale": self._cfg.locale,
+            "locale": loc,
             # 显式 Accept-Language：页面 UI 语言（以及中文选择器）由它决定
             "extra_http_headers": {
-                "Accept-Language": self._accept_language(self._cfg.locale)
+                "Accept-Language": self._accept_language(loc)
             },
         }
         if state.exists():
@@ -208,13 +217,19 @@ class BrowserManager:
         if path.exists():
             path.unlink()
 
-    async def open_page(self, provider: str, init_scripts: list[str] | None = None) -> Page:
+    async def open_page(
+        self,
+        provider: str,
+        init_scripts: list[str] | None = None,
+        locale: str | None = None,
+    ) -> Page:
         """新开页面（调用方随后 goto）。
 
         ``init_scripts``：provider 提供的页面级注入脚本（如 DeepSeek 的 XHR 网络
         监听），在 goto 之前注入（add_init_script 只对后续导航生效）。
+        ``locale``：provider 级语言覆盖（空 = 全局 browser.locale）。
         """
-        ctx = await self.get_context(provider)
+        ctx = await self.get_context(provider, locale=locale)
         page = await ctx.new_page()
         for script in init_scripts or []:
             await page.add_init_script(script)

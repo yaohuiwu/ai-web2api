@@ -261,10 +261,14 @@ class ThreadManager:
                         f"{entry['model']}，无法切换到 {model}",
                     )
                 page = await provider.browser.open_page(
-                    provider.name, init_scripts=provider.init_scripts()
+                    provider.name,
+                    init_scripts=provider.init_scripts(),
+                    locale=provider.locale,
                 )
                 try:
-                    restore_url = f"{provider.cfg.url.rstrip('/')}/a/chat/s/{entry['url_id']}"
+                    restore_url = provider.session_url(entry["url_id"])
+                    if restore_url is None:
+                        raise RuntimeError("session_url 模板未配置")
                     await page.goto(restore_url, wait_until="domcontentloaded", timeout=30000)
                     await page.wait_for_timeout(2000)  # SPA 渲染会话页
                     sel = await extractor.first_match(page, provider.cfg.selectors.input)

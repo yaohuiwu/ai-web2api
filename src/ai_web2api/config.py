@@ -108,6 +108,7 @@ class LoginPageSelectors(BaseModel):
 class LoginConfig(BaseModel):
     mode: Literal["manual", "cookies", "auto"] = "manual"
     hint: str = ""
+    url: str | None = None  # 登录页 URL（与聊天页不同时用，如 Qwen 的 /auth；空 = 用 provider.url）
     # auto 模式：.env 中凭据的键名
     username_env: str = "DEEPSEEK_USERNAME"
     password_env: str = "DEEPSEEK_PASSWORD"
@@ -129,6 +130,8 @@ class ProviderConfig(BaseModel):
     enabled: bool = True
     driver: str = ""                # 驱动类名，空 = 用 name
     url: str
+    locale: str | None = None       # 覆盖全局 browser.locale（多 provider 语言不同）
+    session_url: str | None = None  # thread 恢复 URL 模板：{base}（无尾斜杠） / {id}
     models: list[ModelConfig]
     selectors: SelectorsConfig = Field(default_factory=SelectorsConfig)
     login: LoginConfig = Field(default_factory=LoginConfig)

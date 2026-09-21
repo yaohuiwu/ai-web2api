@@ -27,6 +27,7 @@ profiles_dir: profiles
 providers:
   deepseek:
     url: https://chat.deepseek.com
+    session_url: "{base}/a/chat/s/{id}"  # thread 恢复 URL 模板（{base}=url 去尾斜杠）
     models:
       - {name: deepseek-web, ui_label: "DeepSeek 最新版"}
       - {name: deepseek-r1-web, ui_label: "DeepSeek-R1"}
