@@ -155,6 +155,9 @@ class BaseProvider(abc.ABC):
                 self.browser.clear_login_error(self.name)
                 return {"ok": True, "already_logged_in": True}
 
+            # 等加载遮罩消失：否则 #splash-screen 会拦截后续点击（Qwen 实测）
+            await self._wait_loading_gone(page, lp)
+
             # 若默认是验证码 tab，先切到"密码登录"
             tab_sel = await first_match(page, lp.password_tab)
             if tab_sel is not None:
@@ -202,6 +205,15 @@ class BaseProvider(abc.ABC):
         if path:
             out["screenshot"] = f"/admin/{self.name}/login/screenshot"
         return out
+
+    @staticmethod
+    async def _wait_loading_gone(page: "Page", lp) -> None:
+        """等登录页加载遮罩消失（state=hidden：不存在也算通过）。"""
+        for sel in lp.splash:
+            try:
+                await page.wait_for_selector(sel, state="hidden", timeout=15000)
+            except Exception:  # noqa: BLE001
+                pass
 
     async def complete(
         self,

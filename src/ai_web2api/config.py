@@ -99,6 +99,7 @@ class LoginPageSelectors(BaseModel):
     """登录页选择器（候选列表，取第一个匹配的）。DeepSeek 2026-08 实测值见 config.yaml。"""
 
     password_tab: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 切"密码登录"tab（默认可能是验证码 tab）
+    splash: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 加载遮罩：点击前等它消失（否则拦截点击）
     username: Annotated[list[str], BeforeValidator(_norm_selectors)] = [
         "input[placeholder*=\"手机号\"]",
         "input[type=text]",
