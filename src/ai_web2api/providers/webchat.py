@@ -73,6 +73,9 @@ class WebChatProvider(BaseProvider):
     ATTACH_WAIT_SECONDS: float = 60.0
     ATTACH_PREVIEW_EXCLUDE: str = ""  # 预览计数时排除的容器（如消息区）
 
+    # 下拉菜单 option 出现的等待上限（秒）
+    MENU_OPTION_TIMEOUT: float = 5.0
+
     # ---------- 主流程 ----------
 
     async def generate(
@@ -101,7 +104,7 @@ class WebChatProvider(BaseProvider):
             logger.info("[%s] input matched: %s", self.name, input_sel)
 
             # 发送前应用模型/模式/开关（在记录容器数量之前，避免 UI 重渲染影响增量判定）
-            await self._apply_model(page, model)
+            await self._apply_model(page, model, can_set=not resume)
             await self._apply_options(
                 page, mode, deep_think, search, can_set_mode=not resume
             )
@@ -185,7 +188,17 @@ class WebChatProvider(BaseProvider):
         cfg = self.cfg
         sels = cfg.selectors
         if mode:
-            if not sels.mode_button:
+            if sels.mode_menu.trigger and sels.mode_menu.option:
+                # 下拉菜单形态：在输入框内，resume 时也可切
+                label = sels.mode_menu.labels.get(mode)
+                if label is None:
+                    logger.warning(
+                        "[%s] mode=%r 无 labels 映射（%s），忽略",
+                        self.name, mode, list(sels.mode_menu.labels),
+                    )
+                else:
+                    await self._select_menu_option(page, sels.mode_menu, label, what="mode")
+            elif not sels.mode_button:
                 # 无模式选择区：mode 只能翻译成开关
                 preset = self.MODE_PRESETS.get(mode)
                 if preset is None:
@@ -284,9 +297,68 @@ class WebChatProvider(BaseProvider):
             return False
         return True
 
-    async def _apply_model(self, page: Page, model: str | None) -> None:
-        """在页面 UI 选择模型（默认无操作；子类按 ``selectors.model_menu`` 覆写）。"""
-        return None
+    async def _apply_model(self, page: Page, model: str | None, can_set: bool = True) -> None:
+        """按 ``selectors.model_menu`` 在页面选择模型（``model`` 名 → ``ui_label``）。
+
+        未配置菜单 / 已是目标 / ``can_set=False``（resume）时不做任何操作。
+        """
+        menu = self.cfg.selectors.model_menu
+        if not menu.trigger or not menu.option or not model:
+            return
+        if not can_set:
+            logger.info("[%s] model=%s ignored (resume)", self.name, model)
+            return
+        label = model
+        for m in self.cfg.models:
+            if m.name == model:
+                label = m.ui_label or m.name
+                break
+        await self._select_menu_option(page, menu, label, what="model")
+
+    async def _select_menu_option(self, page: Page, menu, label: str, *, what: str) -> bool:
+        """下拉菜单选择：点 trigger → 点 option（``{label}`` 占位）→ 可选读回校验。"""
+        if not menu.trigger or not menu.option:
+            return False
+        # 已是目标值 → 跳过
+        if menu.current and label:
+            cur_sel = await extractor.first_match(page, menu.current)
+            if cur_sel is not None:
+                try:
+                    cur = (await page.locator(cur_sel).first.inner_text() or "").strip()
+                except Exception:
+                    cur = ""
+                if cur == label:
+                    logger.info("[%s] %s already %r", self.name, what, label)
+                    return True
+        trigger = await extractor.first_match(page, menu.trigger)
+        if trigger is None:
+            logger.info("[%s] %s menu trigger not found", self.name, what)
+            return False
+        try:
+            await page.locator(trigger).first.click()
+            await page.wait_for_timeout(500)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s] %s menu open failed: %s", self.name, what, e)
+            return False
+        cands = [s.replace("{label}", label) for s in menu.option]
+        opt = await extractor.wait_first_match(page, cands, timeout=self.MENU_OPTION_TIMEOUT)
+        if opt is None:
+            logger.warning(
+                "[%s] %s option %r not found (cands=%s)", self.name, what, label, cands
+            )
+            try:
+                await page.keyboard.press("Escape")  # 关掉展开的菜单
+            except Exception:
+                pass
+            return False
+        try:
+            await page.locator(opt).first.click()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s] %s option click failed: %s", self.name, what, e)
+            return False
+        await page.wait_for_timeout(500)
+        logger.info("[%s] %s -> %r", self.name, what, label)
+        return True
 
     @staticmethod
     async def _is_checked(page: Page, sel: str, checked_sels: list[str]) -> bool:

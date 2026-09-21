@@ -35,6 +35,32 @@ def _norm_selectors(v: Any) -> list[str]:
     return [s for s in v if s and isinstance(s, str)]
 
 
+class MenuConfig(BaseModel):
+    """下拉菜单（Ant Design 风格）：点 ``trigger`` 展开，再点 ``option``。
+
+    ``option`` 里可用 ``{label}`` 占位（如 ``div[role=option]:has-text("{label}")``），
+    运行时用目标文案（模型 ``ui_label`` / 模式 labels）替换。``current`` 可选，
+    用于读回当前值、已是目标则跳过。
+    """
+
+    trigger: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
+    option: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
+    current: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
+
+
+class ModeMenuConfig(MenuConfig):
+    """模式下拉：API ``mode`` → UI 文案（``labels``）。"""
+
+    labels: dict[str, str] = {}
+
+
+class AttachmentMenuConfig(BaseModel):
+    """附件入口：可选先点 ``trigger`` 打开菜单，再 ``set_input_files(file_input)``。"""
+
+    trigger: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
+    file_input: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
+
+
 class SelectorsConfig(BaseModel):
     # 每个字段都是"候选列表"：按顺序取第一个在页面上匹配的选择器（UI 改版容错）
     input: Annotated[list[str], BeforeValidator(_norm_selectors)] = ["textarea#chat-input"]
@@ -55,6 +81,11 @@ class SelectorsConfig(BaseModel):
     toggle_button: dict[str, list[str]] = {}
     toggle_checked: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 判断开关已开
     upload_input: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 附件上传入口（input[type=file] 等）
+
+    # 下拉菜单形态（可选）：模型选择 / 模式选择 / 附件入口
+    model_menu: MenuConfig = Field(default_factory=MenuConfig)
+    mode_menu: ModeMenuConfig = Field(default_factory=ModeMenuConfig)
+    attachment_menu: AttachmentMenuConfig = Field(default_factory=AttachmentMenuConfig)
 
 
 class LoginPageSelectors(BaseModel):
