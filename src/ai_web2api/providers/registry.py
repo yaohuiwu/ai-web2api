@@ -47,6 +47,7 @@ class ProviderRegistry:
         self._aliases: dict[str, str] = {}  # 别名 → 真实模型名（客户端兼容层）
         self._alias_owner: dict[str, str] = {}  # 别名 → provider 名（用于暴露列表）
         self._login_status: dict[str, bool] = {}
+        self._fail_counts: dict[str, int] = {}  # 连续检测失败次数（防抖，见 _update_status）
 
         for pcfg in config.providers:
             if not pcfg.enabled:
@@ -136,6 +137,27 @@ class ProviderRegistry:
     def login_status(self) -> dict[str, bool]:
         return dict(self._login_status)
 
+    def _update_status(self, name: str, ok: bool) -> bool:
+        """写入登录态（带防抖）。
+
+        后台检测会开新页，Qwen 这类站点对多标签/瞬时波动会误报未登录；
+        因此从「已登录」转「未登录」需**连续 2 次**失败才生效，返回最终状态。
+        显式动作（登录/退出）不走这里，直接 set_login_status。
+        """
+        prev = self._login_status.get(name, False)
+        if not ok and prev:
+            n = self._fail_counts.get(name, 0) + 1
+            self._fail_counts[name] = n
+            if n < 2:
+                logger.info(
+                    "login status %s: 本次检测失败，但上次已登录 → 忽略瞬时失败（%d/2）", name, n
+                )
+                return True
+        if ok:
+            self._fail_counts[name] = 0
+        self._login_status[name] = ok
+        return ok
+
     async def refresh_login_status(self) -> None:
         if not self.config.browser.status_check:
             logger.info("定时状态检测已关闭（browser.status_check=false），跳过")
@@ -149,8 +171,8 @@ class ProviderRegistry:
             except Exception as e:  # noqa: BLE001
                 logger.warning("check_login(%s) 失败: %s", name, e)
                 ok = False
-            self._login_status[name] = ok
-            logger.info("login status %s: %s", name, ok)
+            effective = self._update_status(name, ok)
+            logger.info("login status %s: %s", name, effective)
 
     async def _refresh_login_status_headless(self) -> None:
         """用独立 headless 浏览器做定时状态检测（不占用/不弹出主浏览器窗口）。
@@ -190,7 +212,7 @@ class ProviderRegistry:
                             await ctx.close()
                     except Exception as e:  # noqa: BLE001
                         logger.warning("headless check_login(%s) 失败: %s", name, e)
-                    self._login_status[name] = ok
-                    logger.info("login status %s: %s (headless)", name, ok)
+                    self._login_status[name] = self._update_status(name, ok)
+                    logger.info("login status %s: %s (headless)", name, self._login_status[name])
             finally:
                 await browser.close()

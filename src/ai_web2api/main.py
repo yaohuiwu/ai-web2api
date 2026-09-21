@@ -297,6 +297,8 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
                 await asyncio.sleep(cfg.browser.login_check_interval)
                 before = registry.login_status()
                 await registry.refresh_login_status()
+                # 掉线且配了自动登录凭据 → 自愈重登（模式=auto 且未登录时才会动作）
+                await _auto_login_missing(registry)
                 after = registry.login_status()
                 for name in registry.providers():
                     if not after.get(name):

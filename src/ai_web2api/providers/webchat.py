@@ -145,17 +145,22 @@ class WebChatProvider(BaseProvider):
                 await page.close()
 
     async def _ensure_input(self, page: Page, resume: bool) -> str:
-        """定位输入框；resume 时页面被打断先 reload 恢复，仍失败判定失效。"""
+        """定位输入框；resume 时页面被打断先 reload 恢复，仍失败判定失效。
+
+        用 wait_first_match（而非 instant）：SPA 导航/重渲染/加载遮罩期间输入框会短暂消失，
+        立刻判定会误报“页面失效”。
+        """
         cfg = self.cfg
-        input_sel = await extractor.first_match(page, cfg.selectors.input)
+        input_sel = await extractor.wait_first_match(page, cfg.selectors.input, timeout=6.0)
         if input_sel is None and resume:
             # 页面可能正被 SPA 导航/后台重载打断（count() 瞬时异常被吞成 0）。
             # 先 reload 当前会话页恢复，仍失败才判定失效销毁。
             logger.info("[%s] resume page input not matched, reloading to recover", self.name)
             try:
                 await page.reload(wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(2000)  # SPA 渲染会话页
-                input_sel = await extractor.first_match(page, cfg.selectors.input)
+                input_sel = await extractor.wait_first_match(
+                    page, cfg.selectors.input, timeout=12.0
+                )
             except Exception:
                 input_sel = None
             if input_sel is not None:

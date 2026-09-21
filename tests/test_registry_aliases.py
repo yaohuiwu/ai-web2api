@@ -68,3 +68,16 @@ def test_duplicate_model_name_last_wins(caplog):
         reg = ProviderRegistry(cfg, browser=None)  # type: ignore[arg-type]
     assert reg.get_for_model("m").name == "b"
     assert any("重复" in r.message for r in caplog.records)
+
+
+def test_login_status_debounce():
+    """一次性检测失败不应立刻判未登录（Qwen 这类站点会瞬时误报）。"""
+    reg = ProviderRegistry(_cfg(), browser=None)  # type: ignore[arg-type]
+    reg.set_login_status("qwen", True)
+    assert reg._update_status("qwen", False) is True  # 第 1 次失败 → 忽略
+    assert reg.login_status()["qwen"] is True
+    assert reg._update_status("qwen", False) is False  # 第 2 次失败 → 生效
+    assert reg.login_status()["qwen"] is False
+    assert reg._update_status("qwen", True) is True  # 恢复登录
+    assert reg.login_status()["qwen"] is True
+    assert reg._update_status("qwen", False) is True  # 防抖计数已重置
