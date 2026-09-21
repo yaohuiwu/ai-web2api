@@ -11,12 +11,14 @@ from ..config import AppConfig
 from ..core.errors import ModelNotFoundError
 from .base import BaseProvider, first_match
 from .deepseek import DeepSeekProvider
+from .qwen import QwenProvider
 
 logger = logging.getLogger(__name__)
 
 # 驱动类注册表：新增 Web AI 时在此登记
 DRIVERS: dict[str, type[BaseProvider]] = {
     "deepseek": DeepSeekProvider,
+    "qwen": QwenProvider,
 }
 
 # 常见 OpenAI 模型名（llama_index 等客户端默认使用）→ 自动映射到首选 provider 的默认模型。

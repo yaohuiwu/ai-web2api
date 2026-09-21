@@ -102,3 +102,61 @@ providers:
     stable_polls: 12
     min_wait_before_stable: 8.0
     thread_busy_timeout: 20.0  # resume 时发送后无新容器即判定页面忙（上一请求未完成）
+
+  # Qwen Chat（chat.qwen.ai）。模型/模式/附件都是下拉菜单或固定 input，全部配置化。
+  # 登录页独立（/auth）；凭据放 .env：QWEN_USERNAME / QWEN_PASSWORD。
+  qwen:
+    driver: qwen
+    url: https://chat.qwen.ai/
+    locale: zh-CN
+    session_url: "{base}/c/{id}"  # 会话 URL 形态待登录实测确认
+    # network: 待实测 Qwen 的流式端点后再配；暂不配 → 走 DOM 兜底
+    models:
+      # 对外模型名 = 原模型名小写 + -web（与 deepseek-web 区分）
+      - {name: qwen3.8-max-web, ui_label: "Qwen3.8-Max"}
+      - {name: qwen3.7-plus-web, ui_label: "Qwen3.7-Plus"}
+      - {name: qwen3.8-omni-flash-web, ui_label: "Qwen3.8-Omni-Flash"}
+    selectors:
+      input:
+        - "textarea.message-input-textarea"
+      send_button: []              # 待实测（空 = 回车发送）
+      response_container: []       # 待实测：登录后校准回复容器
+      thinking_container: []       # 待实测：思考容器
+      stop_button: []              # 待实测
+      login_check:
+        - "textarea.message-input-textarea"
+      new_chat_button: []          # 待实测
+      model_menu:                  # 顶部模型下拉
+        trigger: ["span.ant-dropdown-trigger"]
+        option: ['div[role=option]:has-text("{label}")']
+        current: ["span.ant-dropdown-trigger"]
+      mode_menu:                   # 输入框右侧模式下拉：自动/思考/快速
+        trigger: [".qwen-thinking-selector .qwen-chat-v2-dropdown-menu-trigger"]
+        option:
+          - 'div[role=option]:has-text("{label}")'
+          - '.qwen-chat-v2-dropdown-menu-item:has-text("{label}")'
+        current: [".qwen-thinking-selector .qwen-chat-v2-dropdown-menu-select-label"]
+        labels: {auto: "自动", thinking: "思考", fast: "快速"}
+      attachment_menu:
+        file_input: ["input#filesUpload"]
+    login:
+      mode: auto
+      url: https://chat.qwen.ai/auth
+      username_env: QWEN_USERNAME
+      password_env: QWEN_PASSWORD
+      page:
+        username:
+          - "input[name=email]"
+          - "input[type=email]"
+        password:
+          - "input[name=password]"
+          - "input[type=password]"
+        submit:
+          - "button:has-text(\"登录\")"
+          - "button[type=submit]"
+    queue: {max_size: 10, timeout: 60}
+    response_timeout: 180
+    poll_interval: 0.2
+    stable_polls: 12
+    min_wait_before_stable: 8.0
+    thread_busy_timeout: 20.0
