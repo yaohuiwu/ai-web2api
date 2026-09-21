@@ -41,8 +41,10 @@ class _Provider:
         self.text = text
         self.gate = _Gate()
         self.cfg = SimpleNamespace()
+        self.last_prompt = None
 
     async def complete(self, messages, model, **kw):
+        self.last_prompt = kw.get("prompt_override")
         return self.text, None
 
 
@@ -77,6 +79,13 @@ def _client(text: str, function_calling: bool = True) -> TestClient:
     app = FastAPI()
     app.include_router(create_router(_Registry(text, function_calling), None))  # type: ignore[arg-type]
     return TestClient(app)
+
+
+def _client_and_reg(text: str, function_calling: bool = True):
+    reg = _Registry(text, function_calling)
+    app = FastAPI()
+    app.include_router(create_router(reg, None))  # type: ignore[arg-type]
+    return TestClient(app), reg
 
 
 def _body(text: str, **extra) -> dict:
@@ -130,3 +139,25 @@ def test_function_calling_disabled_ignores_tools():
     ch = d["choices"][0]
     assert ch["finish_reason"] == "stop"
     assert ch["message"]["content"] == TOOL_TEXT  # 不解析，原文返回
+
+
+def test_tool_result_turn_injects_tool_result_block():
+    """工具结果回合（即使未带 tools）→ prompt 里要注入 <tool_result> 并要答案。"""
+    c, reg = _client_and_reg(PLAIN)
+    body = {
+        "model": "fake-web",
+        "messages": [
+            {"role": "user", "content": "东京天气"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": "{}"}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": '{"temp":20}'},
+        ],
+    }
+    c.post("/v1/chat/completions", json=body)
+    assert reg.provider.last_prompt is not None
+    assert '<tool_result tool_call_id="call_1">' in reg.provider.last_prompt
