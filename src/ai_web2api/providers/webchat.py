@@ -837,16 +837,15 @@ XMLHttpRequest.prototype.send = function (body) {{
                 elif stop_seen:
                     done = True  # 出现过停止按钮且已消失 = 生成结束
             if not done and stable >= stable_polls and elapsed > min_wait:
-                if last["thinking"] and not last["content"]:
-                    # 思考已产出但正文未开始：可能是"思考→正文"的间隙，大幅放宽
-                    if stable >= stable_polls * 4:
-                        done = True
-                elif last["content"]:
+                if last["content"]:
                     # 正文已开始：markdown 渐进渲染会有超过稳定窗口的停顿，放宽避免截断
                     if stable >= stable_polls * 3:
                         done = True
-                else:
-                    done = True
+                elif last["thinking"] and md_sel is not None:
+                    # 思考稳定、已有正文容器但正文还没出 → 可能"思考→正文"间隙，大幅放宽
+                    if stable >= stable_polls * 4:
+                        done = True
+                # 否则（正文容器尚未出现）→ 继续等，避免空正文提前结束（Qwen 实测）
             if done:
                 return
 

@@ -124,9 +124,11 @@ providers:
       send_button:                  # 实测：输入后才渲染的圆形发送按钮
         - "button.send-button"
         - ".chat-prompt-send-button"
-      response_container:           # 实测：正文（phase-answer 区分思考/回答）
+      response_container:           # 实测：正文（流式期间可能还没加上 phase-answer）
         - ".response-message-content.phase-answer"
+        - ".response-message-content"
         - ".custom-qwen-markdown"
+        - ".qwen-markdown"
       thinking_container:           # 实测：思考状态卡（内容为“已经完成思考”，非全文）
         - ".qwen-chat-thinking-status-card-content"
       stop_button: []
@@ -170,7 +172,7 @@ providers:
     queue: {max_size: 10, timeout: 60}
     response_timeout: 180
     poll_interval: 0.2
-    stable_polls: 12
-    min_wait_before_stable: 8.0
+    stable_polls: 20
+    min_wait_before_stable: 10.0
     # 0 = 关闭忙检测：Qwen 走 DOM 兜底，首帧容器可能 >20s 才出现，否则误判"页面正忙"
     thread_busy_timeout: 0
