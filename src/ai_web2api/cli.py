@@ -14,6 +14,7 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -125,21 +126,33 @@ async def _login_flow(args: argparse.Namespace) -> int:
                             await _type_into(page.locator(p).first, creds["password"])
                             print(f"[{name}] 已自动填入账号密码（验证码/Google 请手动完成）。")
                 print(
-                    f"[{name}] 请在弹出的浏览器窗口完成登录（Google / 验证码 / 短信均可），"
-                    f"等待中…（最长 {args.timeout:.0f}s，Ctrl+C 取消）"
+                    f"[{name}] 请在弹出的浏览器窗口完成登录（Google / 验证码 / 滑块均可）。\n"
+                    f"        完成后回到本终端按【回车】保存（也会尝试自动检测）。"
+                    f"最长 {args.timeout:.0f}s，Ctrl+C 取消。"
                 )
+                # 登录指示器可能不准（如 ChatGPT）→ 支持用户手动回车确认
+                confirm = None
+                if sys.stdin.isatty():
+                    confirm = asyncio.get_running_loop().run_in_executor(
+                        None, sys.stdin.readline
+                    )
                 deadline = time.monotonic() + args.timeout
                 ok = False
                 while time.monotonic() < deadline:
+                    if confirm is not None and confirm.done():
+                        ok = True
+                        print(f"[{name}] 已确认，保存登录态…")
+                        break
                     if (
                         await extractor.first_match(page, provider.login_check_selectors)
                         is not None
                     ):
                         ok = True
+                        print(f"[{name}] 自动检测到登录成功。")
                         break
-                    await page.wait_for_timeout(2000)
+                    await page.wait_for_timeout(1500)
                 if not ok:
-                    print(f"[{name}] 超时未检测到登录成功，未保存。")
+                    print(f"[{name}] 超时未确认（未保存）。")
                     return 1
 
             # 保存 storage_state
