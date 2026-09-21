@@ -18,6 +18,5 @@ class QwenProvider(WebChatProvider):
     """chat.qwen.ai 驱动。"""
 
     name = "qwen"
-    # 会话 URL 形态（chat.qwen.ai/c/<uuid>）待登录实测确认；确认前保持 None
-    # → thread 不落 url_id（历史仍在，只是重启后不能 goto 恢复会话页）。
-    session_url_pattern: str | None = None
+    # 会话 URL：chat.qwen.ai/c/<uuid>（实测）
+    session_url_pattern = r"/c/([0-9a-fA-F-]{8,})"

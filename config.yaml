@@ -109,7 +109,7 @@ providers:
     driver: qwen
     url: https://chat.qwen.ai/
     locale: zh-CN
-    session_url: "{base}/c/{id}"  # 会话 URL 形态待登录实测确认
+    session_url: "{base}/c/{id}"  # 实测：chat.qwen.ai/c/<uuid>
     # network: 待实测 Qwen 的流式端点后再配；暂不配 → 走 DOM 兜底
     models:
       # 对外模型名 = 原模型名小写 + -web（与 deepseek-web 区分）
@@ -119,13 +119,19 @@ providers:
     selectors:
       input:
         - "textarea.message-input-textarea"
-      send_button: []              # 待实测（空 = 回车发送）
-      response_container: []       # 待实测：登录后校准回复容器
-      thinking_container: []       # 待实测：思考容器
-      stop_button: []              # 待实测
-      login_check:
-        - "textarea.message-input-textarea"
-      new_chat_button: []          # 待实测
+      send_button:                  # 实测：输入后才渲染的圆形发送按钮
+        - "button.send-button"
+        - ".chat-prompt-send-button"
+      response_container:           # 实测：正文（phase-answer 区分思考/回答）
+        - ".response-message-content.phase-answer"
+        - ".custom-qwen-markdown"
+      thinking_container:           # 实测：思考状态卡（内容为“已经完成思考”，非全文）
+        - ".qwen-chat-thinking-status-card-content"
+      stop_button: []
+      login_check:                  # 登录后才有的“新建对话”
+        - "text=新建对话"
+      new_chat_button:
+        - "text=新建对话"
       model_menu:                  # 顶部模型下拉
         trigger: ["span.ant-dropdown-trigger"]
         option: ['div[role=option]:has-text("{label}")']
@@ -145,6 +151,9 @@ providers:
       username_env: QWEN_USERNAME
       password_env: QWEN_PASSWORD
       page:
+        password_tab:              # 部分入口默认验证码登录，需先切“使用密码登录”
+          - "text=使用密码登录"
+          - "button:has-text(\"使用密码登录\")"
         username:
           - "input[name=email]"
           - "input[type=email]"
