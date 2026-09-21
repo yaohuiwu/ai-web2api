@@ -123,3 +123,15 @@ def test_tool_choice_object_pydantic():
     tc = ToolChoiceObject.model_validate({"type": "function", "function": {"name": "get_time"}})
     filtered, force = resolve_effective_tools([WEATHER, TIME], tc)
     assert filtered == [TIME] and force is True
+
+
+def test_build_resume_prompt_omits_tool_defs():
+    """resume 页面已有上下文：不再重复注入工具说明，只发本轮。"""
+    messages = [
+        {"role": "user", "content": "东京天气？"},
+        {"role": "assistant", "content": None, "tool_calls": [{"function": {"name": "get_weather", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "call_1", "content": '{"temp":20}'},
+    ]
+    p = build_resume_prompt(messages, [WEATHER], None)
+    assert "tool_json" not in p and "Available tools" not in p  # 不重复工具说明
+    assert "<tool_result" in p and "根据以上工具" in p

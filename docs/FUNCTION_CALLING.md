@@ -102,7 +102,7 @@ POST /v1/chat/completions {messages, tools, tool_choice}
   - `system/developer → System:`；`user → Human:`；`assistant(含 tool_calls) → "[Called tools]"+tool_json 块`；
   - `tool → <tool_result tool_call_id="...">...</tool_result>`；最后一条是工具结果 → 追加“据结果回答”。
 - `build_resume_prompt(messages, tools, tool_choice)`：**thread resume** 用——页面已有历史，
-  只拼「本轮」：可选工具说明（含 defs+格式，保证模型知道格式）+ （若本轮是工具结果）`<tool_result>` + 续写提示；
+  只拼「本轮」，**不重复工具说明**（首次 create 已注入）：（若本轮是工具结果）`<tool_result>` + 续写提示；
   否则就是最后一条 user 文本。
 - `parse_tool_response(text, tools)` → `(content|None, tool_calls|None, finish_reason)`：
   命中且**名字在本次 tools 内**才算；生成 `call_<uuid24>`；`arguments` 序列化为 JSON 字符串。
@@ -137,7 +137,8 @@ POST /v1/chat/completions {messages, tools, tool_choice}
 ### 6.4 thread 绑定与工具结果
 - 我们的 resume 只发最后一条 user 消息；**工具结果回合**要把 `<tool_result>` 作为本轮文本注入
   （这就是 `build_resume_prompt` 的用途）。
-- 工具轮次通常每轮都带 `tools`；我们在 resume 时也带上简短工具说明（defs+格式），保证格式可复现。
+- 工具轮次每轮都带 `tools`，但 resume **不重复注入工具说明**：页面上下文里首次 create 时已经有一份，
+  再发一次是浪费（这也避免了“工具说明发两遍”）。仅当页面是新会话（create）时才注入。
 - model 绑定（thread 固定 model）与 `tools` 每请求可变不冲突。
 
 ### 6.5 与 mode / deep_think / search / attachments / options

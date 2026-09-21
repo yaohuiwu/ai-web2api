@@ -162,28 +162,23 @@ def build_prompt(messages: list[dict], tools: list[Any] | None = None, tool_choi
 def build_resume_prompt(
     messages: list[dict], tools: list[Any] | None = None, tool_choice: Any = None
 ) -> str:
-    """thread resume：页面已有历史，只发「本轮」（工具结果回合注入 <tool_result>）。"""
-    effective, force = resolve_effective_tools(tools, tool_choice)
+    """thread resume：页面已有历史（含首次注入的工具说明），**只发本轮**。
+
+    - 工具说明**不重复注入**（页面上下文里已经有了，发了也是浪费）
+    - 本轮是工具结果 → 注入 `<tool_result>` + 续写提示
+    - 本轮是普通用户消息 → 直接发该文本
+    """
     lang = _detect_lang(messages)
-    parts: list[str] = []
-    if effective:
-        # resume 也带一次工具说明，保证模型知道输出格式
-        parts.append(build_tool_prompt(normalize_tool_defs(effective), lang, force))
     last = messages[-1] if messages else None
     if last is None:
-        return "\n\n".join(parts)
+        return ""
     if _is_tool_result(last):
-        s = format_message(last)
-        if s:
-            parts.append(s)
-        parts.append(_CONT_CN if lang == "cn" else _CONT_EN)
-    elif last.get("role") == "user":
-        parts.append(_text_content(last.get("content")))
-    else:
-        s = format_message(last)
-        if s:
-            parts.append(s)
-    return "\n\n".join(parts)
+        s = format_message(last) or ""
+        cont = _CONT_CN if lang == "cn" else _CONT_EN
+        return f"{s}\n\n{cont}" if s else cont
+    if last.get("role") == "user":
+        return _text_content(last.get("content"))
+    return format_message(last) or ""
 
 
 def needs_tool_handling(messages: list[dict], tools: list[Any] | None) -> bool:
