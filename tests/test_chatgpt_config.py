@@ -36,8 +36,9 @@ def test_chatgpt_config_valid():
     assert c.locale == "en-US"
     assert c.session_url == "{base}/c/{id}"
     assert c.login.mode == "manual"  # ChatGPT 无密码自动登录
-    # contenteditable → 必须逐字输入
+    # contenteditable → 必须逐字输入；markdown 重渲染 → 正文缓冲后一次性发
     assert c.selectors.type_prompt is True
+    assert c.selectors.stream_content is False
     assert "#prompt-textarea" in c.selectors.input
     assert c.selectors.stop_button and "stop-button" in c.selectors.stop_button[0]
     assert c.selectors.response_container

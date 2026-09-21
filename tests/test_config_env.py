@@ -14,6 +14,14 @@ from ai_web2api.config import AppConfig, apply_env_overrides, load_config
 ROOT = Path(__file__).resolve().parent.parent
 
 
+@pytest.fixture(autouse=True)
+def _clean_headless_env(monkeypatch: pytest.MonkeyPatch):
+    """隔离：某些测试 import main 会 load_dotenv() 把 .env 注入 os.environ（如 WEB2API_HEADLESS）——
+    每个用例先清掉这些变量，避免污染。"""
+    for k in ("WEB2API_HEADLESS", "DEEPSEEK_HEADLESS", "QWEN_HEADLESS", "CHATGPT_HEADLESS"):
+        monkeypatch.delenv(k, raising=False)
+
+
 def _cfg(headless: bool = False) -> AppConfig:
     return AppConfig.model_validate(
         {

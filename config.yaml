@@ -199,6 +199,7 @@ providers:
         - "#prompt-textarea"
         - "div.ProseMirror[contenteditable='true']"
       type_prompt: true         # contenteditable/React → 逐字输入
+      stream_content: false     # markdown 重渲染严重 → 正文缓冲后一次性发（避免 diff 丢内容）
       send_button:
         - 'button[data-testid="send-button"]'
         - 'button[aria-label="Send prompt"]'

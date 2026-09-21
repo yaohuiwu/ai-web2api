@@ -802,6 +802,8 @@ XMLHttpRequest.prototype.send = function (body) {{
         poll_ms = int(cfg.poll_interval * 1000)
         stable_polls = cfg.stable_polls
         min_wait = cfg.min_wait_before_stable
+        # 正文重渲染严重的站点（如 ChatGPT）逐字 diff 会丢内容 → 改“缓冲、结束一次性发”
+        buffer_content = not cfg.selectors.stream_content
 
         # 阶段1：等待新回复标记出现（md 或 thinking 任一候选数量增加）
         md_sel: str | None = None
@@ -863,6 +865,9 @@ XMLHttpRequest.prototype.send = function (body) {{
                 if new == old:
                     continue
                 changed = True
+                if kind == "content" and buffer_content:
+                    last[key] = new      # 先攒着，结束时一次性发（避免重渲染导致 diff 丢内容）
+                    continue
                 inc = _diff_increment(old, new)
                 if inc:
                     yield StreamChunk(kind, inc)
@@ -890,6 +895,9 @@ XMLHttpRequest.prototype.send = function (body) {{
                         done = True
                 # 否则（正文容器尚未出现）→ 继续等，避免空正文提前结束（Qwen 实测）
             if done:
+                if buffer_content and last["content"]:
+                    # 结束：一次性发出完整正文（流式带缓冲）
+                    yield StreamChunk("content", last["content"])
                 return
 
             await page.wait_for_timeout(poll_ms)

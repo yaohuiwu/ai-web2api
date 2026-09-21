@@ -75,6 +75,8 @@ class SelectorsConfig(BaseModel):
     send_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 空 = 用回车发送
     # 输入框是 contenteditable / React（如 ChatGPT）时用逐字输入——fill() 可能不生效
     type_prompt: bool = False
+    # 正文流式策略：True=逐字 diff（默认）；False=缓冲后一次性发（ChatGPT 等 markdown 重渲染严重、diff 会丢内容）
+    stream_content: bool = True
     response_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = [".ds-markdown"]
     thinking_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
     stop_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 填了可加快"生成结束"判定
