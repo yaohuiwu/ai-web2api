@@ -107,9 +107,9 @@ class BaseProvider(abc.ABC):
         """
         page = await self.browser.open_page(self.name, locale=self.locale)
         try:
-            await page.goto(self.cfg.url, wait_until="domcontentloaded", timeout=30000)
-            # 聊天页是 SPA，输入框/侧栏在 domcontentloaded 后才渲染，需轮询等待
-            sel = await wait_first_match(page, self.login_check_selectors, timeout=15.0)
+            sel = await self._goto_ready(
+                page, self.cfg.url, self.login_check_selectors, total_timeout=35.0
+            )
             if sel is not None:
                 return True
             if await self._page_stuck_loading(page):
@@ -137,6 +137,41 @@ class BaseProvider(abc.ABC):
         except Exception:
             return True
         return not txt
+
+    async def _goto_ready(
+        self,
+        page: "Page",
+        url: str,
+        selectors: list[str],
+        *,
+        total_timeout: float = 35.0,
+    ) -> str | None:
+        """打开 ``url`` 并等任一选择器就绪；若卡在加载屏则 reload 再等（限总时长）。
+
+        站点（如 Qwen）被限流时 SPA 会卡在启动屏，直接判定“未登录”会误报；
+        这里 reload 一次并给足时间。返回命中的选择器或 None。
+        """
+        deadline = time.monotonic() + total_timeout
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:  # noqa: BLE001
+            logger.info("[%s] goto %s 失败：%s", self.name, url, e)
+            return None
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            sel = await wait_first_match(page, selectors, timeout=min(15.0, remaining))
+            if sel is not None:
+                return sel
+            if await self._page_stuck_loading(page) and time.monotonic() < deadline - 8:
+                logger.info("[%s] 页面卡在加载屏，reload 重试", self.name)
+                try:
+                    await page.reload(wait_until="domcontentloaded", timeout=30000)
+                except Exception:  # noqa: BLE001
+                    return None
+                continue
+            return None
 
     def get_credentials(self) -> dict[str, str]:
         """从环境变量/.env 读取登录凭据（键名可配置，兼容 username/password 写法）。"""
@@ -185,19 +220,18 @@ class BaseProvider(abc.ABC):
             }
         page = await self.browser.open_page(self.name, locale=self.locale)
         try:
-            await page.goto(self.login_url, wait_until="domcontentloaded", timeout=30000)
-
             lp = cfg.login.page
-            # SPA 在 domcontentloaded 后才渲染 DOM：等「已登录（聊天输入框）」
-            # 或「登录表单（账号+密码输入框）」任一出现，再往下判断。
-            appeared = await wait_first_match(
+            # SPA 在 domcontentloaded 后才渲染：等「已登录（聊天输入框）」或「登录表单」
+            # （卡启动屏会 reload 重试，避免 Qwen 限流时误判）
+            appeared = await self._goto_ready(
                 page,
+                self.login_url,
                 [*self.login_check_selectors, *lp.username, *lp.password],
-                timeout=15.0,
+                total_timeout=35.0,
             )
             if appeared is None:
                 return await self._login_fail(
-                    page, "页面 15s 内未渲染出登录表单/聊天页（可能被风控/验证码页拦截），请手动登录"
+                    page, "页面 35s 内未渲染出登录表单/聊天页（可能被风控/验证码页拦截），请手动登录"
                 )
 
             # 已登录则幂等返回。用 wait：登录态下 /auth 会重定向到聊天页，
@@ -358,10 +392,11 @@ class BaseProvider(abc.ABC):
         page = await self.browser.open_page(
             self.name, init_scripts=self.init_scripts(), locale=self.locale
         )
-        await page.goto(self.cfg.url, wait_until="domcontentloaded", timeout=30000)
         try:
-            # 聊天页是 SPA，输入框在 domcontentloaded 后才渲染，需轮询等待
-            sel = await wait_first_match(page, self.login_check_selectors, timeout=15.0)
+            # 卡启动屏时 _goto_ready 会 reload 重试（Qwen 限流常见），避免误报未登录
+            sel = await self._goto_ready(
+                page, self.cfg.url, self.login_check_selectors, total_timeout=40.0
+            )
             if sel is None:
                 raise TimeoutError("no login_check selector matched")
         except Exception:
