@@ -29,6 +29,7 @@
     </label>
     <label><input type="checkbox" id="deepThink" checked> 深度思考</label>
     <label><input type="checkbox" id="search" checked> 智能搜索</label>
+    <label><input type="checkbox" id="useTools"> 工具</label>
     <label>API Key
       <input type="password" id="apiKey" placeholder="可选">
     </label>
@@ -49,6 +50,21 @@
 <main id="main">
 <div id="chat">
   <div class="msg meta"><div class="bubble">输入消息开始测试本地 OpenAI 兼容接口（POST /v1/chat/completions）</div></div>
+</div>
+
+<div class="tool-panel" id="toolPanel" hidden>
+  <div class="tool-row">
+    <label>tool_choice
+      <select id="toolChoice">
+        <option value="auto">auto</option>
+        <option value="required">required</option>
+        <option value="none">none</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="autoExec" checked> 自动执行 mock 工具后继续</label>
+    <span>内置 mock：get_weather / get_time</span>
+  </div>
+  <textarea id="toolsJson" rows="6" spellcheck="false"></textarea>
 </div>
 
 <div id="inputBar">

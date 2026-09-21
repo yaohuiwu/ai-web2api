@@ -1,5 +1,5 @@
 // Playground 逻辑
-let history = [];       // [{role, content}]
+let messages = [];      // 完整 OpenAI messages（含 assistant.tool_calls / role=tool）
 let rawLog = [];        // [{req, res|error}]
 let streaming = false;
 
@@ -7,6 +7,23 @@ const apiKeyEl = $("#apiKey");
 apiKeyEl.value = localStorage.getItem("aiw2api_api_key") || "";
 apiKeyEl.addEventListener("change", () =>
   localStorage.setItem("aiw2api_api_key", apiKeyEl.value));
+
+// ---------- Function Calling：内置 mock 工具 ----------
+// 网页端只负责“模型说要用哪个工具”；工具的真正执行在客户端。
+// Playground 用这些 mock 模拟本地执行，从而端到端跑通 FC 闭环。
+const MOCK_TOOLS = {
+  get_weather: (a) =>
+    JSON.stringify({ city: a.city || "unknown", temp_c: 22, condition: "晴", humidity: "55%" }),
+  get_time: () => JSON.stringify({ time: new Date().toISOString(), timezone: "UTC" }),
+};
+
+function runMockTool(name, argsJson) {
+  let args = {};
+  try { args = JSON.parse(argsJson || "{}"); } catch {}
+  const fn = MOCK_TOOLS[name];
+  const out = fn ? fn(args) : JSON.stringify({ error: `没有 ${name} 的 mock 实现` });
+  return typeof out === "string" ? out : JSON.stringify(out);
+}
 
 function addMsg(role, content, opts = {}) {
   const chat = $("#chat");
@@ -23,6 +40,30 @@ function addMsg(role, content, opts = {}) {
   return div;
 }
 
+function addToolCallMsg(calls) {
+  const chat = $("#chat");
+  for (const tc of calls) {
+    const div = document.createElement("div");
+    div.className = "msg tool-call";
+    div.innerHTML =
+      `<div class="bubble"><div class="tool-title">🔧 工具调用 · <code>${esc(tc.function.name)}</code></div>` +
+      `<pre>${esc(tc.function.arguments || "{}")}</pre></div>`;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+  }
+}
+
+function addToolResultMsg(name, result) {
+  const chat = $("#chat");
+  const div = document.createElement("div");
+  div.className = "msg tool-result";
+  div.innerHTML =
+    `<div class="bubble"><div class="tool-title">↩︎ 工具结果 · <code>${esc(name)}</code></div>` +
+    `<pre>${esc(result)}</pre></div>`;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
 function addMeta(text) {
   const chat = $("#chat");
   const div = document.createElement("div");
@@ -30,16 +71,6 @@ function addMeta(text) {
   div.innerHTML = `<div class="bubble">${esc(text)}</div>`;
   chat.appendChild(div);
   chat.scrollTop = chat.scrollHeight;
-}
-
-function showRaw(title) {
-  const chat = $("#chat");
-  const div = document.createElement("div");
-  div.className = "msg meta";
-  div.innerHTML = `<details class="raw"><summary>${esc(title)}</summary><pre class="raw"></pre></details>`;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-  return div.querySelector("pre");
 }
 
 async function loadModels() {
@@ -62,13 +93,21 @@ async function loadModels() {
   }
 }
 
-function buildBody(content) {
+function currentTools() {
+  if (!$("#useTools").checked) return null;
+  try {
+    const arr = JSON.parse($("#toolsJson").value || "[]");
+    return Array.isArray(arr) && arr.length ? arr : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildBody() {
   const body = {
     model: $("#model").value,
-    messages: [...history, { role: "user", content }],
+    messages: [...messages],
     stream: $("#stream").checked,
-    // 开关显式发送：DeepSeek 三模式合并后它们就是唯一的输出控制项
-    // （新版页面默认两者都开，与这里的勾选默认值一致）
     deep_think: $("#deepThink").checked,
     search: $("#search").checked,
   };
@@ -76,6 +115,12 @@ function buildBody(content) {
   if (tid) body.thread_id = tid;
   const mode = $("#mode").value;
   if (mode) body.mode = mode;
+  const tools = currentTools();
+  if (tools) {
+    body.tools = tools;
+    const tc = $("#toolChoice").value;
+    if (tc) body.tool_choice = tc;
+  }
   return body;
 }
 
@@ -93,15 +138,16 @@ function errMsg(body) {
 }
 
 // 服务端为无 thread_id 的请求自动分配会话：写回输入框，后续消息复用同一会话
-// （否则每条消息都会被当成新会话 → thread_id 每轮都变，上下文无法延续）
 function rememberThreadId(tid) {
   if (!tid) return;
   const el = $("#threadId");
   if (!el || el.value.trim()) return;   // 元素缺失 / 用户已显式填了 thread_id → 不覆盖
   el.value = tid;
-  el.dispatchEvent(new Event("input"));  // 触发 hint 更新
-  refreshThreads();                      // 左侧列表立即高亮该会话
+  el.dispatchEvent(new Event("input"));
+  refreshThreads();
 }
+
+// ---------- 发送：非流式 / 流式 ----------
 
 async function sendNonStream(body) {
   const res = await fetch("/v1/chat/completions", {
@@ -110,19 +156,23 @@ async function sendNonStream(body) {
   const data = await res.json();
   if (!res.ok) throw new Error(errMsg(data));
   rawLog.push({ req: body, res: data });
-  const msg = data.choices && data.choices[0] && data.choices[0].message;
-  const content = msg ? msg.content : "";
-  const th = msg ? msg.reasoning_content : null;
-  if (th && !content) {
-    // 长思考被稳定判定截断（完整() 返回时正文未生成）→ 明确提示
-    addMsg("assistant", "（思考过程已完整输出，但正文未生成——可能因思考过长被结束判定截断，请重试）", { thinking: th });
+  const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
+  if (msg.tool_calls && msg.tool_calls.length) {
+    addToolCallMsg(msg.tool_calls);
   } else {
-    addMsg("assistant", content || "（空回复）", { thinking: th });
+    const content = msg.content || "";
+    const th = msg.reasoning_content;
+    if (th && !content) {
+      addMsg("assistant", "（思考过程已完整输出，但正文未生成——可能因思考过长被结束判定截断，请重试）", { thinking: th });
+    } else {
+      addMsg("assistant", content || "（空回复）", { thinking: th });
+    }
   }
   if (data.thread_id) {
     addMeta(`thread_id: ${data.thread_id}`);
     rememberThreadId(data.thread_id);
   }
+  return { content: msg.content || "", thinking: msg.reasoning_content || "", toolCalls: msg.tool_calls || [] };
 }
 
 async function sendStream(body) {
@@ -140,9 +190,9 @@ async function sendStream(body) {
   let fullContent = "";
   let fullThinking = "";
   let thinkBox = null;
+  let toolCalls = [];
   const bubbleDiv = addMsg("assistant", "");
   const bubble = bubbleDiv.querySelector(".bubble");
-  // 正文独立容器：流式更新只写这里，绝不触碰思考块（textContent 整体覆盖会删掉 thinking）
   const contentBox = document.createElement("div");
   contentBox.className = "content";
   bubble.appendChild(contentBox);
@@ -171,6 +221,17 @@ async function sendStream(body) {
       contentBox.textContent = fullContent;
       $("#chat").scrollTop = $("#chat").scrollHeight;
     }
+    if (delta.tool_calls) {
+      for (const tcd of delta.tool_calls) {
+        const i = tcd.index || 0;
+        const tc = toolCalls[i] || (toolCalls[i] = { id: "", type: "function", function: { name: "", arguments: "" } });
+        if (tcd.id) tc.id = tcd.id;
+        if (tcd.function) {
+          if (tcd.function.name) tc.function.name += tcd.function.name;
+          if (tcd.function.arguments) tc.function.arguments += tcd.function.arguments;
+        }
+      }
+    }
   };
 
   while (true) {
@@ -196,7 +257,8 @@ async function sendStream(body) {
       }
     }
   }
-  // 收尾：md 渲染（流式期间 textContent 保证顺滑，结束后一次性渲染）
+  toolCalls = toolCalls.filter(Boolean);
+
   if (thinkBox && !fullThinking) {
     thinkBox.remove();
   } else if (thinkBox) {
@@ -204,57 +266,77 @@ async function sendStream(body) {
     thinkBox.innerHTML = "<summary>💭 思考过程</summary>" + md(fullThinking);
     thinkBox.open = open;
   }
-  rawLog.push({ req: body, res: { content: fullContent, thinking: fullThinking } });
-  if (!fullContent && fullThinking) {
-    // 真实 DeepSeek 长思考时，稳定判定可能在正文开始前结束流（已知行为）→ 明确提示
+  rawLog.push({ req: body, res: { content: fullContent, thinking: fullThinking, tool_calls: toolCalls } });
+
+  if (toolCalls.length) {
+    bubbleDiv.remove();            // 工具轮没有正文，去掉空气泡
+    addToolCallMsg(toolCalls);
+  } else if (!fullContent && fullThinking) {
     contentBox.innerHTML = "<p>（思考过程已完整输出，但正文未生成——可能因思考过长被结束判定截断，请重试）</p>";
   } else if (!fullContent && !fullThinking) {
     contentBox.textContent = "（空回复）";
   } else {
     contentBox.innerHTML = md(fullContent);
-    // 服务端错误透传（[会话错误]/[错误] 前缀）→ 红色气泡
     if (/^\s*\[(会话错误|错误)\]/.test(fullContent)) {
       bubble.classList.add("error");
       contentBox.style.color = "#dc2626";
     }
+  }
+  return { content: fullContent, thinking: fullThinking, toolCalls };
+}
+
+// 一轮请求 + （可选）工具自动执行闭环
+async function dispatchLoop() {
+  $("#send").disabled = true;
+  streaming = true;
+  try {
+    for (let round = 0; round < 6; round++) {
+      const body = buildBody();
+      const result = body.stream ? await sendStream(body) : await sendNonStream(body);
+      if (result.toolCalls && result.toolCalls.length) {
+        messages.push({ role: "assistant", content: null, tool_calls: result.toolCalls });
+        if (!$("#autoExec").checked) break;   // 不自动执行 → 等用户手动处理
+        for (const tc of result.toolCalls) {
+          const out = runMockTool(tc.function.name, tc.function.arguments);
+          messages.push({ role: "tool", tool_call_id: tc.id, content: out });
+          addToolResultMsg(tc.function.name, out);
+        }
+        continue;   // 带上工具结果再请求 → 期望得到最终回答
+      }
+      messages.push({ role: "assistant", content: result.content || "" });
+      break;
+    }
+    $("#hint").textContent = "";
+  } catch (e) {
+    addMsg("error", "请求失败: " + e.message);
+    rawLog.push({ error: e.message });
+    $("#hint").textContent = "提示：503 = 未登录；429 = 队列满/thread 超限；409 = thread 冲突或失效";
+  } finally {
+    streaming = false;
+    $("#send").disabled = false;
+    $("#input").focus();
+    refreshThreads();
   }
 }
 
 async function send() {
   const text = $("#input").value.trim();
   if (!text || streaming) return;
-  const body = buildBody(text);
-  history.push({ role: "user", content: text });
+  messages.push({ role: "user", content: text });
   addMsg("user", text);
-  localStorage.setItem("aiw2api_model", body.model);
-  const tidUsed = body.thread_id || "";
-  if (tidUsed) addMeta(`thread_id: ${tidUsed}（绑定会话，续用只发最后一条）`);
+  localStorage.setItem("aiw2api_model", $("#model").value);
+  const tid = $("#threadId").value.trim();
+  if (tid) addMeta(`thread_id: ${tid}（绑定会话，续用只发最后一条）`);
   $("#input").value = "";
-  $("#send").disabled = true;
-  streaming = true;
-  try {
-    if (body.stream) await sendStream(body);
-    else await sendNonStream(body);
-    $("#hint").textContent = "";
-  } catch (e) {
-    addMsg("error", "请求失败: " + e.message);
-    rawLog.push({ req: body, error: e.message });
-    $("#hint").textContent = "提示：503 = 未登录；429 = 队列满/thread 超限；409 = thread 冲突或失效";
-  } finally {
-    streaming = false;
-    $("#send").disabled = false;
-    $("#input").focus();
-    refreshThreads(); // 新 thread 创建后立即出现在左侧
-  }
+  await dispatchLoop();
 }
 
 $("#send").onclick = send;
 $("#clear").onclick = () => {
-  history = [];
+  messages = [];
   $("#chat").innerHTML = `<div class="msg meta"><div class="bubble">已清空。${$("#threadId").value.trim() ? "（thread_id 仍保留，可继续原会话）" : ""}</div></div>`;
 };
 // IME（输入法）组词保护：中文/日文等组词时按回车是「选词上屏」，不应发送。
-// 部分 IME 确认候选词时 isComposing 已置 false → 再用 compositionend 时间戳兜底。
 const inputEl = $("#input");
 let composing = false;
 let composeEndedAt = 0;
@@ -265,23 +347,19 @@ inputEl.addEventListener("compositionend", () => {
 });
 inputEl.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" || e.shiftKey) return;
-  // 组词中（isComposing / keyCode 229 / composing）或刚结束组词 → 这次回车是选词
   if (e.isComposing || e.keyCode === 229 || composing) return;
   if (Date.now() - composeEndedAt < 80) return;
   e.preventDefault();
   send();
 });
-$("#threadId").addEventListener("change", () => { history = []; });
+$("#threadId").addEventListener("change", () => { messages = []; });
 $("#threadId").addEventListener("input", (e) => {
   const tid = e.target.value.trim();
-  // mode 在新版 UI 里等价于开关组合（服务端把 fast/expert 翻译成 深度思考/智能搜索），
-  // 开关每次请求都能改 → 绑定 thread 后依旧可切换，不再禁用
   $("#hint").textContent = tid
     ? "已启用会话绑定：首次请求创建会话并注入全部历史，后续 resume 只发最后一条；深度思考/智能搜索可随时切换"
     : "";
 });
 $("#mode").addEventListener("change", (e) => {
-  // mode 预设同步到开关：避免"mode=fast 但深度思考还勾着"这种矛盾参数
   const v = e.target.value;
   if (v === "fast") {
     $("#deepThink").checked = false;
@@ -295,7 +373,35 @@ $("#mode").addEventListener("change", (e) => {
     : "";
 });
 
-// ---- 左侧会话列表（GET /admin/threads 轮询；点击切换 thread）----
+// ---- 工具面板 ----
+function setupToolsPanel() {
+  const toolsJsonEl = $("#toolsJson");
+  const sample = [
+    {
+      type: "function",
+      function: {
+        name: "get_weather",
+        description: "查询某城市当前天气",
+        parameters: { type: "object", properties: { city: { type: "string" } }, required: ["city"] },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "get_time",
+        description: "获取当前时间",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  ];
+  toolsJsonEl.value = localStorage.getItem("aiw2api_tools") || JSON.stringify(sample, null, 2);
+  toolsJsonEl.addEventListener("change", () => localStorage.setItem("aiw2api_tools", toolsJsonEl.value));
+  $("#useTools").addEventListener("change", () => {
+    $("#toolPanel").hidden = !$("#useTools").checked;
+  });
+}
+
+// ---- 左侧会话列表（点击切换 thread，手动刷新）----
 function refreshThreads() {
   fetch("/admin/threads")
     .then((r) => r.json())
@@ -337,12 +443,11 @@ async function switchThread(tid, loaded = true) {
   if (streaming) return;
   const el = $("#threadId");
   el.value = tid;
-  el.dispatchEvent(new Event("input")); // 触发 hint 更新
-  history = [];
+  el.dispatchEvent(new Event("input"));
+  messages = [];
   $("#chat").innerHTML = "";
   addMeta(`已切换到会话 ${tid}`);
   try {
-    // 从服务端拉历史消息（SQLite），切换后即可回看
     const r = await fetch(`/admin/threads/${encodeURIComponent(tid)}/messages`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
@@ -362,7 +467,7 @@ function newChat() {
   if (streaming) return;
   $("#threadId").value = "";
   $("#threadId").dispatchEvent(new Event("input"));
-  history = [];
+  messages = [];
   $("#chat").innerHTML =
     '<div class="msg meta"><div class="bubble">已开始新会话（无 thread_id = 无状态，每次请求独立）</div></div>';
   refreshThreads();
@@ -371,6 +476,7 @@ function newChat() {
 $("#newChat").onclick = newChat;
 $("#refreshThreads").onclick = refreshThreads;
 
+setupToolsPanel();
 loadModels();
 refreshThreads();
 $("#input").focus();
