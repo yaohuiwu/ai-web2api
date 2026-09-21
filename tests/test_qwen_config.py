@@ -45,5 +45,6 @@ def test_qwen_config_valid():
     assert "button.send-button" in q.selectors.send_button
     assert ".response-message-content.phase-answer" in q.selectors.response_container
     assert q.selectors.login_check == ["text=新建对话"]
+    assert q.thread_busy_timeout == 0  # 关闭忙检测（DOM 首帧可能 >20s）
     # 模型对外名统一 -web 后缀
     assert q.models and all(m.name.endswith("-web") for m in q.models)

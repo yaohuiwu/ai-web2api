@@ -172,4 +172,5 @@ providers:
     poll_interval: 0.2
     stable_polls: 12
     min_wait_before_stable: 8.0
-    thread_busy_timeout: 20.0
+    # 0 = 关闭忙检测：Qwen 走 DOM 兜底，首帧容器可能 >20s 才出现，否则误判"页面正忙"
+    thread_busy_timeout: 0

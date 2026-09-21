@@ -671,7 +671,7 @@ XMLHttpRequest.prototype.send = function (body) {{
                 raise ResponseTimeoutError(
                     f'provider "{self.name}" 发送后未检测到回复开始', provider=self.name
                 )
-            if busy_timeout is not None and elapsed > busy_timeout:
+            if busy_timeout and elapsed > busy_timeout:  # 0/None = 关闭忙检测
                 raise ThreadBusyError(
                     f'provider "{self.name}" thread 页面正忙（上一请求未完成，发送被排队），'
                     f"会话已销毁，请稍后重试（thread_busy_timeout={busy_timeout:.0f}s）",
@@ -770,7 +770,7 @@ XMLHttpRequest.prototype.send = function (body) {{
                 raise ResponseTimeoutError(
                     f'provider "{self.name}" 发送后未检测到回复开始', provider=self.name
                 )
-            if busy_timeout is not None and elapsed > busy_timeout:
+            if busy_timeout and elapsed > busy_timeout:  # 0/None = 关闭忙检测
                 raise ThreadBusyError(
                     f'provider "{self.name}" thread 页面正忙（上一请求未完成，发送被排队），'
                     f"会话已销毁，请稍后重试（thread_busy_timeout={busy_timeout:.0f}s）",
