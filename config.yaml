@@ -8,6 +8,8 @@ server:
   thread_parallel: true
   thread_persist: true  # thread_id → DeepSeek 会话 URL id 落盘，重启后 goto 恢复
   cors_origins: ["*"]
+  # 常见 OpenAI 模型名（gpt-4 等）兜底别名挂给哪个 provider；空 = 第一个启用的 provider
+  default_provider: deepseek
 
 browser:
   headless: true          # 静默运行（不弹浏览器窗口）；由 .env 覆盖：

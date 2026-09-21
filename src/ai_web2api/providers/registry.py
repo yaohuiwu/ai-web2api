@@ -58,6 +58,11 @@ class ProviderRegistry:
             provider = driver(pcfg, browser)
             self._providers[pcfg.name] = provider
             for m in pcfg.models:
+                if m.name in self._model_map:
+                    logger.warning(
+                        "模型名 %r 在多个 provider 重复，%s 将覆盖先注册者",
+                        m.name, pcfg.name,
+                    )
                 self._model_map[m.name] = provider
             for alias, target in pcfg.model_aliases.items():
                 if target not in self._model_map:
@@ -70,14 +75,21 @@ class ProviderRegistry:
                 self._alias_owner[alias] = pcfg.name
             logger.info("registered provider %s (models=%s)", pcfg.name, [m.name for m in pcfg.models])
 
-        # 内置兜底：常见 OpenAI 模型名 → 首选 provider 的默认模型（显式别名优先，不覆盖）
-        for name, p in self._providers.items():
+        # 内置兜底：常见 OpenAI 模型名 → 默认 provider 的默认模型（显式别名优先，不覆盖）。
+        # 默认 provider：server.default_provider（未配 = 第一个启用的 provider）。
+        default_name = self.config.server.default_provider or next(iter(self._providers), None)
+        if self.config.server.default_provider and default_name not in self._providers:
+            logger.warning(
+                "server.default_provider=%r 不存在/未启用，兜底别名不挂载",
+                self.config.server.default_provider,
+            )
+        elif default_name:
+            p = self._providers[default_name]
             default_model = p.exposed_models[0]
             for alias in OPENAI_COMMON_MODELS:
                 if alias not in self._aliases and default_model in self._model_map:
                     self._aliases.setdefault(alias, default_model)
-                    self._alias_owner.setdefault(alias, name)
-            break  # 只给第一个启用的 provider 挂内置别名
+                    self._alias_owner.setdefault(alias, default_name)
 
     # ---------- 查询 ----------
 
