@@ -103,9 +103,20 @@ function renderProviderDetail(p) {
     <div class="actions">
       <button class="btn" onclick="actLoginStatus('${p.name}')">刷新登录状态</button>
       <button class="btn primary" onclick="actAutoLogin('${p.name}')">自动登录</button>
-      <button class="btn" onclick="actManualLogin('${p.name}')">手动登录</button>
+      <button class="btn" onclick="actManualLogin('${p.name}')">手动登录/导入</button>
       <button class="btn" onclick="actScreenshot('${p.name}')">抓取截图</button>
       <button class="btn danger" onclick="actLogout('${p.name}')">退出登录</button>
+    </div>
+    <div class="manual-panel" id="manualPanel" hidden>
+      <div class="mp-line">本机运行（登录完会自动导入）：<code id="manualCmd"></code></div>
+      <div class="mp-line muted">或粘贴 / 拖入 <code>state.json</code>：</div>
+      <textarea id="statePaste" rows="5" spellcheck="false" placeholder='{"cookies":[...],"origins":[...]}'></textarea>
+      <div class="mp-actions">
+        <input type="file" id="stateFile" accept=".json,application/json" hidden>
+        <button class="btn" onclick="document.getElementById('stateFile').click()">选择文件</button>
+        <button class="btn primary" onclick="actImportState('${p.name}')">导入</button>
+        <span class="muted" id="stateStatus"></span>
+      </div>
     </div>`;
 }
 
@@ -129,13 +140,47 @@ async function actAutoLogin(name) {
   finally { btn.disabled = false; }
 }
 
-async function actManualLogin(name) {
-  const btn = event.target; btn.disabled = true;
+function actManualLogin(name) {
+  const panel = $("#manualPanel");
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  if (panel.hidden) return;
+  const cmd = $("#manualCmd");
+  if (cmd) cmd.textContent = `python -m ai_web2api.cli login ${name}`;
+  const fileEl = $("#stateFile");
+  const readFile = (f) => {
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { $("#statePaste").value = r.result; $("#stateStatus").textContent = `已读入 ${f.name}`; };
+    r.readAsText(f);
+  };
+  if (fileEl) fileEl.onchange = () => readFile(fileEl.files && fileEl.files[0]);
+  panel.ondragover = (e) => e.preventDefault();
+  panel.ondrop = (e) => {
+    e.preventDefault();
+    readFile(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+  };
+}
+
+async function actImportState(name) {
+  const status = $("#stateStatus");
+  const txt = ($("#statePaste").value || "").trim();
+  if (!txt) { status.textContent = "请先粘贴或选择 state.json"; return; }
+  let state;
+  try { state = JSON.parse(txt); } catch (e) { status.textContent = "JSON 解析失败: " + e.message; return; }
+  status.textContent = "导入中…";
   try {
-    const r = await api(`/admin/${name}/login/start`, { method: "POST" });
-    toast(`已打开登录窗口（需 headless=false 才可见）。完成后点「刷新登录状态」。${r.hint || ""}`);
-  } catch (e) { toast(`失败: ${e.message}`); }
-  finally { btn.disabled = false; }
+    const r = await api(`/admin/${name}/login/state`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state),
+    });
+    status.textContent = r.logged_in ? "导入成功，已登录 ✓" : "已导入，但登录态未确认";
+    toast(`${name}: 已导入登录态`);
+    await load();
+  } catch (e) {
+    status.textContent = "导入失败: " + e.message;
+  }
 }
 
 async function actScreenshot(name) {

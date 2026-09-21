@@ -1,6 +1,6 @@
 # 手动登录：CLI 子命令 + state 导入（设计，待评审）
 
-> 状态：**设计，待批准**。批准后再改代码。
+> 状态：**已实现**（CLI 子命令 + 导入接口 + UI 粘贴/上传）。
 > 目标：在**有显示器的本机**用真实浏览器手动完成登录（含验证码/Google/短信），
 > 生成 `storage_state`，再导入到运行中的服务（含 Docker），无需 VNC / 改镜像。
 
@@ -98,13 +98,12 @@ python -m ai_web2api.cli login qwen --import-url http://127.0.0.1:8000   # 覆�
   （项目 `.venv` 通常已具备）。
 - Google 登录成功率取决于出口网络；失败可直接改用 `--manual` 多试或导入 cookies。
 
-## 7. 分步实现计划（每步一提交）
+## 7. 分步实现计划（已全部完成，每步一提交）
 
-- **Step 1** — `BrowserManager.reset_context()` + 单测（关 context、下次重建）。
-- **Step 2** — `POST /admin/{p}/login/state`（写盘 + reset + 复核）+ TestClient 单测。
-- **Step 3** — `ai_web2api/cli.py`（argparse 子命令 `login`）+ 流程；单测覆盖参数解析与"保存/导入"分支（网页交互用 stub）。
-- **Step 4** — UI：手动登录提示 + **粘贴 / 文件上传导入**；文档（README「手动登录」、PROVIDER_QWEN 关联）。
-- （可选）**Step 5** — 登录成功日志/`/healthz` 复核；`--out` 覆盖已有 state 的备份策略。
+- [x] **Step 1** — `BrowserManager.reset_context()` + 单测。
+- [x] **Step 2** — `POST /admin/{p}/login/state`（写盘 + reset + 复核）+ TestClient 单测。
+- [x] **Step 3** — `ai_web2api/cli.py`（argparse 子命令 `login`）+ 单测。
+- [x] **Step 4** — UI：手动登录提示 + 粘贴 / 文件上传导入；文档（README「登录」、本文件）。
 
 ## 8. 已定 / 待确认
 

@@ -58,10 +58,24 @@ INFO ai_web2api: OpenAI API（局域网）：http://192.168.1.5:8000/v1
 
 ### 1. 登录（首次必做）
 
-推荐方式：`config.yaml` 里配 `login.mode: auto` + `.env` 写 `DEEPSEEK_USERNAME/DEEPSEEK_PASSWORD`，
+**方式 A（推荐）自动登录**：`config.yaml` 里配 `login.mode: auto` + `.env` 写 `DEEPSEEK_USERNAME/DEEPSEEK_PASSWORD`，
 服务启动时自动登录（无头，不弹窗口）。
 
-需要**手动**登录（自动登录被验证码/风控拦住）时，临时让窗口可见再重启：
+**方式 B（推荐，需验证码/Google/滑块时）命令行手动登录**（在有显示器的本机运行；登录成功后**默认自动导入本地服务**，免重启）：
+
+```bash
+python -m ai_web2api.cli login qwen            # 有头浏览器；先自动填账号密码，你补验证码/选 Google
+python -m ai_web2api.cli login deepseek --manual
+python -m ai_web2api.cli login qwen --no-import # 只写 state，不导入
+```
+
+- 生成并写入 `profiles/<provider>/state.json`；带 `--import-url` 可指定服务地址（默认由 `config.yaml` 的 host/port 推导）。
+- 详见 [`docs/MANUAL_LOGIN.md`](docs/MANUAL_LOGIN.md)。
+
+**方式 C：在 `/ui` 状态面板导入**：Provider 详情点「手动登录/导入」→ 粘贴 `state.json` 或选文件（可拖入）→ 导入。
+（接口：`POST /admin/{p}/login/state`，会写盘 + 重置 context + 复核登录态。）
+
+**方式 D（旧）：让窗口可见手动登录**（本地 non-docker）：
 
 ```bash
 DEEPSEEK_HEADLESS=false .venv/bin/python -m ai_web2api.main   # 或写进 .env 后重启
@@ -74,9 +88,9 @@ curl http://127.0.0.1:8000/admin/deepseek/login/status           # 检测登录�
 > 覆盖优先级：`WEB2API_HEADLESS` > `DEEPSEEK_HEADLESS`（即 `<PROVIDER>_HEADLESS`）> `config.yaml`。
 > headless 下 `login/start` 打开的窗口不可见，接口会直接返回提示而不是静默卡住。
 
-登录态自动保存到 `profiles/deepseek/state.json`，重启服务自动恢复（无需重复登录）。
+登录态自动保存到 `profiles/<provider>/state.json`，重启服务自动恢复（无需重复登录）。
 
-也可以直接导入 cookies：
+也可以直接导入 cookies（仅 cookies；需要 localStorage 时用 `login/state`）：
 
 ```bash
 curl -X POST http://127.0.0.1:8000/admin/deepseek/login/cookies \
