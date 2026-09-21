@@ -232,6 +232,6 @@ providers:
     queue: {max_size: 10, timeout: 60}
     response_timeout: 180
     poll_interval: 0.2
-    stable_polls: 20
-    min_wait_before_stable: 10.0
+    stable_polls: 30
+    min_wait_before_stable: 15.0
     thread_busy_timeout: 0

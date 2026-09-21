@@ -895,9 +895,17 @@ XMLHttpRequest.prototype.send = function (body) {{
                         done = True
                 # 否则（正文容器尚未出现）→ 继续等，避免空正文提前结束（Qwen 实测）
             if done:
-                if buffer_content and last["content"]:
-                    # 结束：一次性发出完整正文（流式带缓冲）
-                    yield StreamChunk("content", last["content"])
+                if buffer_content:
+                    # 收尾兜底：结束判定可能比最后一帧渲染早一拍 → 再等一拍重取一次，取更长的
+                    await page.wait_for_timeout(poll_ms + 200)
+                    try:
+                        final = (await extractor.extract_markdown(page, md_sel, md_idx)) if md_sel else ""
+                    except Exception:  # noqa: BLE001
+                        final = ""
+                    if final and len(final) > len(last["content"]):
+                        last["content"] = final
+                    if last["content"]:
+                        yield StreamChunk("content", last["content"])
                 return
 
             await page.wait_for_timeout(poll_ms)
