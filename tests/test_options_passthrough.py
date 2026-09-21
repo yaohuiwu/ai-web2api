@@ -72,6 +72,7 @@ class _GenStub(WebChatProvider):
         search=None,
         attachments=None,
         options=None,
+        prompt_override=None,
     ):
         self.seen = options
         if False:

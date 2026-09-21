@@ -92,6 +92,7 @@ class WebChatProvider(BaseProvider):
         search: bool | None = None,
         attachments: list[dict] | None = None,
         options: dict | None = None,
+        prompt_override: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
         cfg = self.cfg
         resume = thread_mode == "resume"
@@ -125,7 +126,10 @@ class WebChatProvider(BaseProvider):
                 for s in cfg.selectors.thinking_container
             }
 
-            if resume:
+            if prompt_override is not None:
+                # Function Calling：协议层已拼好 prompt，直发
+                prompt = prompt_override
+            elif resume:
                 # 会话绑定续用：页面已有完整历史（页面为准），只发最后一条 user 消息
                 prompt = last_user_message(messages)
             else:

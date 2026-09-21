@@ -28,6 +28,13 @@ from ..core.errors import (
 from ..core.threads import ThreadManager
 from ..providers.base import last_user_message
 from ..providers.registry import ProviderRegistry
+from ..tool_calling.converter import (
+    build_prompt as fc_build_prompt,
+)
+from ..tool_calling.converter import (
+    build_resume_prompt as fc_build_resume_prompt,
+)
+from ..tool_calling.converter import needs_tool_handling, parse_tool_response
 from .schemas import (
     ChatCompletionChoice,
     ChatCompletionRequest,
@@ -96,6 +103,41 @@ def _sse(payload: dict) -> str:
     return "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
 
 
+async def _stream_fc(
+    chat_id: str,
+    model: str,
+    thread_id: str | None,
+    content: str | None,
+    thinking: str | None,
+    tool_calls: list[dict] | None,
+    finish: str,
+):
+    """Function Calling 的流式输出：先缓冲后发（工具场景无法边流边发）。
+
+    - 有 tool_calls → 发两段式 tool_call delta（id/name → arguments），finish=tool_calls
+    - 否则 → 一次性发 content，finish=stop
+    """
+    meta = {"id": chat_id, "object": "chat.completion.chunk", "created": int(time.time()), "model": model}
+    if thread_id:
+        meta["thread_id"] = thread_id
+    yield _sse({**meta, "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]})
+    if thinking:
+        yield _sse({**meta, "choices": [{"index": 0, "delta": {"reasoning_content": thinking}, "finish_reason": None}]})
+    if tool_calls:
+        for i, tc in enumerate(tool_calls):
+            fn = tc.get("function", {})
+            yield _sse(
+                {**meta, "choices": [{"index": 0, "delta": {"tool_calls": [{"index": i, "id": tc.get("id"), "type": "function", "function": {"name": fn.get("name"), "arguments": ""}}]}, "finish_reason": None}]}
+            )
+            yield _sse(
+                {**meta, "choices": [{"index": 0, "delta": {"tool_calls": [{"index": i, "function": {"arguments": fn.get("arguments", "")}}]}, "finish_reason": None}]}
+            )
+    elif content:
+        yield _sse({**meta, "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}]})
+    yield _sse({**meta, "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]})
+    yield "data: [DONE]\n\n"
+
+
 def create_router(registry: ProviderRegistry, threads: ThreadManager | None = None) -> APIRouter:
     router = APIRouter()
     thread_parallel = threads is not None and registry.config.server.thread_parallel
@@ -151,6 +193,48 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 kwargs["attachments"] = attachments
             if req.options:
                 kwargs["options"] = req.options
+            # Function Calling：协议层拼 prompt；流式带工具走“先缓冲后发”
+            fc_active = bool(
+                registry.config.server.function_calling
+                and needs_tool_handling(messages, req.tools)
+            )
+            if fc_active:
+                kwargs["prompt_override"] = (
+                    fc_build_resume_prompt(messages, req.tools, req.tool_choice)
+                    if mode == "resume"
+                    else fc_build_prompt(messages, req.tools, req.tool_choice)
+                )
+
+            if req.stream and fc_active:
+                try:
+                    async with session.lock:
+                        content, thinking = await asyncio.wait_for(
+                            provider.complete(messages, resolved, **kwargs),
+                            timeout=provider.cfg.response_timeout + 60,
+                        )
+                    await tm.persist(thread_id)
+                    await tm.save_turn(
+                        thread_id, provider.name, resolved, user_text, content, thinking
+                    )
+                except asyncio.TimeoutError:
+                    await tm.close(thread_id)
+                    raise ThreadTimeoutError(
+                        f'thread "{thread_id}" 响应超时，会话已销毁，请重试'
+                    )
+                except ThreadExpiredError:
+                    await tm.close(thread_id)
+                    raise
+                except ThreadBusyError:
+                    await tm.close(thread_id)
+                    raise
+                c, calls, finish = (
+                    parse_tool_response(content, req.tools) if req.tools else (content, None, "stop")
+                )
+                return StreamingResponse(
+                    _stream_fc(chat_id, model, thread_id, c, thinking, calls, finish),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
 
             if req.stream:
 
@@ -214,12 +298,18 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 await tm.close(thread_id)  # 页面忙（上一请求未完成）→ 销毁，客户端可重建
                 raise
             message = ResponseMessage(content=content, reasoning_content=thinking)
+            finish = "stop"
+            if fc_active and req.tools:
+                content, calls, finish = parse_tool_response(content, req.tools)
+                message = ResponseMessage(
+                    content=content, reasoning_content=thinking, tool_calls=calls
+                )
             return ChatCompletionResponse(
                 id=chat_id,
                 created=int(time.time()),
                 model=model,
                 thread_id=thread_id,
-                choices=[ChatCompletionChoice(message=message)],
+                choices=[ChatCompletionChoice(message=message, finish_reason=finish)],
             )
 
         opts = {}
@@ -234,6 +324,26 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         if req.options:
             opts["options"] = req.options
 
+        # Function Calling（无状态）：协议层拼 prompt；流式带工具先缓冲后发
+        fc_active = bool(
+            registry.config.server.function_calling and needs_tool_handling(messages, req.tools)
+        )
+        if fc_active:
+            opts["prompt_override"] = fc_build_prompt(messages, req.tools, req.tool_choice)
+
+        if req.stream and fc_active:
+            content, thinking = await provider.gate.run(
+                provider.complete, messages, resolved, **opts
+            )
+            c, calls, finish = (
+                parse_tool_response(content, req.tools) if req.tools else (content, None, "stop")
+            )
+            return StreamingResponse(
+                _stream_fc(chat_id, model, None, c, thinking, calls, finish),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
         if req.stream:
             return StreamingResponse(
                 _stream_completions(provider, messages, resolved, chat_id, **opts),
@@ -243,11 +353,15 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
 
         content, thinking = await provider.gate.run(provider.complete, messages, resolved, **opts)
         message = ResponseMessage(content=content, reasoning_content=thinking)
+        finish = "stop"
+        if fc_active and req.tools:
+            content, calls, finish = parse_tool_response(content, req.tools)
+            message = ResponseMessage(content=content, reasoning_content=thinking, tool_calls=calls)
         return ChatCompletionResponse(
             id=chat_id,
             created=int(time.time()),
             model=model,
-            choices=[ChatCompletionChoice(message=message)],
+            choices=[ChatCompletionChoice(message=message, finish_reason=finish)],
         )
 
     async def _stream_completions(provider, messages, model, chat_id, **opts):
