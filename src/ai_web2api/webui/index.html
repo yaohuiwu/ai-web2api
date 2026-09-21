@@ -9,26 +9,35 @@
 </head>
 <body>
 <header>
-  <h1>ai-web2api</h1>
-  <span class="sub" id="serverLine">—</span>
+  <div class="brand">
+    <span class="logo">◈</span>
+    <div class="brand-text">
+      <h1>ai-web2api</h1>
+      <span class="sub" id="serverLine">—</span>
+    </div>
+  </div>
   <span class="spacer"></span>
-  <label class="toggle"><input type="checkbox" id="autoRefresh" checked> 自动刷新 (10s)</label>
+  <label class="toggle"><input type="checkbox" id="autoRefresh" checked> 自动刷新</label>
   <button class="btn" id="refreshBtn">刷新</button>
-  <a href="/ui/playground.html">OpenAI 测试页 →</a>
+  <a class="btn primary" href="/ui/playground.html">Playground →</a>
 </header>
 <main>
-  <section class="grid" id="serverCard"></section>
-  <section style="margin-top:16px">
-    <div class="card">
+  <section class="kpis" id="kpis"></section>
+
+  <section class="panel">
+    <div class="panel-head">
       <h2>Provider</h2>
-      <div id="providers"></div>
+      <div class="tabs" id="providerTabs"></div>
     </div>
+    <div id="providerDetail" class="provider-detail"></div>
   </section>
-  <section style="margin-top:16px">
-    <div class="card">
-      <h2>Thread 会话 <span id="threadCount" style="float:right;text-transform:none"></span></h2>
-      <div id="threads"></div>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Thread 会话</h2>
+      <span class="muted" id="threadCount"></span>
     </div>
+    <div id="threads"></div>
   </section>
 </main>
 <div class="toast" id="toast"></div>
