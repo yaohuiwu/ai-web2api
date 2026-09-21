@@ -155,6 +155,20 @@ class BrowserManager:
         logger.info("context created for provider %s (state restored=%s)", provider, state.exists())
         return ctx
 
+    async def reset_context(self, provider: str) -> None:
+        """关闭并丢弃 provider 的 context（下次 ``get_context`` 用最新 ``state.json`` 重建）。
+
+        用于手动登录导入 state 后**立即生效**（无需重启服务）。
+        """
+        ctx = self._contexts.pop(provider, None)
+        if ctx is not None:
+            try:
+                await ctx.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("context close skipped for %s: %s", provider, exc)
+        self._state_dirty.discard(provider)
+        logger.info("context reset for provider %s", provider)
+
     def mark_state_dirty(self, provider: str) -> None:
         """标记登录态已变化（刚登录成功 / 注入了 cookie）→ 下次 save_state 必须落盘。"""
         self._state_dirty.add(provider)
