@@ -81,3 +81,17 @@ def test_login_status_debounce():
     assert reg._update_status("qwen", True) is True  # 恢复登录
     assert reg.login_status()["qwen"] is True
     assert reg._update_status("qwen", False) is True  # 防抖计数已重置
+
+
+def test_login_status_seeded_from_state_file(tmp_path):
+    """有 state.json 的 provider 初始视为已登录（避免首次检测不确定时误显示未登录）。"""
+    from ai_web2api.browser.manager import BrowserManager
+    from ai_web2api.config import BrowserConfig
+
+    (tmp_path / "qwen").mkdir()
+    (tmp_path / "qwen" / "state.json").write_text("{}", encoding="utf-8")
+    bm = BrowserManager(BrowserConfig(), tmp_path)
+    reg = ProviderRegistry(_cfg(), browser=bm)
+    st = reg.login_status()
+    assert st.get("qwen") is True
+    assert not st.get("deepseek")  # 无 state 文件 → 不预置

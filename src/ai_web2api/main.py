@@ -250,7 +250,8 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
         return {
             "status": "ok",
             "providers": {
-                name: {"logged_in": ok} for name, ok in registry.login_status().items()
+                name: {"logged_in": registry.login_status().get(name, False)}
+                for name in registry.providers()
             },
         }
 

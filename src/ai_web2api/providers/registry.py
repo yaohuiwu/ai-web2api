@@ -76,6 +76,16 @@ class ProviderRegistry:
                 self._alias_owner[alias] = pcfg.name
             logger.info("registered provider %s (models=%s)", pcfg.name, [m.name for m in pcfg.models])
 
+        # 初始登录态：有 state.json 视为已登录（首次检测若“不确定”就不应该显示未登录）。
+        # 真实掉线由带防抖的检测（连续 2 次确认失败）纠正。
+        if self._browser is not None:
+            for name in self._providers:
+                try:
+                    if self._browser.state_path(name).exists():
+                        self._login_status[name] = True
+                except Exception:  # noqa: BLE001
+                    pass
+
         # 内置兜底：常见 OpenAI 模型名 → 默认 provider 的默认模型（显式别名优先，不覆盖）。
         # 默认 provider：server.default_provider（未配 = 第一个启用的 provider）。
         default_name = self.config.server.default_provider or next(iter(self._providers), None)
