@@ -129,7 +129,10 @@ POST /v1/chat/completions {messages, tools, tool_choice}
 - **带工具**：**缓冲正文**（thinking 仍可实时流），生成结束后解析：
   - 命中工具 → 发 `tool_calls` delta（先 `id/name+arguments:""`，再 `arguments`），`finish_reason="tool_calls"`；
   - 否则 → 把缓冲的正文一次性/分块发出，`finish_reason="stop"`。
-  - （与参考项目一致：工具场景流式退化为“先攒后发”，避免已发出的正文无法撤回。）
+  - **为什么不能边流边发**：模型原始输出是一段**文本**（工具调用是其中一段 ```` ```tool_json ```` 代码块），
+    只有**全文解析完**才知道它是“工具调用”还是“正常回答”。若先把原始文本当 `delta.content` 发出去，
+    之后才发现是工具调用，已发出的 SSE 字节**无法撤回**——客户端会既显示一段 JSON 文本、又收到 `tool_calls`，无法使用。
+    因此工具请求下流式退化为“先攒后发”；不带工具时仍逐字流，不受影响。
 
 ### 6.4 thread 绑定与工具结果
 - 我们的 resume 只发最后一条 user 消息；**工具结果回合**要把 `<tool_result>` 作为本轮文本注入
@@ -159,8 +162,12 @@ POST /v1/chat/completions {messages, tools, tool_choice}
 
 ## 8. 配置/开关
 
-- 默认**按请求自动启用**（传了 `tools` 才生效），无需配置。
-- 可选加 `server.function_calling: bool = True`（全局关闭用），先不加，保持简单。
+- 默认**按请求自动启用**（传了 `tools` 才生效）。
+- **`server.function_calling: bool = True`**（全局总开关）：
+  - `true`：有 `tools` 就走 FC（注入/解析）。
+  - `false`：**完全忽略** `tools`（当普通对话处理，不注入工具提示、不解析工具调用）——
+    用于**避免注入工具提示触发网页端风控**，或排查问题时一键关掉。
+  - 关闭时 `role=tool` 消息也按普通文本处理（不注入 `<tool_result>`）。
 - 语言：默认按用户文本自动判断；可用 provider `locale` 起始语言兜底。
 
 ---
@@ -204,10 +211,14 @@ POST /v1/chat/completions {messages, tools, tool_choice}
 
 ---
 
-## 12. 需要确认的点
+## 12. 已确认决策
 
-1. **API 面**：`tools` 用 OpenAI 原生字段名（`tools` / `tool_choice`），对吗？
-2. **流式带工具**接受“先缓冲后发”（不是逐字流），对吗？（与参考项目一致）
-3. 工具结果回合若客户端**没带 tools**，仍注入 `<tool_result>` 并要答案——可以吗？
-4. 是否需要 `server.function_calling` 全局开关？（我倾向先不加）
-5. 本次是否**只在 DeepSeek 上验证**即可（Qwen 同源，天然支持）？
+| # | 结论 |
+|---|------|
+| 1 | 用 OpenAI 原生字段名 `tools` / `tool_choice` ✅ |
+| 2 | 流式带工具“先缓冲后发” ✅（原因见 §6.3） |
+| 3 | 工具结果回合即使未带 `tools`，仍注入 `<tool_result>` 并要答案 ✅ |
+| 4 | 加 `server.function_calling` 全局总开关（默认 `true`；关掉=忽略 tools，用于防/避风控） ✅ |
+| 5 | 本次只在 DeepSeek 上验证（Qwen 同源） ✅ |
+
+批准后从 **Step 1** 开始实现。
