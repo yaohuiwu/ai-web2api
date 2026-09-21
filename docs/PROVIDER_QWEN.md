@@ -344,3 +344,20 @@ Step A–H 已全部完成（每步一提交，快速套件 95 passed + 假页 e
 - Qwen 偶发 `net::ERR_CONNECTION_CLOSED`（疑似风控/限流），重试即可。
 - 思考全文（非状态）需进一步校准（可能需展开折叠面板）。
 - 流式端点 `/api/v2/chat/completions` 的 SSE 格式待接入 `network` 解析（可选）。
+
+---
+
+## 11. 登录失败根因与修复（2026-09 调研）
+
+Qwen 登录/保持登录高频失败，逐个定位到 **4 个可修复点 + 1 个外部因素**：
+
+| # | 现象 | 根因 | 修复 |
+|---|------|------|------|
+| 1 | 输入账号密码后点「登录」**零请求** | 登录框是 **React 受控输入**：`fill()` 只改 DOM 值、React state 仍为空 → 提交被静默跳过 | 改用**逐字输入** `press_sequentially`（`base.auto_login`） |
+| 2 | 手动登录：第一次点「登录」无效、**第二次才行** | 网页首发提交偶发静默 no-op | 自动登录**重试** `login.retries`（默认 3） |
+| 3 | 页面卡在 `#splash-screen`（`#root` 空、body 空）→ 误判未登录 | Qwen 限流时 SPA 不 boot | `_goto_ready`：卡加载屏时 **reload 重试** + 更长等待（`check_login`/`open_chat_page`/`auto_login`） |
+| 4 | 默认是「使用验证码登录」tab | 需先点「使用密码登录」 | `login.page.password_tab` + 点后等密码框、没出来再点一次 |
+| 5 | `auth.qwen.ai/api/v2/auths/refresh` 返回“令牌已撤销，请重新登录” | Qwen 服务端撤销会话 | 后台检测**防抖**（连续 2 次失败才判掉线）+ 掉线**自愈重登** |
+
+**外部因素（无法完全消除）**：同一账号/IP 短时间大量自动化访问会触发 Qwen 风控——表现为“页面不 boot / 返回未登录页 / 令牌被撤销”。
+缓解手段：降低 `browser.login_check_interval`（已从 300s 调到 900s）、让账号冷却、必要时用**真实浏览器手动登录一次**并导入 `state.json`/cookies。

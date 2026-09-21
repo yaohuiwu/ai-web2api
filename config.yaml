@@ -18,7 +18,7 @@ browser:
   # 页面语言必须 zh-CN：选择器文案（深度思考/开启新对话/密码登录）都是中文，
   # Playwright 默认 en-US 时 DeepSeek 会渲染英文 UI → 这些选择器全部失配
   locale: zh-CN
-  login_check_interval: 300
+  login_check_interval: 900   # 定时登录态检测间隔（秒）。Qwen 对高频访问敏感，不宜过短
   state_expiry_margin: 86400 # 登录态剩余有效期低于该值才落盘 state.json（秒）；已登录且未过期则不反复写
   # 定时状态检测：独立开关 + 默认 headless（即使主浏览器 headed 也不弹窗）
   status_check: true      # 定时检测登录态/保存状态总开关
