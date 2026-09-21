@@ -1,7 +1,7 @@
 # 多 Provider 扩展设计与 Qwen 接入方案（待评审）
 
-> 状态：**设计，待 review/批准**。批准前不改代码。
-> 相关：`docs/DESIGN.md`（总体架构）、`docs/HISTORY.md`（会话历史）
+> 状态：**已实现**（通用化重构 + Qwen 接入均已落地，见「10. 实现结果与实测校准」）。
+> 相关：`docs/DESIGN.md`（§3 Provider 扩展点）、`docs/HISTORY.md`（会话历史）
 
 ---
 
@@ -302,3 +302,45 @@ providers:
    **不做**图片生成/视频/语音输出，可以吗？
 5. **登录联调**：Step G 需要你提供 Qwen 密码（或先跑一次有头手动登录、我再导出 `state.json`）。
 6. **Step A 重构范围**：允许我改动 `DeepSeekProvider` 的内部结构（保持对外行为与配置不变）吗？
+
+---
+
+## 10. 实现结果与实测校准
+
+Step A–H 已全部完成（每步一提交，快速套件 95 passed + 假页 e2e 6 passed）：
+
+| 步骤 | 提交 | 内容 |
+|------|------|------|
+| A | `refactor(providers): extract generic WebChatProvider...` | 通用引擎上提，DeepSeek 只留差异 |
+| B | `feat(providers): declarative model/mode dropdown menus...` | 下拉菜单选项 + `ui_label` 模型选择 |
+| C | `feat(providers): per-provider locale, login.url, session_url...` | provider 级 locale/登录页/会话 URL 模板 |
+| D | `feat(providers): attachment menu framework...` | 附件框架 |
+| E | `feat(providers): config-driven XHR/SSE capture...` | 网络抓取框架 |
+| F | `feat(api): generic options passthrough...` | `options` 透传 |
+| G | `feat(qwen): register Qwen provider... / calibrate selectors...` | Qwen 驱动 + 实测校准 |
+| H | `feat(registry): server.default_provider alias ownership...` | 多 provider 别名归属 |
+
+### 登录后实测校准（2026-09，`chat.qwen.ai`）
+
+| 项 | 实测值 |
+|----|--------|
+| 登录页 | `https://chat.qwen.ai/auth`，`input[name=email]` / `input[name=password]` / `button:has-text("登录")` |
+| 聊天输入 | `textarea.message-input-textarea`（placeholder「询问 Qwen」） |
+| **发送按钮** | 输入后才渲染：`button.send-button` / `.chat-prompt-send-button`（圆形向上箭头） |
+| 正文容器 | `.response-message-content.phase-answer`（`.phase-answer` 区分思考/回答） |
+| 思考容器 | `.qwen-chat-thinking-status-card-content`（内容为「已经完成思考」等状态，非思考全文） |
+| 模型下拉 | `span.ant-dropdown-trigger` → `div[role=option]:has-text("{label}")`（如 `Qwen3.7-Plus` / `Qwen3.8-Max`） |
+| 模式下拉 | `.qwen-thinking-selector ...` → 选项 `自动/思考/快速` |
+| 附件 | `input#filesUpload` |
+| **会话 URL** | `https://chat.qwen.ai/c/<uuid>` → `session_url: "{base}/c/{id}"` |
+| 流式端点 | 观察到 `POST /api/v2/chat/completions`（暂未接入，先走 DOM 兜底） |
+| 登录检测 | `text=新建对话`（登录后才有） |
+
+实测结果：`model=qwen3.7-plus-web` → `content="2"`、`reasoning="已经完成思考"`；
+`mode=thinking` → 日志 `mode -> '思考'` 且正常回复。
+
+### 待办 / 注意
+
+- Qwen 偶发 `net::ERR_CONNECTION_CLOSED`（疑似风控/限流），重试即可。
+- 思考全文（非状态）需进一步校准（可能需展开折叠面板）。
+- 流式端点 `/api/v2/chat/completions` 的 SSE 格式待接入 `network` 解析（可选）。

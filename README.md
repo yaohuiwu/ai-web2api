@@ -4,14 +4,14 @@
 
 核心机制：Playwright 驱动真实浏览器 —— 打开网页、保持登录态、输入消息、增量提取流式响应，再以 OpenAI 的 `/v1/chat/completions` 格式暴露出去。不逆向任何内部 API，纯 DOM 自动化，Web 改版只需改配置里的选择器。
 
-> 设计文档见 [`docs/DESIGN.md`](docs/DESIGN.md)。当前进度：M1（DeepSeek 驱动 + 非流式/流式 + 登录态持久化 + 串行队列）已完成。
+> 设计文档见 [`docs/DESIGN.md`](docs/DESIGN.md)（§3 是 Provider 扩展点）；Qwen 接入见 [`docs/PROVIDER_QWEN.md`](docs/PROVIDER_QWEN.md)。当前已支持多 provider（**DeepSeek / Qwen** 可同时启用）。
 
 ## 快速开始
 
 ### 方式一：Docker Compose（推荐，镜像自带 Chromium）
 
 ```bash
-cp .env.example .env          # 填 DEEPSEEK_USERNAME / DEEPSEEK_PASSWORD（可选，也可手动登录）
+cp .env.example .env          # 填 DEEPSEEK_USERNAME/PASSWORD、QWEN_USERNAME/PASSWORD（可选，也可手动登录）
 docker compose up -d --build  # 首次会拉基础镜像并装依赖，约几分钟
 docker compose logs -f        # 看启动日志，会打印可点击的 UI/API 地址
 ```
@@ -236,6 +236,7 @@ curl http://127.0.0.1:8001/v1/chat/completions \
 server:
   host: 0.0.0.0
   port: 8000
+  default_provider: deepseek   # 常见 OpenAI 模型名(gpt-4 等)兜底别名挂给谁；空 = 首个启用 provider
 browser:
   headless: true           # 静默运行（不弹窗口）；可用 .env 覆盖：WEB2API_HEADLESS > DEEPSEEK_HEADLESS
   locale: zh-CN            # 页面语言（决定 DeepSeek UI 文案 / 中文选择器是否匹配）
@@ -288,7 +289,26 @@ providers:                 # 也支持 list 写法
           - "button[type=submit]"
     queue: {max_size: 10, timeout: 60}   # 每 provider 串行队列
     response_timeout: 180
+    network: {url_pattern: "/api/v0/chat/completion"}  # XHR 监听（不配 = 走 DOM 兜底）
+  qwen:                     # 第二个 provider（可同时启用）；模型对外名 = 原模型名 + -web
+    url: https://chat.qwen.ai/
+    session_url: "{base}/c/{id}"          # thread 恢复 URL 模板
+    models:
+      - {name: qwen3.7-plus-web, ui_label: "Qwen3.7-Plus"}
+    selectors:
+      input: ["textarea.message-input-textarea"]
+      send_button: ["button.send-button"]  # 输入后才出现的圆形发送按钮
+      response_container: [".response-message-content.phase-answer"]
+      model_menu: {trigger: ["span.ant-dropdown-trigger"], option: ['div[role=option]:has-text("{label}")']}
+      mode_menu:
+        trigger: [".qwen-thinking-selector .qwen-chat-v2-dropdown-menu-trigger"]
+        option: ['div[role=option]:has-text("{label}")']
+        labels: {auto: "自动", thinking: "思考", fast: "快速"}
+    login: {mode: auto, url: https://chat.qwen.ai/auth, username_env: QWEN_USERNAME, password_env: QWEN_PASSWORD}
 ```
+
+> 选择器三种 UI 形态：`mode_button`（radio）/ `toggle_button`（开关）/ `model_menu`+`mode_menu`（下拉菜单）；
+> provider 级可选 `locale` / `session_url` / `login.url` / `network`；自定义选项走 `/v1` 请求的 `options` 字段。
 
 ## API 一览
 
@@ -316,6 +336,8 @@ providers:                 # 也支持 list 写法
 ```bash
 DEEPSEEK_USERNAME=你的账号
 DEEPSEEK_PASSWORD=你的密码
+QWEN_USERNAME=你的邮箱
+QWEN_PASSWORD=你的密码
 ```
 
 然后：

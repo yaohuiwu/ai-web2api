@@ -68,32 +68,30 @@
 
 ## 3. Provider 抽象（核心扩展点）
 
-```python
-class BaseProvider(ABC):
-    name: str                       # "deepseek"
-    models: list[str]               # ["deepseek-web", ...]
+分两层：
 
-    async def ensure_ready(self) -> None:
-        """打开页面、恢复或建立登录态；未登录且无凭据时抛出明确错误"""
+- **`BaseProvider`**（`providers/base.py`）：登录/凭据/开页/登录检测，`complete()` 聚合流式。
+- **`WebChatProvider`**（`providers/webchat.py`）：**站点无关的聊天引擎** ——  `generate()`
+  全流程（开页 → 模型/模式/开关/附件 → 发送 → 网络优先/DOM 兜底轮询 → diff 增量 → 忙/失效/超时）。
 
-    async def chat(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
-        """非流式对话"""
+新 provider 只需继承 `WebChatProvider` + 配置选择器，按需覆写钩子：
 
-    async def chat_stream(self, request: ChatCompletionRequest) -> AsyncIterator[StreamChunk]:
-        """流式对话，产出 OpenAI SSE chunk"""
+| 钩子 | 默认 | 说明 |
+|------|------|------|
+| `init_scripts()` | 由 `network.url_pattern` 生成 XHR 监听 | 页面级注入 |
+| `_parse_sse_snapshot(text)` | 抛 `_NetFallback`（走 DOM） | 网络流解析 |
+| `_extract_thinking(page, sel, idx)` | 取元素 `innerText` | 思考区提取 |
+| `MODE_PRESETS` | `{}` | `mode` → 开关组合 |
+| `session_url_pattern` / `cfg.session_url` | — | thread 恢复 URL |
+| `_apply_extra_options(page, options)` | no-op | provider 自定义选项 |
 
-    async def reset(self) -> None:
-        """新建对话（清空网页端上下文）"""
+选择器支持三种 UI 形态：`mode_button`（radio）/ `toggle_button`（开关）/
+`model_menu`+`mode_menu`（下拉菜单，点开→点选→读回校验）。
 
-    async def close(self) -> None:
-        """释放浏览器资源"""
-```
-
-**新增一个网页 AI 的步骤**（以未来 Kimi 为例）：
-1. 新建 `providers/kimi.py`，继承 `BaseProvider`；
-2. 实现 `ensure_ready`（含登录）、`chat` / `chat_stream`（选择器、等待完成策略）；
-3. 在 `providers/__init__.py` 的 `PROVIDERS` 注册表中登记；
-4. 配置新的 provider 段（`config.yaml`）即可切换/新增，HTTP 层零改动。
+**新增一个网页 AI 的步骤**（以 Qwen 为例）：
+1. 新建 `providers/qwen.py`，继承 `WebChatProvider`（多数情况只需登记 `name` / `session_url_pattern`）；
+2. 在 `providers/registry.py` 的 `DRIVERS` 注册表登记；
+3. `config.yaml` 增加 provider 段（选择器 / 模型 / 模式 / 附件 / 登录）——HTTP 层零改动。
 
 ---
 
