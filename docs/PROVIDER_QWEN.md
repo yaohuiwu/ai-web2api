@@ -1,6 +1,7 @@
 # 多 Provider 扩展设计与 Qwen 接入方案（待评审）
 
 > 状态：**已实现**（通用化重构 + Qwen 接入均已落地，见「10. 实现结果与实测校准」）。
+> **注意：Qwen 默认已停用**（`config.yaml` 里 `providers.qwen.enabled: false`）——不在 `/v1/models`、`/healthz`、`/ui` 中出现；需要时改回 `true` 即可。
 > 相关：`docs/DESIGN.md`（§3 Provider 扩展点）、`docs/HISTORY.md`（会话历史）
 
 ---

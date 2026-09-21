@@ -9,6 +9,8 @@ set -e
 case "${WEB2API_HEADLESS:-}" in
   false|False|0|no|off)
     echo "[entrypoint] WEB2API_HEADLESS=${WEB2API_HEADLESS} → headful under Xvfb (DISPLAY=:99)"
+    # 重启时容器内会残留上次的 X 锁/套接字 → 先清掉，否则 Xvfb 起不来
+    rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true
     Xvfb :99 -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
     export DISPLAY=:99
     i=0
@@ -17,6 +19,11 @@ case "${WEB2API_HEADLESS:-}" in
       sleep 0.2
       i=$((i + 1))
     done
+    if [ ! -e /tmp/.X11-unix/X99 ]; then
+      echo "[entrypoint] Xvfb 启动失败："
+      cat /tmp/xvfb.log 2>/dev/null || true
+      exit 1
+    fi
     exec "$@"
     ;;
   *)

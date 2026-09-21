@@ -4,7 +4,7 @@
 
 核心机制：Playwright 驱动真实浏览器 —— 打开网页、保持登录态、输入消息、增量提取流式响应，再以 OpenAI 的 `/v1/chat/completions` 格式暴露出去。不逆向任何内部 API，纯 DOM 自动化，Web 改版只需改配置里的选择器。
 
-> 设计文档见 [`docs/DESIGN.md`](docs/DESIGN.md)（§3 是 Provider 扩展点）；Qwen 接入见 [`docs/PROVIDER_QWEN.md`](docs/PROVIDER_QWEN.md)。当前已支持多 provider（**DeepSeek / Qwen** 可同时启用）。
+> 设计文档见 [`docs/DESIGN.md`](docs/DESIGN.md)（§3 是 Provider 扩展点）；Qwen 接入见 [`docs/PROVIDER_QWEN.md`](docs/PROVIDER_QWEN.md)、ChatGPT 见 [`docs/PROVIDER_CHATGPT.md`](docs/PROVIDER_CHATGPT.md)。当前默认启用 **DeepSeek / ChatGPT**（Qwen 已接入但默认 `enabled: false`，按需开启）。
 
 ## 快速开始
 
@@ -332,7 +332,7 @@ providers:                 # 也支持 list 写法
     queue: {max_size: 10, timeout: 60}   # 每 provider 串行队列
     response_timeout: 180
     network: {url_pattern: "/api/v0/chat/completion"}  # XHR 监听（不配 = 走 DOM 兜底）
-  qwen:                     # 第二个 provider（可同时启用）；模型对外名 = 原模型名 + -web
+  qwen:                     # 已接入，但默认 enabled: false（不注册 / UI 不显示）；需要时改 true
     url: https://chat.qwen.ai/
     session_url: "{base}/c/{id}"          # thread 恢复 URL 模板
     models:

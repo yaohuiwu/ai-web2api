@@ -108,6 +108,7 @@ providers:
   # Qwen Chat（chat.qwen.ai）。模型/模式/附件都是下拉菜单或固定 input，全部配置化。
   # 登录页独立（/auth）；凭据放 .env：QWEN_USERNAME / QWEN_PASSWORD。
   qwen:
+    enabled: false            # 暂不注册（UI / `/v1/models` / `/healthz` 里都不出现）；需要时改回 true
     driver: qwen
     url: https://chat.qwen.ai/
     locale: zh-CN
