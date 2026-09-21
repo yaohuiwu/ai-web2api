@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -130,5 +131,30 @@ async def test_persist_disabled_writes_nothing(tmp_path: Path):
         await tm.save_turn("t1", "deepseek", "m", "q", "a")
         assert tm.list() == []  # 未落库
         assert await tm.get_messages("t1") == []
+    finally:
+        tm.shutdown()
+
+
+async def test_list_sorted_newest_first(tmp_path: Path):
+    """DB 会话按最近活跃倒序：后写的在最前。"""
+    tm = ThreadManager(_server(), tmp_path)
+    try:
+        for tid in ("t1", "t2", "t3"):
+            await tm.save_turn(tid, "deepseek", "m", "q", "a")
+            await asyncio.sleep(0.005)  # 拉开 updated_at
+        assert [t["thread_id"] for t in tm.list()] == ["t3", "t2", "t1"]
+    finally:
+        tm.shutdown()
+
+
+async def test_list_active_session_sorts_with_db(tmp_path: Path):
+    """活跃会话（内存）与已落库会话混排，最新的最先。"""
+    tm = ThreadManager(_server(), tmp_path)
+    try:
+        await tm.save_turn("old", "deepseek", "m", "q", "a")
+        await asyncio.sleep(0.005)
+        page = StubPage()
+        tm._sessions["new"] = ThreadSession("new", StubProvider(), page, "m")
+        assert [t["thread_id"] for t in tm.list()] == ["new", "old"]
     finally:
         tm.shutdown()

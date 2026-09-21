@@ -39,7 +39,7 @@ class ThreadSession:
 
     __slots__ = (
         "thread_id", "provider", "page", "model",
-        "lock", "created", "last_used", "url_id", "first_message",
+        "lock", "created", "last_used", "created_at", "updated_at", "url_id", "first_message",
     )
 
     def __init__(
@@ -60,9 +60,13 @@ class ThreadSession:
         now = time.monotonic()
         self.created = now
         self.last_used = now
+        # 墙钟时间（供列表按时间倒序）；created/last_used 是单调钟，仅用于 TTL
+        self.created_at = time.time()
+        self.updated_at = self.created_at
 
     def touch(self) -> None:
         self.last_used = time.monotonic()
+        self.updated_at = time.time()
 
     def sync_url(self) -> str | None:
         """从当前页面 URL 提取 provider 会话 id（如 DeepSeek /a/chat/s/<uuid>）。"""
@@ -79,6 +83,8 @@ class ThreadSession:
             "model": self.model,
             "first_message": self.first_message,
             "created": round(self.created, 1),
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
             "idle_seconds": round(time.monotonic() - self.last_used, 1),
             "page_url": self.page.url if not self.page.is_closed() else "closed",
             "url_id": self.url_id,
@@ -118,6 +124,7 @@ class ThreadManager:
     def list(self) -> list[dict]:
         """内存活跃会话 + DB 持久化条目（重启后左侧列表不空）。
 
+        统一按最近活跃时间（``updated_at``）倒序，**最新在上**；
         DB 条目标记 loaded=false，点击切换后由下次请求触发恢复。
         """
         out = [s.to_dict() for s in self._sessions.values()]
@@ -143,6 +150,8 @@ class ThreadManager:
                 }
             )
             seen.add(tid)
+        # 按最近活跃时间倒序（最新在上）；时间戳缺失的排最后
+        out.sort(key=lambda d: d.get("updated_at") or d.get("created_at") or 0, reverse=True)
         return out
 
     def active_count(self) -> int:
@@ -345,6 +354,9 @@ class ThreadManager:
 
         try:
             await asyncio.to_thread(_work)
+            session = self._sessions.get(thread_id)
+            if session is not None:
+                session.touch()  # 活跃时间对齐（列表按最近活跃倒序）
         except Exception:  # noqa: BLE001  历史写入失败不应影响请求结果
             logger.warning("thread %s save_turn 失败", thread_id, exc_info=True)
 
