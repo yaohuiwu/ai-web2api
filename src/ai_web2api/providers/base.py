@@ -205,10 +205,15 @@ class BaseProvider(abc.ABC):
                 return await self._login_fail(
                     page, f"登录页输入框未匹配（user={user_sel}, pwd={pwd_sel}）"
                 )
-            await page.locator(user_sel).first.fill(creds["username"])
-            await page.locator(pwd_sel).first.fill(creds["password"])
-            # React 受控输入：填完等一拍让状态提交（否则立刻点提交可能带上旧值），
-            # 也能降低被风控判定为“机器快速填表”的概率。
+            # 逐字输入（而非 fill()）：Qwen 的登录框是 React 受控组件，fill() 只改 DOM 值、
+            # React state 仍为空 → 点“登录”会被静默跳过（实测：零请求、页面又变回验证码 tab）。
+            async def _type(el, text: str) -> None:
+                await el.click()
+                await el.fill("")
+                await el.press_sequentially(text, delay=25)
+
+            await _type(page.locator(user_sel).first, creds["username"])
+            await _type(page.locator(pwd_sel).first, creds["password"])
             await page.wait_for_timeout(800)
 
             submit_sel = await first_match(page, lp.submit)
