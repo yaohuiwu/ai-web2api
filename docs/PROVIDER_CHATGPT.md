@@ -158,3 +158,22 @@ providers:
 > 注意：本项目是**单浏览器实例 + 全局 headless 开关**，所以开了有头就是所有 provider 都有头（Xvfb 下无窗口、无影响，且对其他站点反而更不易被风控）。
 
 模型切换入口当前 UI 未找到可靠选择器（`model_menu` 暂不生效，`_apply_model` 会静默跳过）——后续可再校。
+
+---
+
+## 10. 落地：Xvfb headful（已实现并验证）
+
+- `Dockerfile`：装 `xvfb`；`ENTRYPOINT docker-entrypoint.sh`。
+- `docker-entrypoint.sh`：`WEB2API_HEADLESS=false` 时**手动起 `Xvfb :99`** 并 `DISPLAY=:99` 跑 headful；
+  否则保持 headless（默认行为不变）。
+  > 注意：**不用 `xvfb-run`**——它在本镜像里会卡在“等 X 就绪”。
+- `docker-compose.yml`：`WEB2API_HEADLESS: "${WEB2API_HEADLESS:-true}"`；设 `.env` 里
+  `WEB2API_HEADLESS=false` 即可开启。
+
+**实测（容器 headful under Xvfb）**：
+- `/healthz` → `chatgpt: true`；
+- `POST /v1/chat/completions` model=`gpt-5-web` → `content="pong"` ✅（Sentinel 403 消失）。
+
+未做/待补：
+- **模型切换**入口选择器未找到（`model_menu` 暂不生效，`_apply_model` 静默跳过）；如需切 `gpt-4o`/`o3` 再校准。
+- `thinking_container`（o 系列思考）未校准。

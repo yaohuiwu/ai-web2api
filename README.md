@@ -24,6 +24,7 @@ docker compose logs -f        # 看启动日志，会打印可点击的 UI/API �
 - 容器内无可见窗口，手动登录用 cookies 导入：
   `curl -X POST http://127.0.0.1:8000/admin/deepseek/login/cookies -H 'Content-Type: application/json' -d '{"cookies":[...]}'`
 - 对外暴露时建议设 `WEB2API_API_KEY`（保护 `/v1/*`）并自行用反代限制 `/admin`
+- **用 ChatGPT 时**：设 `WEB2API_HEADLESS=false`（写进 `.env` 或 `WEB2API_HEADLESS=false docker compose up -d`）→ 容器用 **Xvfb 跑 headful**（Sentinel 会拦 headless，headful 才过）；不影响其他 provider
 
 ```bash
 docker compose down          # 停止（保留登录态）

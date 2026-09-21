@@ -19,6 +19,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# 可选：Xvfb，用 WEB2API_HEADLESS=false 时跑 headful（ChatGPT Sentinel 会拦 headless）。
+# 很小（几 MB），默认不启用。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
 # 先装依赖（利用层缓存：改代码不会触发重装依赖）
 COPY pyproject.toml uv.lock README.md ./
 RUN pip install --upgrade pip uv \
@@ -39,4 +45,8 @@ VOLUME ["/app/profiles"]
 EXPOSE 8000
 
 # 容器内必须监听所有网卡，宿主才能访问（config.yaml 默认已是 0.0.0.0）
+# entrypoint：WEB2API_HEADLESS=false 时自动用 xvfb-run 跑 headful；否则原样 headless。
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["python", "-m", "ai_web2api.main"]

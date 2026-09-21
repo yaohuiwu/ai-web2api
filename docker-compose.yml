@@ -23,6 +23,7 @@ services:
     environment:
       # 让容器里打印/使用 0.0.0.0 监听，宿主才能访问 8000
       AI_WEB2API_CONFIG: /app/config.yaml
+      # 设 false → 用 Xvfb 跑 headful（ChatGPT 的 Sentinel 反爬会拦 headless；headful 可通过）
       WEB2API_HEADLESS: "${WEB2API_HEADLESS:-true}"
       # 可选：设置后 /v1/* 需带 Authorization: Bearer <key>（逗号分隔多 key）
       # WEB2API_API_KEY: "your-secret-key"
