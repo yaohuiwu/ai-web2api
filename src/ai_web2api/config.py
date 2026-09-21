@@ -127,6 +127,19 @@ class QueueConfig(BaseModel):
     timeout: float = 60.0
 
 
+class NetworkConfig(BaseModel):
+    """网络抓取（XHR/SSE）：按 ``url_pattern`` 生成页面级监听脚本。
+
+    - ``capture``：总开关；关 / 未配 ``url_pattern`` → 不注入，直接走 DOM 轮询。
+    - ``url_pattern``：匹配要监听的 XHR URL 的正则（如 DeepSeek ``/api/v0/chat/completion``）。
+    - ``grace_seconds``：首次事件宽限期（空 = 自动 ``min(max(6, timeout*0.2), 20)``）。
+    """
+
+    capture: bool = True
+    url_pattern: str | None = None
+    grace_seconds: float | None = None
+
+
 class ModelConfig(BaseModel):
     name: str
     ui_label: str | None = None
@@ -143,6 +156,7 @@ class ProviderConfig(BaseModel):
     selectors: SelectorsConfig = Field(default_factory=SelectorsConfig)
     login: LoginConfig = Field(default_factory=LoginConfig)
     queue: QueueConfig = Field(default_factory=QueueConfig)
+    network: NetworkConfig = Field(default_factory=NetworkConfig)
     model_aliases: dict[str, str] = {}  # 别名 → 本 provider 的模型名（如 gpt-4 → deepseek-web）
     response_timeout: float = 180.0
     poll_interval: float = 0.2

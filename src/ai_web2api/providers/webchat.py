@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import tempfile
@@ -536,6 +537,44 @@ class WebChatProvider(BaseProvider):
         else:
             await page.keyboard.press("Enter")
 
+    # ---------- 网络接入 ----------
+
+    def _net_init_js(self, url_pattern: str) -> str:
+        """生成 XHR 监听脚本：匹配 ``url_pattern`` 的请求把 responseText 存到全局量。"""
+        g, d = self.NET_GLOBAL, self.NET_GLOBAL_DONE
+        pat = json.dumps(url_pattern)  # 包成 JS 字符串供 new RegExp 用，避免正则转义问题
+        return f"""
+window.{g} = "";
+window.{d} = false;
+const __aiw2a_rx = new RegExp({pat});
+const __aiw2a_oo = XMLHttpRequest.prototype.open;
+const __aiw2a_os = XMLHttpRequest.prototype.send;
+XMLHttpRequest.prototype.open = function (method, url) {{
+  this.__aiw2a_url = url;
+  return __aiw2a_oo.apply(this, arguments);
+}};
+XMLHttpRequest.prototype.send = function (body) {{
+  const xhr = this;
+  if (xhr.__aiw2a_url && __aiw2a_rx.test(xhr.__aiw2a_url)) {{
+    xhr.addEventListener('readystatechange', function () {{
+      try {{
+        const rt = xhr.responseText || '';
+        if (rt) window.{g} = rt;
+        if (xhr.readyState === 4) window.{d} = true;
+      }} catch (e) {{}}
+    }});
+  }}
+  return __aiw2a_os.apply(this, arguments);
+}};
+"""
+
+    def init_scripts(self) -> list[str]:
+        """默认：按 ``network.url_pattern`` 生成 XHR 监听；未配 → 不注入（走 DOM）。"""
+        net = self.cfg.network
+        if not net.capture or not net.url_pattern:
+            return []
+        return [self._net_init_js(net.url_pattern)]
+
     # ---------- 响应读取：网络优先 + DOM 兜底 ----------
 
     def _reset_net_capture_js(self) -> str:
@@ -593,7 +632,11 @@ class WebChatProvider(BaseProvider):
         cfg = self.cfg
         timeout = cfg.response_timeout
         poll_ms = int(cfg.poll_interval * 1000)
-        net_grace = min(max(6.0, timeout * 0.2), 20.0)
+        net_grace = (
+            cfg.network.grace_seconds
+            if cfg.network.grace_seconds is not None
+            else min(max(6.0, timeout * 0.2), 20.0)
+        )
         start = time.monotonic()
 
         # 阶段1：等首次事件

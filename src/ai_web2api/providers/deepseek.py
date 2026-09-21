@@ -5,8 +5,11 @@
 
 - 会话 URL 形态 ``/a/chat/s/<uuid>``
 - 旧 mode 值 → 新版开关的翻译（``MODE_PRESETS``）
-- XHR/SSE 网络抓取 JS 与响应解析（``_NET_INIT_JS`` / ``_parse_sse_snapshot``）
+- 响应解析（SSE JSON-Patch 协议，``_parse_sse_snapshot``）
 - 思考面板提取（"已思考（用时 N 秒）"）
+
+网络抓取（XHR 监听 ``/api/v0/chat/completion``）由基类按 ``network.url_pattern``
+生成（见 ``config.yaml``），不再写死在驱动里。
 """
 
 from __future__ import annotations
@@ -19,36 +22,6 @@ from playwright.async_api import Page
 from .webchat import WebChatProvider
 
 logger = logging.getLogger(__name__)
-
-
-# 网络监听注入脚本（页面级，goto 前注入）。
-# DeepSeek Web 前端用 XHR + SSE（POST /api/v0/chat/completion），响应是 JSON
-# Patch 流（THINK/TOOL_SEARCH/TOOL_OPEN/RESPONSE 片段 + close 事件）。拦截 XHR
-# 在 readystatechange 阶段读 responseText 增量，最新全文存 window.__aiw2a_sse。
-# 注意：add_init_script 必须用顶层语句，箭头函数形式不生效（实测）。
-_NET_INIT_JS = r"""
-window.__aiw2a_sse = "";
-window.__aiw2a_sse_done = false;
-const __aiw2a_oo = XMLHttpRequest.prototype.open;
-const __aiw2a_os = XMLHttpRequest.prototype.send;
-XMLHttpRequest.prototype.open = function (method, url) {
-  this.__aiw2a_url = url;
-  return __aiw2a_oo.apply(this, arguments);
-};
-XMLHttpRequest.prototype.send = function (body) {
-  const xhr = this;
-  if (xhr.__aiw2a_url && /\/api\/v0\/chat\/completion/.test(xhr.__aiw2a_url)) {
-    xhr.addEventListener('readystatechange', function () {
-      try {
-        const rt = xhr.responseText || '';
-        if (rt) window.__aiw2a_sse = rt;
-        if (xhr.readyState === 4) window.__aiw2a_sse_done = true;
-      } catch (e) {}
-    });
-  }
-  return __aiw2a_os.apply(this, arguments);
-};
-"""
 
 
 class DeepSeekProvider(WebChatProvider):
@@ -71,10 +44,6 @@ class DeepSeekProvider(WebChatProvider):
     MAX_ATTACHMENTS = 50  # DeepSeek tooltip：最多 50 个
     MAX_ATTACH_BYTES = 100 * 1024 * 1024  # 每个最大 100MB
     ATTACH_PREVIEW_EXCLUDE = ".ds-message"  # 预览计数排除消息区历史图片
-
-    def init_scripts(self) -> list[str]:
-        """页面级注入：XHR SSE 网络监听（goto 前生效）。"""
-        return [_NET_INIT_JS]
 
     # ---------- 网络响应解析（DeepSeek JSON-Patch 协议） ----------
 
