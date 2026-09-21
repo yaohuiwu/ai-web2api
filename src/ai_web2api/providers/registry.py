@@ -170,7 +170,13 @@ class ProviderRegistry:
                 ok = await p.check_login()
             except Exception as e:  # noqa: BLE001
                 logger.warning("check_login(%s) 失败: %s", name, e)
-                ok = False
+                ok = None
+            if ok is None:
+                logger.info(
+                    "login status %s: 不确定（页面未就绪），保持上次状态 %s",
+                    name, self._login_status.get(name, False),
+                )
+                continue
             effective = self._update_status(name, ok)
             logger.info("login status %s: %s", name, effective)
 

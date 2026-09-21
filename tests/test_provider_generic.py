@@ -42,3 +42,46 @@ def test_session_url_template():
     assert _prov().session_url("abc") is None  # 未配模板
     p = _prov(session_url="{base}/c/{id}")
     assert p.session_url("abc") == "https://chat.qwen.ai/c/abc"
+
+
+# ---- check_login 的“不确定”判定（页面还在加载屏时不应判未登录）----
+
+import pytest  # noqa: E402
+
+
+class _StuckPage:
+    def __init__(self, splash_visible: bool = False, body: str = ""):
+        self._splash_visible = splash_visible
+        self._body = body
+
+    def locator(self, sel):  # noqa: ANN001
+        return self
+
+    @property
+    def first(self):
+        return self
+
+    async def is_visible(self) -> bool:
+        return self._splash_visible
+
+    async def inner_text(self, sel):  # noqa: ANN001
+        return self._body
+
+
+def _stuck_prov() -> WebChatProvider:
+    return _prov(login={"page": {"splash": ["#splash-screen"]}})
+
+
+@pytest.mark.asyncio
+async def test_stuck_loading_true_on_visible_splash():
+    assert await _stuck_prov()._page_stuck_loading(_StuckPage(splash_visible=True, body="hi")) is True
+
+
+@pytest.mark.asyncio
+async def test_stuck_loading_true_on_empty_body():
+    assert await _stuck_prov()._page_stuck_loading(_StuckPage(splash_visible=False, body="  ")) is True
+
+
+@pytest.mark.asyncio
+async def test_stuck_loading_false_when_ready():
+    assert await _stuck_prov()._page_stuck_loading(_StuckPage(splash_visible=False, body="新建对话")) is False

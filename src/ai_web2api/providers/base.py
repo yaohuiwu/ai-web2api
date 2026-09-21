@@ -95,18 +95,44 @@ class BaseProvider(abc.ABC):
             return None
         return tpl.format(base=self.cfg.url.rstrip("/"), id=url_id)
 
-    async def check_login(self) -> bool:
+    async def check_login(self) -> bool | None:
+        """检查登录态。
+
+        True=已登录；False=确实未登录；None=**不确定**（页面还没 boot/网络异常），
+        调用方不应据此判定未登录（否则 Qwen 这类站点会在加载屏阶段误报）。
+        """
         page = await self.browser.open_page(self.name, locale=self.locale)
         try:
             await page.goto(self.cfg.url, wait_until="domcontentloaded", timeout=30000)
-            # 聊天页是 SPA，输入框在 domcontentloaded 后才渲染，需轮询等待
-            # （冷启动加载较慢，给足 15s，避免误报未登录）
+            # 聊天页是 SPA，输入框/侧栏在 domcontentloaded 后才渲染，需轮询等待
             sel = await wait_first_match(page, self.login_check_selectors, timeout=15.0)
-            return sel is not None
-        except Exception:
+            if sel is not None:
+                return True
+            if await self._page_stuck_loading(page):
+                logger.info(
+                    "check_login(%s): 页面仍在加载（loading 遮罩/空 body），结果不确定", self.name
+                )
+                return None
             return False
+        except Exception as e:  # noqa: BLE001
+            logger.info("check_login(%s): 页面异常（%s），结果不确定", self.name, e)
+            return None
         finally:
             await page.close()
+
+    async def _page_stuck_loading(self, page: "Page") -> bool:
+        """页面是否还没渲染出内容（loading 遮罩可见 / body 基本为空）。"""
+        for s in self.cfg.login.page.splash:
+            try:
+                if await page.locator(s).first.is_visible():
+                    return True
+            except Exception:
+                pass
+        try:
+            txt = (await page.inner_text("body") or "").strip()
+        except Exception:
+            return True
+        return not txt
 
     def get_credentials(self) -> dict[str, str]:
         """从环境变量/.env 读取登录凭据（键名可配置，兼容 username/password 写法）。"""

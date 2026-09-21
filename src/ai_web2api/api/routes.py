@@ -449,6 +449,9 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         provider = registry.get_provider(name)
         was = registry.login_status().get(name, False)
         ok = await provider.check_login()
+        if ok is None:
+            # 页面未就绪/网络异常 → 不确定，保持上次状态（不要误报未登录）
+            return {"provider": name, "logged_in": was, "inconclusive": True}
         if ok and not was:
             # 刚从不登录变登录（多为手动登录完成）→ 登录态已变，必须落盘
             provider.browser.mark_state_dirty(name)
@@ -476,8 +479,9 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         provider.browser.mark_state_dirty(name)
         await provider.browser.save_state(name)
         ok = await provider.check_login()
-        registry.set_login_status(name, ok)
-        return {"provider": name, "logged_in": ok}
+        if ok is not None:
+            registry.set_login_status(name, ok)
+        return {"provider": name, "logged_in": registry.login_status().get(name, False)}
 
     @router.post("/admin/{name}/login/logout")
     async def login_logout(name: str):
