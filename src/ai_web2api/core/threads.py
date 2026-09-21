@@ -406,6 +406,18 @@ class ThreadManager:
         logger.info("thread %s closed (active=%d, discard=%s)", thread_id, len(self._sessions), discard)
         return closed
 
+    async def close_provider(self, provider_name: str, discard: bool = False) -> int:
+        """关闭某 provider 的全部活跃会话（导入新登录态/重置 context 时用）。返回关闭数量。
+
+        ``discard=False``（默认）：只关页面，保留 DB 历史（下次同 id 可恢复）。
+        """
+        ids = [tid for tid, s in self._sessions.items() if s.provider.name == provider_name]
+        for tid in ids:
+            await self.close(tid, discard=discard)
+        if ids:
+            logger.info("closed %d active thread session(s) for provider %s", len(ids), provider_name)
+        return len(ids)
+
     async def cleanup(self) -> int:
         """回收空闲超过 TTL 的会话（仅关页面，保留持久化条目可恢复）。返回回收数量。"""
         if not self._sessions:

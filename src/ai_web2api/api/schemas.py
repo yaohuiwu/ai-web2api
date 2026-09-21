@@ -202,3 +202,12 @@ class CookieItem(BaseModel):
 
 class CookiesPayload(BaseModel):
     cookies: list[CookieItem]
+
+
+class StorageStatePayload(BaseModel):
+    """完整 Playwright storage_state（cookies + localStorage origins）。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    cookies: list[dict[str, Any]] = Field(default_factory=list)
+    origins: list[dict[str, Any]] = Field(default_factory=list)

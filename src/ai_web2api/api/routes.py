@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from pathlib import Path
@@ -41,6 +42,7 @@ from .schemas import (
     ChatCompletionResponse,
     CookiesPayload,
     ResponseMessage,
+    StorageStatePayload,
     normalize_message,
 )
 
@@ -601,8 +603,43 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         registry.set_login_status(name, ok)
         return {"provider": name, **result}
 
+    @router.post("/admin/{name}/login/state")
+    async def login_state(name: str, payload: StorageStatePayload):
+        """导入完整 storage_state（cookies+localStorage）：写盘 + 重置 context → **立即生效**。
+
+        供手动登录：宿主用 `python -m ai_web2api.cli login <provider>` 生成 state 后自动/手动导入。
+        """
+        provider = registry.get_provider(name)
+        if not payload.cookies:
+            return JSONResponse(
+                status_code=400, content={"error": "storage_state.cookies 为空"}
+            )
+        path = provider.browser.state_path(name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        state = {"cookies": payload.cookies, "origins": payload.origins}
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+        # 旧 context/页面随之失效：先关该 provider 的活跃 thread 会话（保留历史）
+        if threads is not None:
+            try:
+                await threads.close_provider(name)
+            except Exception:  # noqa: BLE001
+                logger.warning("close_provider(%s) 失败", name, exc_info=True)
+        await provider.browser.reset_context(name)
+        provider.browser.clear_login_error(name)
+        ok = await provider.check_login()
+        if ok is not None:
+            registry.set_login_status(name, ok)
+        return {
+            "provider": name,
+            "logged_in": registry.login_status().get(name, False),
+            "imported": True,
+        }
+
     @router.post("/admin/{name}/login/cookies")
     async def login_cookies(name: str, payload: CookiesPayload):
+        """只导入 cookies（兼容旧接口）；需要 localStorage 时用 login/state。"""
         provider = registry.get_provider(name)
         ctx = await provider.browser.get_context(name, locale=provider.locale)
         # playwright 的 dict 形式使用 camelCase 字段名，与 CookieItem.model_dump() 一致
