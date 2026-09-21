@@ -144,16 +144,15 @@ class BaseProvider(abc.ABC):
                 timeout=15.0,
             )
             if appeared is None:
-                return {
-                    "ok": False,
-                    "reason": "页面 15s 内未渲染出登录表单/聊天页（可能被风控/验证码页拦截），请手动登录",
-                    "url": page.url,
-                }
+                return await self._login_fail(
+                    page, "页面 15s 内未渲染出登录表单/聊天页（可能被风控/验证码页拦截），请手动登录"
+                )
 
             # 已登录则幂等返回
             sel = await first_match(page, self.login_check_selectors)
             if sel is not None:
                 await page.wait_for_timeout(800)
+                self.browser.clear_login_error(self.name)
                 return {"ok": True, "already_logged_in": True}
 
             # 若默认是验证码 tab，先切到"密码登录"
@@ -165,11 +164,9 @@ class BaseProvider(abc.ABC):
             user_sel = await wait_first_match(page, lp.username, timeout=5.0)
             pwd_sel = await wait_first_match(page, lp.password, timeout=5.0)
             if user_sel is None or pwd_sel is None:
-                return {
-                    "ok": False,
-                    "reason": f"登录页输入框未匹配（user={user_sel}, pwd={pwd_sel}）",
-                    "url": page.url,
-                }
+                return await self._login_fail(
+                    page, f"登录页输入框未匹配（user={user_sel}, pwd={pwd_sel}）"
+                )
             await page.locator(user_sel).first.fill(creds["username"])
             await page.locator(pwd_sel).first.fill(creds["password"])
             # React 受控输入：填完等一拍让状态提交（否则立刻点提交可能带上旧值），
@@ -189,15 +186,22 @@ class BaseProvider(abc.ABC):
                     # 刚登录成功 → 登录态已变，必须落盘（save_state 的"按需"规则之外）
                     self.browser.mark_state_dirty(self.name)
                     await self.browser.save_state(self.name)
+                    self.browser.clear_login_error(self.name)
                     return {"ok": True, "already_logged_in": False}
                 await page.wait_for_timeout(1000)
-            return {
-                "ok": False,
-                "reason": "登录超时（60s 内未进入聊天页，可能触发验证码/风控，请手动登录）",
-                "url": page.url,
-            }
+            return await self._login_fail(
+                page, "登录超时（60s 内未进入聊天页，可能触发验证码/风控，请手动登录）"
+            )
         finally:
             await page.close()
+
+    async def _login_fail(self, page: "Page", reason: str) -> dict:
+        """登录失败：先抓一张当前页面截图（webui 可展示）再返回失败结果。"""
+        path = await self.browser.save_login_error(self.name, page)
+        out: dict = {"ok": False, "reason": reason, "url": page.url}
+        if path:
+            out["screenshot"] = f"/admin/{self.name}/login/screenshot"
+        return out
 
     async def complete(
         self,

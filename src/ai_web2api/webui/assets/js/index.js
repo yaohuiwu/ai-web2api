@@ -61,6 +61,11 @@ function renderProviders(providers) {
     ].join("");
     const stateFile = p.has_state_file
       ? `state.json ✓` : `state.json ✗（无持久化登录态）`;
+    const shot = p.login_error_screenshot
+      ? `<div class="p-shot"><div class="p-meta">⚠ 上次登录失败截图（${new Date((p.login_error_at || 0) * 1000).toLocaleString()}）：</div>` +
+        `<a href="/admin/${encodeURIComponent(p.name)}/login/screenshot?t=${p.login_error_at || 0}" target="_blank" rel="noopener">` +
+        `<img src="/admin/${encodeURIComponent(p.name)}/login/screenshot?t=${p.login_error_at || 0}" alt="登录失败截图" loading="lazy"></a></div>`
+      : "";
     return `
     <div class="card provider ${cls}">
       <div class="p-head">
@@ -73,14 +78,26 @@ function renderProviders(providers) {
         默认模型: ${esc(p.default_model || "—")} · response_timeout: ${p.response_timeout}s
       </div>
       <div class="chips">${chips}</div>
+      ${shot}
       <div class="p-actions">
         <button class="btn" onclick="actLoginStatus('${p.name}')">刷新登录状态</button>
         <button class="btn" onclick="actAutoLogin('${p.name}')">自动登录</button>
         <button class="btn" onclick="actManualLogin('${p.name}')">手动登录</button>
+        <button class="btn" onclick="actScreenshot('${p.name}')">抓取截图</button>
         <button class="btn danger" onclick="actLogout('${p.name}')">退出登录</button>
       </div>
     </div>`;
   }).join("");
+}
+
+async function actScreenshot(name) {
+  const btn = event.target; btn.disabled = true;
+  try {
+    const r = await api(`/admin/${name}/login/screenshot`, { method: "POST" });
+    toast(`${name}: ${r.saved ? "已抓取截图" : "截图失败"}`);
+    await load();
+  } catch (e) { toast(`失败: ${e.message}`); }
+  finally { btn.disabled = false; }
 }
 
 async function actLoginStatus(name) {

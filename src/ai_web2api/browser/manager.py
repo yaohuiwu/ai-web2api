@@ -92,6 +92,38 @@ class BrowserManager:
     def state_path(self, provider: str) -> Path:
         return self._profiles_dir / provider / "state.json"
 
+    # ---------- 登录失败截图（webui 调试用） ----------
+
+    def login_error_path(self, provider: str) -> Path:
+        return self._profiles_dir / provider / "login_error.png"
+
+    async def save_login_error(self, provider: str, page: Page) -> str | None:
+        """登录失败时抓页面截图（供 webui 展示，定位风控/验证码/改版）。"""
+        path = self.login_error_path(provider)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            await page.screenshot(path=str(path))
+            logger.info("login error screenshot saved: %s", path)
+            return str(path)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "save login error screenshot failed (provider=%s)", provider, exc_info=True
+            )
+            return None
+
+    def login_error_mtime(self, provider: str) -> float | None:
+        path = self.login_error_path(provider)
+        try:
+            return path.stat().st_mtime if path.exists() else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def clear_login_error(self, provider: str) -> None:
+        try:
+            self.login_error_path(provider).unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+
     @property
     def default_locale(self) -> str:
         return self._cfg.locale

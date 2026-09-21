@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import (
+    FileResponse,
     JSONResponse,
     StreamingResponse,
 )
@@ -343,6 +344,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                     "logged_in": registry.login_status().get(name, False),
                     "login_mode": pcfg.login.mode,
                     "has_state_file": state_file.exists(),
+                    "login_error_screenshot": p.browser.login_error_path(name).exists(),
+                    "login_error_at": p.browser.login_error_mtime(name),
                     "models": [m.name for m in pcfg.models],
                     "model_aliases": pcfg.model_aliases,
                     "default_model": p.exposed_models[0] if p.exposed_models else None,
@@ -482,6 +485,30 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         await provider.browser.clear_state(name)
         registry.set_login_status(name, False)
         return {"provider": name, "logged_in": False}
+
+    @router.get("/admin/{name}/login/screenshot")
+    async def login_screenshot(name: str):
+        """上次登录失败截图（PNG）；没有则 404。供状态面板调试展示。"""
+        provider = registry.get_provider(name)
+        path = provider.browser.login_error_path(name)
+        if not path.exists():
+            return JSONResponse(status_code=404, content={"error": "no screenshot"})
+        return FileResponse(
+            str(path), media_type="image/png", headers={"Cache-Control": "no-store"}
+        )
+
+    @router.post("/admin/{name}/login/screenshot")
+    async def login_screenshot_capture(name: str):
+        """即时抓取当前登录页/聊天页截图（调试用，覆盖上次失败截图）。"""
+        provider = registry.get_provider(name)
+        page = await provider.browser.open_page(name, locale=provider.locale)
+        try:
+            await page.goto(provider.login_url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(3000)
+            saved = await provider.browser.save_login_error(name, page)
+        finally:
+            await page.close()
+        return {"provider": name, "saved": bool(saved)}
 
     # ---------------- admin：调试 ----------------
 

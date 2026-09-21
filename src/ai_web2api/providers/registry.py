@@ -9,7 +9,7 @@ from playwright.async_api import async_playwright
 from ..browser.manager import BrowserManager
 from ..config import AppConfig
 from ..core.errors import ModelNotFoundError
-from .base import BaseProvider, first_match
+from .base import BaseProvider, first_match, wait_first_match
 from .deepseek import DeepSeekProvider
 from .qwen import QwenProvider
 
@@ -184,10 +184,8 @@ class ProviderRegistry:
                         try:
                             page = await ctx.new_page()
                             await page.goto(p.cfg.url, wait_until="domcontentloaded", timeout=30000)
-                            sel = await first_match(page, p.login_check_selectors)
-                            if sel is not None:
-                                await page.wait_for_selector(sel, timeout=8000)
-                                ok = True
+                            sel = await wait_first_match(page, p.login_check_selectors, timeout=15.0)
+                            ok = sel is not None
                         finally:
                             await ctx.close()
                     except Exception as e:  # noqa: BLE001
