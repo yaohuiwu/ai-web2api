@@ -129,23 +129,35 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
     registry = ProviderRegistry(cfg, browser)
     threads = ThreadManager(cfg.server, cfg.profiles_dir)
 
+    async def _startup_login() -> None:
+        """启动时的登录态检测 + 自动登录。
+
+        绝不能放在 lifespan 的 yield 之前 await：那样 uvicorn 在登录完成前
+        不对外服务，`/ui` 会一直连不上（登录可能几十秒）。
+        """
+        try:
+            await registry.refresh_login_status()
+            await _auto_login_missing(registry)
+        except Exception:  # noqa: BLE001
+            logger.exception("启动登录检查失败（服务继续运行）")
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        await browser.start()
-        await registry.refresh_login_status()
-        await _auto_login_missing(registry)
+        await browser.start()  # 快（~1s）；登录检查/自动登录放后台，先让 /ui 可用
         bg = asyncio.create_task(_background_loop())
+        boot = asyncio.create_task(_startup_login())
         try:
             yield
         finally:
             bg.cancel()
+            boot.cancel()
             # 关停阶段：Playwright 驱动可能已被 Ctrl+C 打掉，噪声日志降到 DEBUG
             try:
                 asyncio.get_running_loop().set_exception_handler(_quiet_shutdown_exception_handler)
             except Exception:  # noqa: BLE001
                 pass
             # 等后台任务真正结束：它还可能在用浏览器/独立 playwright 实例
-            await asyncio.gather(bg, return_exceptions=True)
+            await asyncio.gather(bg, boot, return_exceptions=True)
             try:
                 await threads.close_all()
             except Exception:  # noqa: BLE001
