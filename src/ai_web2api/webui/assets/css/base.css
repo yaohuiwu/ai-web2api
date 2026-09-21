@@ -1,0 +1,24 @@
+/* 共享样式：变量 / reset / 通用按钮（index 与 playground 复用） */
+:root {
+  --bg: #f5f6f8; --card: #fff; --border: #e3e6ea;
+  --text: #1c2733; --muted: #6b7686;
+  --blue: #2563eb; --blue-bg: #e8f0fe;
+  --green: #17a673; --green-bg: #e6f7f0;
+  --red: #d64545; --red-bg: #fdecec;
+  --user: #2563eb; --user-bg: #e8f0fe;
+  --assistant: #fff; --assistant-border: #e3e6ea;
+  --radius: 10px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+}
+.btn {
+  border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer;
+}
+.btn:hover { background: #eef1f5; }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+.btn.primary:hover { background: #1d4ed8; }
+.btn.danger { color: var(--red); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }

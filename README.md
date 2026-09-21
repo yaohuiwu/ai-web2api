@@ -365,5 +365,8 @@ src/ai_web2api/
 ├── api/               # OpenAI 兼容路由、schema、SSE
 ├── browser/           # 浏览器管理（单实例多 Context + storage_state 持久化）、DOM→Markdown 提取
 ├── providers/         # 驱动基类 + DeepSeek 实现 + 注册表
-└── core/              # 串行队列（SerialGate）、错误类型 → HTTP 状态码
+├── core/              # SerialGate、错误类型、ThreadManager、SQLite 历史（store.py）
+└── webui/             # 状态面板 + Playground，HTML/CSS/JS 已分离
+    ├── index.html / playground.html    # 只留结构，引用下方 assets
+    └── assets/{css,js}/                # base + 各页面 css/js；common.js 为公共工具
 ```

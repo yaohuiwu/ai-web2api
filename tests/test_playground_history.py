@@ -8,17 +8,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-HTML = Path(__file__).resolve().parent.parent / "src" / "ai_web2api" / "webui" / "playground.html"
+WEBUI = Path(__file__).resolve().parent.parent / "src" / "ai_web2api" / "webui"
+PLAYGROUND_HTML = WEBUI / "playground.html"
+PLAYGROUND_JS = WEBUI / "assets" / "js" / "playground.js"
 
 
 def test_has_refresh_button_and_no_polling():
-    s = HTML.read_text(encoding="utf-8")
-    assert 'id="refreshThreads"' in s, "缺少刷新按钮"
-    assert "$(\"#refreshThreads\").onclick = refreshThreads" in s, "刷新按钮未绑定"
-    assert "setInterval(refreshThreads" not in s, "不应再定时轮询会话列表"
+    html = PLAYGROUND_HTML.read_text(encoding="utf-8")
+    js = PLAYGROUND_JS.read_text(encoding="utf-8")
+    assert 'id="refreshThreads"' in html, "缺少刷新按钮"
+    assert '$("#refreshThreads").onclick = refreshThreads' in js, "刷新按钮未绑定"
+    assert "setInterval(refreshThreads" not in js, "不应再定时轮询会话列表"
 
 
 def test_switch_thread_renders_history_from_api():
-    s = HTML.read_text(encoding="utf-8")
-    assert "function renderHistory" in s, "缺少历史渲染函数"
-    assert "/messages" in s, "未请求 /admin/threads/{id}/messages"
+    js = PLAYGROUND_JS.read_text(encoding="utf-8")
+    assert "function renderHistory" in js, "缺少历史渲染函数"
+    assert "/messages" in js, "未请求 /admin/threads/{id}/messages"
