@@ -148,8 +148,9 @@ class BaseProvider(abc.ABC):
                     page, "页面 15s 内未渲染出登录表单/聊天页（可能被风控/验证码页拦截），请手动登录"
                 )
 
-            # 已登录则幂等返回
-            sel = await first_match(page, self.login_check_selectors)
+            # 已登录则幂等返回。用 wait：登录态下 /auth 会重定向到聊天页，
+            # appeared 可能先匹配到登录表单，等重定向完成再确认聊天页。
+            sel = await wait_first_match(page, self.login_check_selectors, timeout=8.0)
             if sel is not None:
                 await page.wait_for_timeout(800)
                 self.browser.clear_login_error(self.name)
