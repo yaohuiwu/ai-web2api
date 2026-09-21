@@ -1,11 +1,11 @@
 """流式 diff 完整性单元测试：覆盖 markdown 渐进渲染导致的"包裹"重渲染。
 
-对应 deepseek.py 的 _diff_increment：轮询提取的 markdown 文本因 DOM 重渲染
+对应 webchat.py 的 _diff_increment（通用引擎）：轮询提取的 markdown 文本因 DOM 重渲染
 （纯文本 → 代码块/表格/加粗）不再前缀延续，旧逻辑会整段丢弃增量导致
 "思考和正文不完整"。这些用例验证子串匹配能兜住包裹重渲染场景。
 """
 
-from ai_web2api.providers.deepseek import _diff_increment
+from ai_web2api.providers.webchat import _diff_increment
 
 
 def _accumulate(transitions):
