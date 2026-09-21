@@ -583,7 +583,7 @@ class WebChatProvider(BaseProvider):
             # contenteditable / React 输入框：逐字输入（fill 可能不触发框架状态）
             logger.info("[%s] send: type", self.name)
             await input_el.fill("")
-            await input_el.press_sequentially(prompt, delay=15)
+            await self._type_prompt_human(page, input_el, prompt)
         else:
             logger.info("[%s] send: fill", self.name)
             await input_el.fill(prompt)
@@ -594,6 +594,20 @@ class WebChatProvider(BaseProvider):
             await page.locator(send_sel).first.click()
         else:
             await page.keyboard.press("Enter")
+
+    async def _type_prompt_human(self, page: Page, input_el, prompt: str) -> None:
+        """逐字输入提示词（触发 React 受控状态）。
+
+        换行必须用 ``Shift+Enter``：contenteditable / textarea 会把裸 ``Enter`` 当成
+        “发送”，多行提示词（function calling 工具清单、markdown）会被截断 → 发送不完整。
+        """
+        text = prompt.replace("\r\n", "\n").replace("\r", "\n")
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            if line:
+                await input_el.press_sequentially(line, delay=15)
+            if i < len(lines) - 1:
+                await page.keyboard.press("Shift+Enter")
 
     # ---------- 网络接入 ----------
 
