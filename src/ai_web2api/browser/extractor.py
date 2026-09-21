@@ -19,7 +19,16 @@ _MD_JS = r"""
   const blocks = [];
   const walkChildren = (node, list) => {
     [...node.childNodes].forEach((child) => {
-      if (child.nodeType === 3) { list.push(child.textContent); return; }
+      if (child.nodeType === 3) {
+        const t = child.textContent;
+        if (!t) return;
+        if (!/\S/.test(t)) {                // 纯空白
+          if (!t.includes("\n")) list.push(" "); // 行内空白→单空格
+          return;                          // 含换行的源码格式空白→丢弃
+        }
+        list.push(t.replace(/[ \t\r\n]+/g, " ")); // 折叠（同 HTML 渲染）
+        return;
+      }
       if (child.nodeType === 1) walk(child, list);
     });
   };
@@ -50,7 +59,7 @@ _MD_JS = r"""
       list.push("\n" + "#".repeat(Number(tag[1])) + " " + node.textContent.trim() + "\n");
       return;
     }
-    if (tag === "p") { walkChildren(node, list); list.push("\n"); return; }
+    if (tag === "p") { walkChildren(node, list); list.push("\n\n"); return; }
     if (tag === "blockquote") {
       const inner = [];
       walkChildren(node, inner);
@@ -88,7 +97,16 @@ _MD_JS = r"""
     walkChildren(node, list);
   };
   walk(el, blocks);
-  return blocks.join("").replace(/\n{3,}/g, "\n\n").trim();
+  const out = blocks.join("");
+  // 规范化空白：``` 代码块内保留原样，其余按 HTML 语义折叠行首/行尾空白与多余空行
+  const parts = out.split("```");
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i]
+      .replace(/^[ \t]+/gm, "")
+      .replace(/[ \t]+$/gm, "")
+      .replace(/\n{3,}/g, "\n\n");
+  }
+  return parts.join("```").trim();
 }
 """
 
