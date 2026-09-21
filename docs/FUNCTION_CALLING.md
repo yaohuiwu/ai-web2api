@@ -139,6 +139,8 @@ POST /v1/chat/completions {messages, tools, tool_choice}
   （这就是 `build_resume_prompt` 的用途）。
 - 工具轮次每轮都带 `tools`，但 resume **不重复注入工具说明**：页面上下文里首次 create 时已经有一份，
   再发一次是浪费（这也避免了“工具说明发两遍”）。仅当页面是新会话（create）时才注入。
+- **客户端契约**：属同一 thread 的工具会话，**首轮（create）必须带 `tools`**（工具说明只在 create 注入一次）；
+  若首轮没带、之后才带，页面没有可复用的说明 → 模型可能不按格式调用。这是**客户端责任**，网关不代做。
 - model 绑定（thread 固定 model）与 `tools` 每请求可变不冲突。
 
 ### 6.5 与 mode / deep_think / search / attachments / options
