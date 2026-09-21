@@ -82,10 +82,11 @@ python -m ai_web2api.cli login qwen --import-url http://127.0.0.1:8000   # 覆�
 ## 5. UI（状态面板）
 
 - 「手动登录」按钮改为**弹出提示**，展示：
-  - 本机命令：`python -m ai_web2api.cli login <provider>`
-  - 一个「粘贴 `state.json` 导入」文本框 → 调 `POST /admin/<p>/login/state`
-    （给"脚本在别的机器上跑"的兜底；Docker 用户可复制文件内容粘贴）。
-- 登录成功后刷新面板（已有）。
+  - 本机命令：`python -m ai_web2api.cli login <provider>`（登录完会自动导入）
+  - **导入 state**（两种，等效，都 POST 到 `POST /admin/<p>/login/state`）：
+    1. **粘贴**：文本域粘贴 `state.json` 内容；
+    2. **上传/拖拽**：选择或拖入 `state.json` 文件（前端 `FileReader` 读成 JSON 再 POST）。
+- 导入成功→刷新面板；导入失败 → 显示错误（JSON 不合法/结构不对）。
 
 ## 6. 兼容性 / 风险
 
@@ -102,7 +103,7 @@ python -m ai_web2api.cli login qwen --import-url http://127.0.0.1:8000   # 覆�
 - **Step 1** — `BrowserManager.reset_context()` + 单测（关 context、下次重建）。
 - **Step 2** — `POST /admin/{p}/login/state`（写盘 + reset + 复核）+ TestClient 单测。
 - **Step 3** — `ai_web2api/cli.py`（argparse 子命令 `login`）+ 流程；单测覆盖参数解析与"保存/导入"分支（网页交互用 stub）。
-- **Step 4** — UI：手动登录提示 + 粘贴导入；文档（README「手动登录」、PROVIDER_QWEN 关联）。
+- **Step 4** — UI：手动登录提示 + **粘贴 / 文件上传导入**；文档（README「手动登录」、PROVIDER_QWEN 关联）。
 - （可选）**Step 5** — 登录成功日志/`/healthz` 复核；`--out` 覆盖已有 state 的备份策略。
 
 ## 8. 已定 / 待确认
@@ -114,4 +115,4 @@ python -m ai_web2api.cli login qwen --import-url http://127.0.0.1:8000   # 覆�
 
 我拟采用的默认（如无异议即按此开发）：
 1. 导入时**主动关闭该 provider 的活跃 thread 会话**（避免旧 context 页面残留）。
-2. UI 加「粘贴 `state.json` 导入」文本框（兜底：脚本在别的机器跑）。
+2. UI 导入支持 **粘贴 + 选择文件/拖拽上传**（前端读成 JSON 后 POST 同一接口）。
