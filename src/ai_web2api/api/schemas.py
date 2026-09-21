@@ -7,17 +7,61 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+# ---------- Function Calling（tools） ----------
+
+
+class ToolFunctionDef(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name: str
+    description: str | None = None
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolDefinition(BaseModel):
+    type: Literal["function"] = "function"
+    function: ToolFunctionDef
+
+
+class ToolCallFunction(BaseModel):
+    name: str
+    arguments: str = ""
+
+
+class ToolCallOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    type: Literal["function"] = "function"
+    function: ToolCallFunction
+
+
+class ToolChoiceFunction(BaseModel):
+    name: str
+
+
+class ToolChoiceObject(BaseModel):
+    type: Literal["function"]
+    function: ToolChoiceFunction
+
+
+ToolChoice = Literal["none", "auto", "required"] | ToolChoiceObject
+
+
 class ChatMessage(BaseModel):
     """OpenAI 兼容消息。role 放宽到全部已知角色（llama_index 会发 developer/tool）。
 
-    content 兼容 str 与多部分列表（[{type:text, text:...}, {type:image_url,...}]）；
-    其余字段（tool_calls/tool_call_id/name 等）默认忽略，不参与校验。
+    content 兼容 str / 多部分列表 / None；保留 tool_calls / tool_call_id / name
+    （Function Calling 的转录与回放需要）。
     """
 
     model_config = ConfigDict(extra="ignore")
 
     role: Literal["system", "user", "assistant", "developer", "tool", "function"] = "user"
-    content: str | list[Any] = ""
+    content: str | list[Any] | None = ""
+    tool_calls: list[ToolCallOut] | None = None
+    tool_call_id: str | None = None
+    name: str | None = None
 
 
 def _extract_attachments(content: list) -> tuple[list[str], list[dict]]:
@@ -70,20 +114,30 @@ def normalize_message(m: dict) -> tuple[dict, list[dict]]:
 
     - developer → system（OpenAI 语义：developer 是 system 的替代）
     - content 为多部分列表时提取 text 部分拼接；image_url part 提取为附件
-      （返回的 msg 不含图片；附件由 driver 上传到 Web 端输入框）
+    - **保留** tool_calls / tool_call_id / name（Function Calling 转录需要）
     - 返回 (msg, attachments)；无附件时 attachments 为空列表
     """
     role = m.get("role", "user")
     if role == "developer":
         role = "system"
     content = m.get("content", "")
+    if content is None:
+        content = ""
     atts: list[dict] = []
     if isinstance(content, list):
         parts, atts = _extract_attachments(content)
         content = "\n".join(parts)
     else:
         content = str(content)
-    return {"role": role, "content": content}, atts
+    msg: dict = {"role": role, "content": content}
+    # Function Calling：保留工具字段（供 tool_calling.converter 转录/回放）
+    if m.get("tool_calls"):
+        msg["tool_calls"] = m["tool_calls"]
+    if m.get("tool_call_id"):
+        msg["tool_call_id"] = m["tool_call_id"]
+    if m.get("name"):
+        msg["name"] = m["name"]
+    return msg, atts
 
 
 class ChatCompletionRequest(BaseModel):
@@ -99,6 +153,9 @@ class ChatCompletionRequest(BaseModel):
 
     deep_think: bool | None = None  # 深度思考开关（每次请求生效；None = 不改页面状态）
     search: bool | None = None      # 智能搜索开关（每次请求生效；None = 不改页面状态）
+    # Function Calling（OpenAI 原生字段；未传 = 完全走旧行为）
+    tools: list[ToolDefinition] | None = None
+    tool_choice: ToolChoice | None = None
     # 以下字段在 Web 端不可控，收到不报错、仅忽略：
     temperature: float | None = None
     max_tokens: int | None = None
@@ -111,14 +168,15 @@ class ChatCompletionRequest(BaseModel):
 
 class ResponseMessage(BaseModel):
     role: str = "assistant"
-    content: str = ""
+    content: str | None = None
     reasoning_content: str | None = None
+    tool_calls: list[ToolCallOut] | None = None
 
 
 class ChatCompletionChoice(BaseModel):
     index: int = 0
     message: ResponseMessage
-    finish_reason: str = "stop"
+    finish_reason: Literal["stop", "tool_calls", "length"] = "stop"
 
 
 class ChatCompletionResponse(BaseModel):

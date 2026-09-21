@@ -190,6 +190,8 @@ class ServerConfig(BaseModel):
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
     # 常见 OpenAI 模型名（gpt-4 等）兜底别名挂给哪个 provider；空 = 第一个启用的 provider
     default_provider: str | None = None
+    # Function Calling 总开关；false = 完全忽略 tools（不注入工具提示，避免触发网页端风控）
+    function_calling: bool = True
     # 会话绑定（thread_id）：空闲回收 TTL / 上限 / 是否并行 / 是否持久化
     thread_ttl: float = 900.0      # 秒，thread 空闲多久回收（关页面）
     max_threads: int = 8           # 同时活跃 thread 上限，超出 429
