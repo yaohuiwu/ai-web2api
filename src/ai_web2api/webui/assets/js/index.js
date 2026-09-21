@@ -85,12 +85,19 @@ function renderProviderDetail(p) {
          </a>
        </div>`
     : "";
+  const notLogged = !p.logged_in;
+  const cmd = `python -m ai_web2api.cli login ${p.name}`;
+  const notice = notLogged
+    ? `<div class="login-cta">⚠ 未登录。在本机运行 <code>${esc(cmd)}</code>（登录完会自动导入），或在下方粘贴/选择 <code>state.json</code>。
+         <button class="btn sm" onclick="copyText('${cmd}')">复制命令</button></div>`
+    : "";
   detail.innerHTML = `
     <div class="pv-head">
       <span class="pv-name">${esc(p.name)}</span>
       ${badge}
       <span class="pv-driver">driver: ${esc(p.driver)}</span>
     </div>
+    ${notice}
     <dl class="kv">
       <dt>地址</dt><dd class="mono">${esc(p.url)}</dd>
       <dt>登录模式</dt><dd>${esc(p.login_mode)} · ${p.has_state_file ? "state.json ✓" : "state.json ✗（无持久化登录态）"}</dd>
@@ -107,8 +114,8 @@ function renderProviderDetail(p) {
       <button class="btn" onclick="actScreenshot('${p.name}')">抓取截图</button>
       <button class="btn danger" onclick="actLogout('${p.name}')">退出登录</button>
     </div>
-    <div class="manual-panel" id="manualPanel" hidden>
-      <div class="mp-line">本机运行（登录完会自动导入）：<code id="manualCmd"></code></div>
+    <div class="manual-panel" id="manualPanel" ${notLogged ? "" : "hidden"}>
+      <div class="mp-line">本机运行（登录完会自动导入）：<code id="manualCmd">${esc(cmd)}</code></div>
       <div class="mp-line muted">或粘贴 / 拖入 <code>state.json</code>：</div>
       <textarea id="statePaste" rows="5" spellcheck="false" placeholder='{"cookies":[...],"origins":[...]}'></textarea>
       <div class="mp-actions">
@@ -118,6 +125,33 @@ function renderProviderDetail(p) {
         <span class="muted" id="stateStatus"></span>
       </div>
     </div>`;
+  initManualPanel();
+}
+
+function copyText(t) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(() => toast("已复制"), () => toast("复制失败，请手动选择复制"));
+  } else {
+    toast("浏览器不支持自动复制，请手动选择");
+  }
+}
+
+function initManualPanel() {
+  const panel = $("#manualPanel");
+  if (!panel) return;
+  const fileEl = $("#stateFile");
+  const readFile = (f) => {
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { $("#statePaste").value = r.result; $("#stateStatus").textContent = `已读入 ${f.name}`; };
+    r.readAsText(f);
+  };
+  if (fileEl) fileEl.onchange = () => readFile(fileEl.files && fileEl.files[0]);
+  panel.ondragover = (e) => e.preventDefault();
+  panel.ondrop = (e) => {
+    e.preventDefault();
+    readFile(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+  };
 }
 
 async function actLoginStatus(name) {
@@ -144,22 +178,6 @@ function actManualLogin(name) {
   const panel = $("#manualPanel");
   if (!panel) return;
   panel.hidden = !panel.hidden;
-  if (panel.hidden) return;
-  const cmd = $("#manualCmd");
-  if (cmd) cmd.textContent = `python -m ai_web2api.cli login ${name}`;
-  const fileEl = $("#stateFile");
-  const readFile = (f) => {
-    if (!f) return;
-    const r = new FileReader();
-    r.onload = () => { $("#statePaste").value = r.result; $("#stateStatus").textContent = `已读入 ${f.name}`; };
-    r.readAsText(f);
-  };
-  if (fileEl) fileEl.onchange = () => readFile(fileEl.files && fileEl.files[0]);
-  panel.ondragover = (e) => e.preventDefault();
-  panel.ondrop = (e) => {
-    e.preventDefault();
-    readFile(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
-  };
 }
 
 async function actImportState(name) {

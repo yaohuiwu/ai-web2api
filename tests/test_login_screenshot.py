@@ -75,3 +75,7 @@ def test_webui_references_screenshot():
     assert "login/screenshot" in js
     assert "actScreenshot" in js
     assert "login_error_screenshot" in js
+    # 未登录引导：导入面板 + 复制命令
+    assert "initManualPanel" in js
+    assert "login-cta" in js
+    assert "copyText" in js
