@@ -25,6 +25,7 @@ from ..core.errors import (
     ThreadTimeoutError,
 )
 from ..core.threads import ThreadManager
+from ..providers.base import last_user_message
 from ..providers.registry import ProviderRegistry
 from .schemas import (
     ChatCompletionChoice,
@@ -137,6 +138,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 thread_id, provider, resolved, first_message=first_msg[:60]
             )
             kwargs = {"thread_mode": mode, "thread_page": session.page}
+            # 实际发给页面的新用户消息（resume 只发最后一条）→ 历史入库用这条
+            user_text = last_user_message(messages)
             if req.mode is not None:
                 kwargs["mode"] = req.mode
             if req.deep_think is not None:
@@ -158,9 +161,24 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                             f'thread "{thread_id}" 上一请求未释放（可能客户端中断），会话已销毁，请重试'
                         )
                     try:
+                        content_parts: list[str] = []
+                        thinking_parts: list[str] = []
                         async for chunk in provider.generate(messages, resolved, **kwargs):
+                            if chunk.kind == "thinking":
+                                thinking_parts.append(chunk.text)
+                            else:
+                                content_parts.append(chunk.text)
                             yield chunk
                         await tm.persist(thread_id)  # 正常完成 → 落盘会话 URL id（重启可恢复）
+                        # 历史入库（best-effort，内部已捕获异常，不影响流式响应）
+                        await tm.save_turn(
+                            thread_id,
+                            provider.name,
+                            resolved,
+                            user_text,
+                            "".join(content_parts),
+                            "".join(thinking_parts) or None,
+                        )
                     finally:
                         session.lock.release()
 
@@ -177,6 +195,10 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                         timeout=provider.cfg.response_timeout + 60,
                     )
                 await tm.persist(thread_id)  # 正常完成 → 落盘会话 URL id（重启可恢复）
+                # 历史入库（best-effort）
+                await tm.save_turn(
+                    thread_id, provider.name, resolved, user_text, content, thinking
+                )
             except asyncio.TimeoutError:
                 await tm.close(thread_id)  # 销毁：页面关闭强制打断挂起的 Playwright 调用
                 raise ThreadTimeoutError(
@@ -362,6 +384,13 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             return {"thread_id": thread_id, "closed": False}
         closed = await threads.close(thread_id)
         return {"thread_id": thread_id, "closed": closed}
+
+    @router.get("/admin/threads/{thread_id}/messages")
+    async def threads_messages(thread_id: str):
+        """某会话的历史消息（Playground 切换会话时回填）。"""
+        if threads is None:
+            return {"thread_id": thread_id, "messages": []}
+        return {"thread_id": thread_id, "messages": await threads.get_messages(thread_id)}
 
     @router.get("/admin/threads/{thread_id}/dom")
     async def threads_dom(thread_id: str, selector: str = "div.ds-message"):

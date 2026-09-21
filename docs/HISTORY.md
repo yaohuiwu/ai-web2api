@@ -160,7 +160,7 @@ input.addEventListener("keydown", (e) => {
       级联删除 / JSON 迁移）。独立可测，不接入业务。（提交）
 - [x] **Step 2**：重构 `core/threads.py` 走 `ThreadStore`，启动迁移并删除 `threads.json`；
       补/改测试。（提交）
-- [ ] **Step 3**：`api/routes.py` 完成消息落库 + `GET /admin/threads/{id}/messages`；
+- [x] **Step 3**：`api/routes.py` 完成消息落库 + `GET /admin/threads/{id}/messages`；
       扩展 `tests/test_openai_compat.py`（有登录时才跑）。（提交）
 - [ ] **Step 4**：`playground.html` 修复 IME 误发送 + 静态断言测试。（提交）
 - [ ] **Step 5**：`playground.html` 历史消息渲染 + 刷新按钮 + 去掉轮询。（提交）

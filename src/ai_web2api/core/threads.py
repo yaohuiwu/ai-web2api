@@ -122,7 +122,12 @@ class ThreadManager:
         """
         out = [s.to_dict() for s in self._sessions.values()]
         seen = {d["thread_id"] for d in out}
-        for entry in self._store.list_threads():
+        try:
+            entries = self._store.list_threads()
+        except Exception:  # noqa: BLE001  持久化读取失败不能拖垮列表接口
+            logger.warning("读取会话列表失败（只返回内存会话）", exc_info=True)
+            entries = []
+        for entry in entries:
             tid = entry["thread_id"]
             if tid in seen:
                 continue
@@ -210,13 +215,16 @@ class ThreadManager:
             else:
                 session.first_message = first_message or ""
                 if self._persist:
-                    # 新建会话：先把元数据入库（左侧列表标题）
-                    self._store.upsert_thread(
-                        thread_id,
-                        provider.name,
-                        model=model,
-                        title=session.first_message or None,
-                    )
+                    # 新建会话：先把元数据入库（左侧列表标题）；失败仅告警
+                    try:
+                        self._store.upsert_thread(
+                            thread_id,
+                            provider.name,
+                            model=model,
+                            title=session.first_message or None,
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.warning("thread %s 元数据入库失败", thread_id, exc_info=True)
             self._sessions[thread_id] = session
             logger.info(
                 "thread %s %s (provider=%s, model=%s, active=%d/%d)",
@@ -294,14 +302,18 @@ class ThreadManager:
             and (cur.get("title") or "") == session.first_message
         ):
             return  # 无变化
-        await asyncio.to_thread(
-            self._store.upsert_thread,
-            thread_id,
-            session.provider.name,
-            session.model,
-            session.first_message or None,
-            url_id,
-        )
+        try:
+            await asyncio.to_thread(
+                self._store.upsert_thread,
+                thread_id,
+                session.provider.name,
+                session.model,
+                session.first_message or None,
+                url_id,
+            )
+        except Exception:  # noqa: BLE001  持久化失败不应影响请求结果
+            logger.warning("thread %s persist 失败", thread_id, exc_info=True)
+            return
         logger.info("thread %s persisted url_id=%s (model=%s)", thread_id, url_id, session.model)
 
     async def save_turn(
@@ -331,11 +343,18 @@ class ThreadManager:
                 ],
             )
 
-        await asyncio.to_thread(_work)
+        try:
+            await asyncio.to_thread(_work)
+        except Exception:  # noqa: BLE001  历史写入失败不应影响请求结果
+            logger.warning("thread %s save_turn 失败", thread_id, exc_info=True)
 
     async def get_messages(self, thread_id: str) -> list[dict]:
         """读取某会话的历史消息（按时间顺序）。"""
-        return await asyncio.to_thread(self._store.get_messages, thread_id)
+        try:
+            return await asyncio.to_thread(self._store.get_messages, thread_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("thread %s 历史读取失败", thread_id, exc_info=True)
+            return []
 
     def shutdown(self) -> None:
         """关闭 DB 连接（服务退出时调用）。"""
@@ -361,9 +380,12 @@ class ThreadManager:
                 logger.debug("thread %s page close failed", thread_id)
             closed = True
         if discard and self._persist:
-            # 会话废弃：连历史消息一起删（DB 外键级联）
-            deleted = await asyncio.to_thread(self._store.delete_thread, thread_id)
-            closed = closed or deleted
+            # 会话废弃：连历史消息一起删（DB 外键级联）；失败仅告警
+            try:
+                deleted = await asyncio.to_thread(self._store.delete_thread, thread_id)
+                closed = closed or deleted
+            except Exception:  # noqa: BLE001
+                logger.warning("thread %s 历史删除失败", thread_id, exc_info=True)
         logger.info("thread %s closed (active=%d, discard=%s)", thread_id, len(self._sessions), discard)
         return closed
 
