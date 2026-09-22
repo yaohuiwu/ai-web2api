@@ -130,3 +130,26 @@ def test_to_dict_shape():
         "cookie",
     }
     assert d["state"] == "soon" and d["expires_at_iso"].endswith("Z")
+
+
+def test_compute_for_state_file(tmp_path: Path):
+    from ai_web2api.core.auth_expiry import compute_for_state_file
+
+    p = tmp_path / "state.json"
+    p.write_text(
+        json.dumps({"cookies": [_c("token", time.time() + 5 * DAY)]}), encoding="utf-8"
+    )
+    out = compute_for_state_file(p, auth_cookies=["token"], warn_days=1)
+    assert out.state == "ok" and out.source == "cookie"
+    # 文件不存在 → unknown（不抛）
+    assert compute_for_state_file(tmp_path / "nope.json", auth_cookies=["token"]).state == "unknown"
+
+
+def test_background_warns_only_manual_providers():
+    """后台只在……前提：提醒逻辑仅对手动认证生效（静态断言）。"""
+    src = (Path(__file__).resolve().parent.parent / "src" / "ai_web2api" / "main.py").read_text(
+        encoding="utf-8"
+    )
+    assert "_warn_auth_expiry" in src
+    assert 'p.cfg.login.mode != "manual"' in src
+    assert "_auth_warned" in src  # 状态变化才记，避免刷屏

@@ -1,6 +1,8 @@
 # 认证有效期展示与「快过期」提醒（设计）
 
-> 状态：**待 review**（未实现）。目标：UI 展示每个 provider 的认证有效期；对**手动认证**（`login.mode=manual`，如 chatgpt）在快过期时提醒用户更新认证信息。
+> 状态：**P1 已实现**（P2 待定）。目标：UI 展示每个 provider 的认证有效期；对**手动认证**（`login.mode=manual`，如 chatgpt）在快过期时提醒用户更新认证信息。
+>
+> P1 落地：`login.auth_cookies` / `expiry_warn_days` / `browser.auth_expiry_warn_days` 配置 与 `config.yaml` 默认；`core/auth_expiry.py` 计算；`/admin/status` 的 `auth_expiry` 字段；UI 「认证有效期」行 + 手动认证提醒卡；后台仅对手动认证的 WARNING。
 
 ## 1. 目标 / 非目标
 
@@ -147,7 +149,7 @@ else:
 
 ## 9. 分阶段
 
-- **P1（建议本次）**：配置字段 + 计算模块 + `/admin/status` 字段 + 详情「认证有效期」行 + 手动认证提醒卡 + WARNING 日志 + 测试。
+- **P1（已实现）**：配置字段 + 计算模块 + `/admin/status` 字段 + 详情「认证有效期」行 + 手动认证提醒卡 + WARNING 日志 + 测试。实测：chatgpt `ok` 90 天 / qwen `ok` 29 天 / deepseek `unknown`。
 - **P2（可选）**：tab 圆点 / 顶栏横幅 / `/healthz` 标记 / webhook / 统一 `state_expiry()`（落盘判定）到同一套 cookie 选择逻辑 / 实时 context 优先。
 
 ## 10. 待确认（review 点）

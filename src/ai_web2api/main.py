@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from .api.routes import create_router
 from .browser.manager import BrowserManager
 from .config import load_config
+from .core.auth_expiry import compute_for_state_file
 from .core.errors import ProviderError
 from .core.threads import ThreadManager
 from .providers.registry import ProviderRegistry
@@ -291,11 +292,42 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
                     result.get("reason", "未知原因"),
                 )
 
+    _auth_warned: dict[str, str] = {}  # provider → 上次已提醒的认证状态（避免刷屏）
+
+    async def _warn_auth_expiry() -> None:
+        """手动认证 provider 临近/已过期 → 记一次 WARNING。
+
+        仅 ``login.mode == "manual"``（自动认证无需人工干预，不提醒）；
+        状态变化时才记，避免每轮刷屏。
+        """
+        for name, p in registry.providers().items():
+            if p.cfg.login.mode != "manual":
+                _auth_warned.pop(name, None)
+                continue
+            state_file = Path(cfg.profiles_dir) / name / "state.json"
+            info = compute_for_state_file(
+                state_file,
+                auth_cookies=p.cfg.login.auth_cookies,
+                session_ttl_days=p.cfg.login.session_ttl_days,
+                warn_days=p.cfg.login.expiry_warn_days or cfg.browser.auth_expiry_warn_days,
+            )
+            if info.state in ("soon", "expired") and _auth_warned.get(name) != info.state:
+                logger.warning(
+                    'provider "%s" 认证%s（还剩 %.1f 天）：请更新认证信息 → '
+                    "python -m ai_web2api.cli login %s",
+                    name,
+                    "已过期" if info.state == "expired" else "即将过期",
+                    info.days_left or 0.0,
+                    name,
+                )
+            _auth_warned[name] = info.state
+
     async def _background_loop():
         """定期刷新登录态 + （必要时）保存 storage_state + 回收空闲 thread 会话。"""
         while True:
             try:
                 await asyncio.sleep(cfg.browser.login_check_interval)
+                await _warn_auth_expiry()  # 独立于登录态刷新（读 state.json，刷新失败也要提醒）
                 before = registry.login_status()
                 await registry.refresh_login_status()
                 # 掉线且配了自动登录凭据 → 自愈重登（模式=auto 且未登录时才会动作）

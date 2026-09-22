@@ -101,6 +101,29 @@ def compute_auth_expiry(
     return AuthExpiry(state, expires_at, round(days_left, 2), warn_days, source, cookie_name)
 
 
+def compute_for_state_file(
+    path: Path,
+    *,
+    auth_cookies: list[str] | None = None,
+    session_ttl_days: float | None = None,
+    warn_days: float = 3.0,
+    now: float | None = None,
+) -> AuthExpiry:
+    """便捷封装：直接从 provider 的 state.json 路径计算（供路由与后台复用）。"""
+    try:
+        mtime: float | None = path.stat().st_mtime
+    except OSError:
+        mtime = None
+    return compute_auth_expiry(
+        read_state_cookies(path),
+        auth_cookies=auth_cookies,
+        session_ttl_days=session_ttl_days,
+        state_mtime=mtime,
+        warn_days=warn_days,
+        now=now,
+    )
+
+
 # ---------- state.json 读取（按 mtime 缓存，避免状态轮询反复读盘） ----------
 
 _CACHE: dict[str, tuple[float, list[dict]]] = {}
