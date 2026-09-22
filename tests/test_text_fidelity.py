@@ -10,6 +10,9 @@
 from __future__ import annotations
 
 import json
+import os
+import time
+from pathlib import Path
 import re
 import urllib.error
 import urllib.request
@@ -117,6 +120,19 @@ async def _read_page(provider: str, url: str) -> tuple[str, str]:
         return ref, think
 
 
+REPORT = Path(os.environ.get("TEXT_FIDELITY_REPORT", "reports/text_fidelity.jsonl"))
+
+
+def _record(entry: dict) -> None:
+    """把每条用例结果追加到 JSONL（趋势/告警用；失败也记录）。"""
+    try:
+        REPORT.parent.mkdir(parents=True, exist_ok=True)
+        with REPORT.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001  记录失败不影响测试结论
+        pass
+
+
 @pytest.mark.parametrize("model,provider", PROVIDERS)
 @pytest.mark.parametrize("tag,prompt", CASES)
 @pytest.mark.asyncio
@@ -131,6 +147,12 @@ async def test_text_fidelity(model: str, provider: str, tag: str, prompt: str):
     reference, thinking = await _read_page(provider, url)
 
     coverage, missing = _coverage(reference, content)
-    assert coverage >= 0.95, f"[{provider}/{tag}] 覆盖率 {coverage:.2f}，缺 {missing}"
     leaked = LEAK_RE.search(content.strip()[:200])
+    _record({
+        "ts": round(time.time()), "provider": provider, "model": model, "case": tag,
+        "coverage": round(coverage, 3), "content_len": len(content),
+        "reasoning_len": len(message.get("reasoning_content") or ""),
+        "leak": leaked.group(0) if leaked else None, "missing": missing,
+    })
+    assert coverage >= 0.95, f"[{provider}/{tag}] 覆盖率 {coverage:.2f}，缺 {missing}"
     assert not leaked, f"[{provider}/{tag}] 正文里混进了思考特征文本：{leaked.group(0)!r}"

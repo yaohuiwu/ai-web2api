@@ -38,6 +38,10 @@
 | **Kimi** | ✅ **可用 —— 需手动登录** | `kimi-web` | **仅手动**（微信扫码 / 手机号 + 验证码，带易盾验证码） | 已端到端验证：输入、发送、正文提取（思考单独分离）、附件、会话复用（thread 恢复）。正文为**缓冲发送**（思考与正文同处一段），站点无停止按钮 → 靠稳定性判定结束。登录态在 localStorage → 用 `login.auth_local_storage: ["refresh_token"]` 解 JWT 的 `exp`，面板显示约 90 天并在到期前提醒 |
 | **Qwen / 通义** | ⚠️ **实验性 —— 不稳定、响应慢、登录容易被墙** | `qwen3.7-plus-web` | `mode: auto` 或手动 | **默认禁用**（`enabled: false`，需要时改 `true`）。站点 UI 改版频繁、选择器易失效，响应明显更慢，登录常被网络/风控拦截（可能需要自备网络环境）——按"能用就用"对待，不建议生产使用 |
 
+> **文本捕获保真度**（2026-09-22 实测）：长文本、代码块、Markdown 表格三类用例下，
+> DeepSeek 与 ChatGPT 的**句子覆盖率均为 1.00、零思考污染**（6/6 用例）；Kimi 因账号侧排队未完成。
+> 度量方法、原始结果、复跑方式与回归阈值见 [`docs/TEXT_FIDELITY.md`](docs/TEXT_FIDELITY.md)（`./scripts/text_fidelity.sh`）。
+
 ## 快速开始
 
 ### 方式一：Docker Compose（推荐，镜像自带 Chromium）

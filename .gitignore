@@ -10,3 +10,6 @@ wheels/
 .venv
 profiles/
 .env
+
+# 文本保真度回归产物（本地运行生成）
+reports/

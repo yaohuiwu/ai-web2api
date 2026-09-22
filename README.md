@@ -38,6 +38,11 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 | **Kimi** | ✅ **Works — manual login** | `kimi-web` | **manual only** (WeChat QR / phone + SMS code, with a captcha) | Verified end to end: composer, send, clean answer extraction (thinking kept separate), attachments and thread resume. Content is **buffered** (thinking and the answer share one segment) and the site has no stop button, so completion relies on stability detection. Tokens live in localStorage, so `login.auth_local_storage: ["refresh_token"]` is used to read the JWT `exp` — the dashboard shows ~90 days and reminds you before it lapses |
 | **Qwen / Tongyi** | ⚠️ **Experimental — unstable, slow, login easily blocked** | `qwen3.7-plus-web` | `mode: auto` or manual | **Disabled by default** (`enabled: false`; set `true` to try). The site's UI selectors change often, responses are noticeably slower, and login is frequently blocked by network/risk control — treat it as best-effort, not production |
 
+> **Text-capture fidelity** (measured 2026-09-22): across long-form, code-block and markdown-table cases,
+> DeepSeek and ChatGPT scored **1.00 sentence coverage with zero thinking contamination** (6/6 cases);
+> Kimi was skipped because the account was queued by the site. Method, raw results, how to re-run and the
+> regression threshold: [`docs/TEXT_FIDELITY.md`](docs/TEXT_FIDELITY.md) (`./scripts/text_fidelity.sh`).
+
 ## Quick start
 
 ### Option 1: Docker Compose (recommended; the image ships Chromium)
