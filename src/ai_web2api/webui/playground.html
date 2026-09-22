@@ -38,19 +38,21 @@
     <label>thread_id
       <input type="text" id="threadId" placeholder="留空 = 无状态">
     </label>
-    <label>mode
+    <label class="adv-item">mode
       <select id="mode">
         <option value="">默认</option>
         <option value="fast">fast（思考关 + 搜索关）</option>
         <option value="expert">expert（思考开 + 搜索开）</option>
       </select>
     </label>
-    <label><input type="checkbox" id="deepThink" checked> 深度思考</label>
-    <label><input type="checkbox" id="search" checked> 智能搜索</label>
-    <label><input type="checkbox" id="useTools"> 工具</label>
-    <label>API Key
+    <label class="adv-item"><input type="checkbox" id="deepThink" checked> 深度思考</label>
+    <label class="adv-item"><input type="checkbox" id="search" checked> 智能搜索</label>
+    <label class="adv-item"><input type="checkbox" id="useTools"> 工具</label>
+    <label class="adv-item">API Key
       <input type="password" id="apiKey" placeholder="可选">
     </label>
+    <button class="btn sm toolbar-toggle" id="advToggle" title="显示/隐藏高级选项">⚙ 更多</button>
+    <button class="btn sm" id="rawBtn" title="查看最近请求/响应原始报文">原始报文</button>
   </div>
 </div>
 
@@ -62,6 +64,9 @@
       <button class="btn" id="refreshThreads" title="刷新会话列表">刷新</button>
       <button class="btn" id="newChat" title="清空 thread_id，开始无状态新对话">＋ 新会话</button>
     </span>
+  </div>
+  <div class="sidebar-search">
+    <input type="search" id="threadSearch" placeholder="搜索会话…" autocomplete="off">
   </div>
   <div id="threadList"></div>
 </aside>

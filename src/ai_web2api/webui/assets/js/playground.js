@@ -27,6 +27,36 @@ function runMockTool(name, argsJson) {
   return typeof out === "string" ? out : JSON.stringify(out);
 }
 
+// 相对时间（会话列表用）
+function relTime(ts) {
+  if (!ts) return "";
+  const s = Math.max(0, Math.round(Date.now() / 1000 - ts));
+  if (s < 60) return `${s}s 前`;
+  if (s < 3600) return `${Math.round(s / 60)}m 前`;
+  if (s < 86400) return `${Math.round(s / 3600)}h 前`;
+  return `${Math.round(s / 86400)}d 前`;
+}
+
+function footTiming(div, ttfbMs, totalMs) {
+  const el = div && div.querySelector(".mf-timing");
+  if (!el) return;
+  const f = (ms) => (ms == null ? "—" : `${(ms / 1000).toFixed(1)}s`);
+  el.textContent = `首字 ${f(ttfbMs)} · 总 ${f(totalMs)}`;
+}
+
+function wireMsgActions(div) {
+  div.querySelectorAll("[data-act]").forEach((btn) => {
+    btn.onclick = () => {
+      const isJson = btn.dataset.act === "copy-json";
+      const payload = div._payload ?? { content: div._text || "" };
+      copyText(isJson ? JSON.stringify(payload, null, 2) : div._text || "");
+      const old = btn.textContent;
+      btn.textContent = "已复制";
+      setTimeout(() => (btn.textContent = old), 1200);
+    };
+  });
+}
+
 function addMsg(role, content, opts = {}) {
   const chat = $("#chat");
   const div = document.createElement("div");
@@ -44,8 +74,23 @@ function addMsg(role, content, opts = {}) {
         .join("") +
       `</div>`;
   }
+  // 底部信息行：角色 / 时间 / 耗时 / 动作
+  if (role !== "meta") {
+    const roleLabel = { user: "你", assistant: "助手", error: "错误" }[role] || role;
+    const time = new Date().toLocaleTimeString([], { hour12: false });
+    inner += `<div class="msg-foot"><span class="mf-role">${esc(roleLabel)}</span><span>${time}</span>`;
+    if (role === "assistant") {
+      inner += `<span class="mf-timing"></span>`;
+      inner += `<button class="btn sm" data-act="copy">复制</button>`;
+      inner += `<button class="btn sm" data-act="copy-json">复制 JSON</button>`;
+    }
+    inner += `</div>`;
+  }
   inner += `</div>`;
   div.innerHTML = inner;
+  div._text = content;
+  div._payload = opts.payload || null;
+  wireMsgActions(div);
   chat.appendChild(div);
   chat.scrollTop = chat.scrollHeight;
   return div;
@@ -59,7 +104,9 @@ function showPending(div) {
   const p = document.createElement("div");
   p.className = "pending";
   p.innerHTML = '<span class="dots"><i></i><i></i><i></i></span><span class="ptext">等待响应…</span>';
-  bubble.appendChild(p);
+  const foot = bubble.querySelector(".msg-foot");
+  if (foot) bubble.insertBefore(p, foot);
+  else bubble.appendChild(p);
   const t0 = Date.now();
   const timer = setInterval(() => {
     const el = p.querySelector(".ptext");
@@ -247,6 +294,7 @@ function rememberThreadId(tid) {
 // ---------- 发送：非流式 / 流式 ----------
 
 async function sendNonStream(body) {
+  const t0 = Date.now();
   // 先把"等待中"气泡摆上（非流式要等整包，不显示就会以为卡死）
   const pendingDiv = addMsg("assistant", "");
   const stopPending = showPending(pendingDiv);
@@ -268,11 +316,13 @@ async function sendNonStream(body) {
   } else {
     const content = msg.content || "";
     const th = msg.reasoning_content;
+    let div;
     if (th && !content) {
-      addMsg("assistant", "（思考过程已完整输出，但正文未生成——可能因思考过长被结束判定截断，请重试）", { thinking: th });
+      div = addMsg("assistant", "（思考过程已完整输出，但正文未生成——可能因思考过长被结束判定截断，请重试）", { thinking: th, payload: msg });
     } else {
-      addMsg("assistant", content || "（空回复）", { thinking: th });
+      div = addMsg("assistant", content || "（空回复）", { thinking: th, payload: msg });
     }
+    footTiming(div, null, Date.now() - t0);
   }
   if (data.thread_id) {
     addMeta(`thread_id: ${data.thread_id}`);
@@ -303,6 +353,8 @@ async function sendStream(body) {
   contentBox.className = "content";
   bubble.appendChild(contentBox);
   const stopPending = showPending(bubbleDiv);
+  const t0 = Date.now();
+  let ttfb = null;
   let gotThreadId = false;
 
   const ensureThinkBox = () => {
@@ -320,7 +372,10 @@ async function sendStream(body) {
   const flushChunk = (delta) => {
     if (!delta) return;
     // 有任何实际内容（思考/正文/工具）→ 立即撤掉"等待中"指示
-    if (delta.reasoning_content || delta.content || delta.tool_calls) stopPending();
+    if (delta.reasoning_content || delta.content || delta.tool_calls) {
+      if (ttfb === null) ttfb = Date.now() - t0;
+      stopPending();
+    }
     if (delta.reasoning_content) {
       fullThinking += delta.reasoning_content;
       ensureThinkBox().appendChild(document.createTextNode(delta.reasoning_content));
@@ -392,10 +447,13 @@ async function sendStream(body) {
     contentBox.innerHTML = md(fullContent);
     if (/^\s*\[(会话错误|错误)\]/.test(fullContent)) {
       bubble.classList.add("error");
-      contentBox.style.color = "#dc2626";
+      contentBox.style.color = "var(--red-strong)";
     }
   }
-  return { content: fullContent, thinking: fullThinking, toolCalls };
+  bubbleDiv._text = fullContent;
+  bubbleDiv._payload = { content: fullContent, reasoning_content: fullThinking, tool_calls: toolCalls };
+  footTiming(bubbleDiv, ttfb, Date.now() - t0);
+  return { content: fullContent, thinking: fullThinking, toolCalls, elapsed_ms: Date.now() - t0 };
 }
 
 // 一轮请求 + （可选）工具自动执行闭环
@@ -439,7 +497,7 @@ async function send() {
   const atts = pendingAttachments.slice();
   const parts = atts.map((a) => ({ type: "image_url", image_url: { url: a.dataUrl } }));
   messages.push({ role: "user", content: text });   // 历史存文本，附件只发本轮
-  addMsg("user", text, { attachments: atts });
+  addMsg("user", text, { attachments: atts, payload: { role: "user", content: text } });
   localStorage.setItem("aiw2api_model", $("#model").value);
   const tid = $("#threadId").value.trim();
   if (tid) addMeta(`thread_id: ${tid}（绑定会话，续用只发最后一条）`);
@@ -525,11 +583,21 @@ function refreshThreads() {
     .then((data) => {
       const cur = $("#threadId").value.trim();
       const list = $("#threadList");
-      const items = data.threads || [];
+      const search = $("#threadSearch");
+      const q = (search ? search.value : "").trim().toLowerCase();
+      const items = (data.threads || []).filter(
+        (t) =>
+          !q ||
+          `${t.first_message || ""} ${t.thread_id} ${t.provider || ""} ${t.model || ""}`
+            .toLowerCase()
+            .includes(q)
+      );
       list.innerHTML = "";
       if (!items.length) {
         list.innerHTML =
-          '<div class="thread-item"><div class="empty">暂无会话<br>发送消息后会出现在这里（可切换回访）</div></div>';
+          `<div class="thread-item"><div class="empty">${
+            q ? "无匹配会话" : "暂无会话<br>发送消息后会出现在这里（可切换回访）"
+          }</div></div>`;
         return;
       }
       for (const t of items) {
@@ -538,7 +606,7 @@ function refreshThreads() {
         const title = t.first_message || t.thread_id;
         item.innerHTML =
           `<div class="tt">${esc(title)}${t.loaded === false ? ' <span class="arch">存档</span>' : ""}</div>` +
-          `<div class="tid">${esc(t.thread_id)} · ${esc(t.model || "")}</div>`;
+          `<div class="tid"><span class="tp">${esc(t.provider || "")}</span> ${esc(t.model || "")} · ${relTime(t.updated_at)}</div>`;
         item.onclick = () => switchThread(t.thread_id, t.loaded !== false);
         list.appendChild(item);
       }
@@ -602,6 +670,48 @@ function newChat() {
 
 $("#newChat").onclick = newChat;
 $("#refreshThreads").onclick = refreshThreads;
+
+// ---- 工具条「更多」/ 侧栏搜索 / 原始报文 ----
+$("#advToggle").onclick = () => document.querySelector(".toolbar").classList.toggle("expanded");
+$("#threadSearch").addEventListener("input", refreshThreads);
+$("#rawBtn").onclick = toggleRawPanel;
+
+function curlFor(entry) {
+  const body = JSON.stringify(entry.req || {});
+  return `curl -s ${location.origin}/v1/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -d '${body.replace(/'/g, "'\\''")}'`;
+}
+
+// 原始请求/响应抽屉（rawLog 已有数据，之前没入口）
+function toggleRawPanel() {
+  const existing = $("#rawPanel");
+  if (existing) { existing.remove(); return; }
+  const panel = document.createElement("div");
+  panel.id = "rawPanel";
+  if (!rawLog.length) {
+    panel.innerHTML = `<div class="raw-head">还没有请求记录</div>`;
+  } else {
+    const recent = rawLog.slice(-5).reverse();
+    panel.innerHTML =
+      `<div class="raw-head">最近 ${recent.length} 条请求（新→旧）</div>` +
+      recent
+        .map((e, i) => {
+          const req = e.req || {};
+          const res = e.res || { error: e.error };
+          return `<div class="raw-item">
+            <div class="raw-head">#${recent.length - i} · ${esc(req.model || "")}${
+              e.error ? " · <span class=\"auth-expired\">失败</span>" : ""
+            } <button class="btn sm" data-curl="${i}">复制为 curl</button></div>
+            <pre class="raw">${esc(JSON.stringify({ request: req, response: res }, null, 2))}</pre>
+          </div>`;
+        })
+        .join("");
+    panel.querySelectorAll("[data-curl]").forEach((b) => {
+      const e = recent[Number(b.dataset.curl)];
+      b.onclick = () => copyText(curlFor(e));
+    });
+  }
+  $("#layout").after(panel);
+}
 
 setupToolsPanel();
 $("#attachBtn").onclick = () => $("#fileInput").click();

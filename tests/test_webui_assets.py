@@ -136,3 +136,16 @@ def test_status_panel_polish():
     assert ".auth-bar" in css and ".row-actions" in css and ".kpi-top" in css
     pg = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
     assert "thread_id" in pg and "URLSearchParams" in pg, "Playground 未支持 ?thread_id="
+
+
+def test_playground_polish():
+    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+    html = (WEBUI / "playground.html").read_text(encoding="utf-8")
+    css = (WEBUI / "assets/css/playground.css").read_text(encoding="utf-8")
+    assert "function relTime" in js, "缺少相对时间"
+    assert "msg-foot" in js and "footTiming" in js, "消息缺少角色/时间/耗时信息行"
+    assert "wireMsgActions" in js and "copy-json" in js, "缺少复制/复制 JSON"
+    assert "toggleRawPanel" in js and "function curlFor" in js, "缺少原始报文面板/curl 导出"
+    assert "threadSearch" in html and "#threadSearch" in js, "缺少会话搜索"
+    assert "advToggle" in html and ".toolbar-toggle" in css, "缺少窄屏高级项折叠"
+    assert "msg-foot" in css and "#rawPanel" in css
