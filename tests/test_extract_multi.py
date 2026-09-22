@@ -1,0 +1,115 @@
+"""多容器拼接提取（response_all_new）：Kimi 一次回答可能拆成多条消息。
+
+运行：.venv/bin/python -m pytest tests/test_extract_multi.py -v
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from ai_web2api.browser import extractor
+
+
+@pytest.fixture
+def fake_page(monkeypatch):
+    """用假的 count/extract 模拟 N 个容器。"""
+    parts = ["好呀，我用代码给你画一只小兔子 🐰", "画好啦，一只粉色长耳朵小兔子 🐰", "想调整的话随时说，比如：换成白色兔子。"]
+    calls: list[int] = []
+
+    async def fake_count(page, sel):
+        return len(parts)
+
+    async def fake_extract(page, sel, index=-1):
+        calls.append(index)
+        i = -1 if index is None else index
+        return parts[i] if -1 <= i < len(parts) else ""
+
+    monkeypatch.setattr(extractor, "count_matches", fake_count)
+    monkeypatch.setattr(extractor, "extract_markdown", fake_extract)
+    return parts, calls
+
+
+@pytest.mark.asyncio
+async def test_extract_all_from_start(fake_page):
+    parts, calls = fake_page
+    out = await extractor.extract_markdown_from(None, ".md", 0)
+    assert out.split("\n\n") == parts            # 全部拼接，顺序保持
+    assert calls == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_extract_from_middle(fake_page):
+    parts, calls = fake_page
+    out = await extractor.extract_markdown_from(None, ".md", 1)
+    assert out.split("\n\n") == parts[1:]
+    assert calls == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_start_beyond_count_and_empty_selector(fake_page):
+    assert await extractor.extract_markdown_from(None, ".md", 99) == ""
+    assert await extractor.extract_markdown_from(None, "", 0) == ""
+    assert await extractor.extract_markdown_from(None, None, 0) == ""
+
+
+@pytest.mark.asyncio
+async def test_adjacent_duplicates_deduped(monkeypatch):
+    """容器重渲染出现相邻重复内容时去重（避免正文重复输出）。"""
+    parts = ["A", "A", "B"]
+
+    async def fake_count(page, sel):
+        return len(parts)
+
+    async def fake_extract(page, sel, index=-1):
+        return parts[index]
+
+    monkeypatch.setattr(extractor, "count_matches", fake_count)
+    monkeypatch.setattr(extractor, "extract_markdown", fake_extract)
+    assert (await extractor.extract_markdown_from(None, ".md", 0)).split("\n\n") == ["A", "B"]
+
+
+@pytest.mark.asyncio
+async def test_provider_picks_join_mode_by_config(monkeypatch):
+    """_extract_content：response_all_new=true 才拼接，否则维持"只取该下标"。"""
+    from ai_web2api.config import ProviderConfig
+    from ai_web2api.providers.webchat import WebChatProvider
+
+    class _StubBrowser:
+        default_locale = "zh-CN"
+
+    seen: list[str] = []
+
+    async def single(page, sel, index=-1):
+        seen.append("single")
+        return "single"
+
+    async def joined(page, sel, start):
+        seen.append("joined")
+        return "joined"
+
+    monkeypatch.setattr(extractor, "extract_markdown", single)
+    monkeypatch.setattr(extractor, "extract_markdown_from", joined)
+
+    def _prov(**sel):
+        cfg = ProviderConfig.model_validate(
+            {"name": "x", "url": "https://x/", "models": [{"name": "m"}], "selectors": sel}
+        )
+        return WebChatProvider(cfg, _StubBrowser())  # type: ignore[arg-type]
+
+    assert await _prov()._extract_content(None, ".md", 0) == "single"
+    assert await _prov(response_all_new=True)._extract_content(None, ".md", 0) == "joined"
+    assert seen == ["single", "joined"]
+    # 没有容器/下标时直接空串，不去调页面
+    assert await _prov(response_all_new=True)._extract_content(None, None, None) == ""
+
+
+def test_kimi_enables_join_mode():
+    from pathlib import Path
+
+    from ai_web2api.config import load_config
+
+    root = Path(__file__).resolve().parent.parent
+    kimi = next(p for p in load_config(root / "config.yaml").providers if p.name == "kimi")
+    assert kimi.selectors.response_all_new is True
+    deepseek = next(p for p in load_config(root / "config.yaml").providers if p.name == "deepseek")
+    assert deepseek.selectors.response_all_new is False, "其它 provider 不应改变行为"

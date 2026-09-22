@@ -265,6 +265,7 @@ providers:
         - "div[contenteditable='true']"
       type_prompt: true
       stream_content: false     # 思考与正文同处一段 → 缓冲后一次发，避免把"思考已完成…"当正文
+      response_all_new: true    # 一次回答可能被拆成"工具前 + 工具后"多条消息 → 新容器全部拼接
       send_button:
         - ".send-button-container"
       response_container:       # 实测：答案的 .markdown-container **不带** toolcall-content-text（带的是思考）

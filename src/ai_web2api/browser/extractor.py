@@ -179,3 +179,23 @@ async def extract_markdown(page: Page, selector: str | None, index: int | None =
     if not selector:
         return ""
     return await page.evaluate(f"({_MD_JS})({json.dumps(selector)}, {index if index is not None else -1})")
+
+
+async def extract_markdown_from(page: Page, selector: str | None, start: int) -> str:
+    """从第 ``start`` 个匹配元素起，把**后面的全部**依次提取并拼接（空行分隔）。
+
+    为什么需要：一次回答可能被站点拆成**多条消息 / 多个容器**（如 Kimi 工具调用会把回答拆成
+    "工具前的一段 + 工具后的一段"）。只读"新增的第一个容器"会截断内容。
+    相邻重复内容会被去重（容器重渲染时的兜底）。
+    """
+    if not selector:
+        return ""
+    count = await count_matches(page, selector)
+    if count <= 0:
+        return ""
+    parts: list[str] = []
+    for i in range(max(0, min(start, count)), count):
+        text = (await extract_markdown(page, selector, i)).strip()
+        if text and (not parts or parts[-1] != text):
+            parts.append(text)
+    return "\n\n".join(parts)

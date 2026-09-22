@@ -864,9 +864,7 @@ XMLHttpRequest.prototype.send = function (body) {{
                 if found:
                     th_sel, th_idx = found, th_before[found]
 
-            md_text = (
-                await extractor.extract_markdown(page, md_sel, md_idx) if md_sel else ""
-            )
+            md_text = await self._extract_content(page, md_sel, md_idx)
             th_text = await self._extract_thinking(page, th_sel, th_idx) if th_sel else ""
 
             changed = False
@@ -913,7 +911,7 @@ XMLHttpRequest.prototype.send = function (body) {{
                     # 收尾兜底：结束判定可能比最后一帧渲染早一拍 → 再等一拍重取一次，取更长的
                     await page.wait_for_timeout(poll_ms + 200)
                     try:
-                        final = (await extractor.extract_markdown(page, md_sel, md_idx)) if md_sel else ""
+                        final = await self._extract_content(page, md_sel, md_idx)
                     except Exception:  # noqa: BLE001
                         final = ""
                     if final and len(final) > len(last["content"]):
@@ -923,6 +921,14 @@ XMLHttpRequest.prototype.send = function (body) {{
                 return
 
             await page.wait_for_timeout(poll_ms)
+
+    async def _extract_content(self, page: Page, sel: str | None, idx: int | None) -> str:
+        """正文提取：按配置决定"只取该下标"还是"从该下标起全部拼接"。"""
+        if not sel or idx is None:
+            return ""
+        if getattr(self.cfg.selectors, "response_all_new", False):
+            return await extractor.extract_markdown_from(page, sel, idx)
+        return await extractor.extract_markdown(page, sel, idx)
 
     @staticmethod
     async def _find_new(page: Page, before: dict[str, int]) -> str | None:
