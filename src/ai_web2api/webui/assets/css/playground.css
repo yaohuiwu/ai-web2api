@@ -1,14 +1,10 @@
 /* Playground（playground.html）专用样式 */
-header {
-  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
-  padding: var(--sp-3) var(--sp-5); background: var(--header-bg);
-  border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20;
-  backdrop-filter: saturate(160%) blur(8px);
-}
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
-  header a { color: var(--blue-text); text-decoration: none; font-size: 13px; }
-  header .spacer { flex: 1; }
   .opts { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; }
+  .toolbar {
+    display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap;
+    padding: var(--sp-2) var(--sp-5); border-bottom: 1px solid var(--border);
+    background: var(--card);
+  }
   .opts label { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
   .opts input[type=checkbox] { accent-color: var(--blue); }
   .opts input[type=text], .opts select, .opts input[type=password] {
@@ -189,6 +185,9 @@ header {
 
 /* 本页布局（通用 body 视觉在 base.css） */
 body { height: 100dvh; display: flex; flex-direction: column; }
+
+/* 贴底紧凑页脚（app shell 里占位最小） */
+footer.compact { margin-top: 0; padding: 6px var(--sp-5); border-top: 1px solid var(--border); font-size: 11.5px; flex: none; }
 
 /* 本页按钮尺寸 */
 .btn { padding: 8px 18px; border-radius: 9px; font-size: 14px; }

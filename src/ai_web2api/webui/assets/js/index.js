@@ -3,14 +3,6 @@ let timer = null;
 let selectedProvider = null;
 let lastData = null;
 
-function toast(msg) {
-  const el = $("#toast");
-  el.textContent = msg;
-  el.classList.add("show");
-  clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove("show"), 2600);
-}
-
 function fmtUptime(sec) {
   sec = Math.max(0, Math.floor(sec));
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
@@ -41,6 +33,7 @@ function renderKpis(s, t) {
     .map(([k, v]) => `<div class="kpi"><div class="kpi-v">${esc(v)}</div><div class="kpi-k">${esc(k)}</div></div>`)
     .join("");
   $("#serverLine").textContent = `v${s.version} · ${s.host}:${s.port} · 运行 ${fmtUptime(s.uptime_seconds)}`;
+  document.querySelectorAll("[data-version]").forEach((el) => (el.textContent = `v${s.version}`));
 }
 
 function renderProviders(providers) {
@@ -171,14 +164,6 @@ function renderProviderDetail(p) {
       </div>
     </div>`;
   initManualPanel();
-}
-
-function copyText(t) {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(t).then(() => toast("已复制"), () => toast("复制失败，请手动选择复制"));
-  } else {
-    toast("浏览器不支持自动复制，请手动选择");
-  }
 }
 
 function initManualPanel() {

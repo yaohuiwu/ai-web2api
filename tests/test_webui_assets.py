@@ -108,3 +108,18 @@ def test_theme_tokens_and_toggle():
         assert "assets/css/tokens.css" in html, f"{name} 未引入 tokens.css"
         assert "assets/js/theme.js" in html, f"{name} 未引入 theme.js"
         assert "data-theme-toggle" in html, f"{name} 缺少主题切换按钮"
+
+
+def test_shared_header_footer_and_meta():
+    """两页共享 header(nav) / footer / favicon / meta description。"""
+    for name in HTML_FILES:
+        html = (WEBUI / name).read_text(encoding="utf-8")
+        assert 'class="nav"' in html, f"{name} 缺少导航"
+        assert 'data-footer' in html, f"{name} 缺少 footer 占位"
+        assert 'rel="icon"' in html, f"{name} 缺少 favicon"
+        assert 'name="description"' in html, f"{name} 缺少 meta description"
+        assert 'name="color-scheme"' in html, f"{name} 缺少 color-scheme"
+    base = (WEBUI / "assets/css/base.css").read_text(encoding="utf-8")
+    assert ".nav a.active" in base and "footer .f-links" in base
+    common = (WEBUI / "assets/js/common.js").read_text(encoding="utf-8")
+    assert "function renderFooter" in common and "function toast" in common and "function copyText" in common

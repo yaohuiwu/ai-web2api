@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ai-web2api · OpenAI 测试</title>
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="ai-web2api — 把网页端 AI 聊天封装成 OpenAI 兼容 API">
+<title>ai-web2api · Playground</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='%23fff'%3E%E2%97%88%3C/text%3E%3C/svg%3E">
 <script src="assets/js/theme.js"></script>
 <link rel="stylesheet" href="assets/css/tokens.css">
 <link rel="stylesheet" href="assets/css/base.css">
@@ -11,10 +14,22 @@
 </head>
 <body>
 <header>
-  <h1>OpenAI API 测试</h1>
-  <a href="/ui/">← 状态面板</a>
+  <div class="brand">
+    <span class="logo">◈</span>
+    <div class="brand-text">
+      <h1>ai-web2api</h1>
+      <span class="sub">Playground · OpenAI 兼容</span>
+    </div>
+  </div>
+  <nav class="nav">
+    <a href="/ui/">状态面板</a>
+    <a class="active" href="/ui/playground.html">Playground</a>
+    <a href="/docs" target="_blank" rel="noopener">API 文档</a>
+  </nav>
   <span class="spacer"></span>
   <button class="btn theme-toggle" data-theme-toggle onclick="toggleTheme()" aria-label="切换主题">🌙</button>
+</header>
+<div class="toolbar">
   <div class="opts">
     <label>模型
       <select id="model"><option>加载中…</option></select>
@@ -37,7 +52,7 @@
       <input type="password" id="apiKey" placeholder="可选">
     </label>
   </div>
-</header>
+</div>
 
 <div id="layout">
 <aside id="sidebar">
@@ -83,6 +98,7 @@
 </div>
 </main>
 </div>
+<footer data-footer class="compact"></footer>
 
 <script src="assets/js/common.js"></script>
 <script src="assets/js/markdown.js"></script>
