@@ -18,16 +18,11 @@
 ## 功能特性
 
 - **OpenAI 兼容 API** —— `/v1/chat/completions`（流式 SSE + 非流式）与 `/v1/models`；OpenAI SDK、LangChain / llama_index 及任何 OpenAI 客户端可直接接入，可选 API Key 鉴权
-- **多 provider** —— 开箱即用 DeepSeek 与 ChatGPT，可选 Qwen/通义（见下表）
-- **真实浏览器自动化，不逆向接口** —— Playwright 驱动真实页面（纯 DOM 自动化），Web 改版只需改 `config.yaml` 里的选择器
-- **登录态跨重启保持** —— `storage_state` 持久化（cookies **与 localStorage token** 都参与指纹，轮换即重新落盘）、自动登录、一条命令手动登录、UI 导入登录态，以及手动认证 provider 的**认证有效期倒计时 + 到期提醒**
-- **流式输出，思考分离** —— 增量 DOM 提取转成 SSE 增量；模型的思考过程单独放在 `reasoning_content`
-- **会话绑定（`thread_id`）** —— 同一 Web 会话跨请求复用、不同 thread 并行，会话与消息落 SQLite，**多轮记忆跨服务重启保持**
-- **附件 / 图片识别** —— OpenAI 风格的多部分 `content` + `image_url`（data URL 或 http 外链），经页面真实上传
-- **Function Calling** —— 原生 `tools` / `tool_choice`，以 prompt 注入实现，再解析回标准 `tool_calls`（支持流式）
-- **自带 Web 界面** —— 状态面板（登录态、认证有效期、模型/别名、一键导入登录态）、Playground（流式对话、思考面板、附件预览、工具测试、原始报文 + 复制为 curl、等待秒数）会话页（搜索 / provider 过滤 / 分页）与**实时画面页**（只读直播）——亮暗主题、响应式布局
-- **实时画面（只读）** —— 在 UI 里看该 provider 的真实浏览器界面（`/ui/browser.html`，MJPEG 5fps）——**跟随你正在聊的会话**，会话页每张卡片也能直接跳转（`?thread_id=`）；多观众共享同一帧、无人观看自动停、生成中自动降到 1fps。**接口暂不鉴权**，请勿对外暴露（`server.live_view`）
-- **Docker 友好** —— 镜像自带 Chromium；`WEB2API_HEADLESS=false` 在 Xvfb 下跑 headful，应对必须"真实显示器"的站点（如 ChatGPT 的 Sentinel）
+- **多 provider + 真实浏览器自动化** —— 支持 DeepSeek、ChatGPT、豆包、智谱清言、Kimi（Qwen 可选）；Playwright 驱动真实页面（纯 DOM 自动化，不逆向内部接口），站点改版只需改 `config.yaml` 里的选择器
+- **登录态与会话跨重启保持** —— `storage_state` 持久化（cookies **与 localStorage token** 都参与指纹，轮换即重新落盘）、自动登录或一条命令手动登录、手动认证 provider 的**认证有效期倒计时 + 到期提醒**、以及 thread 会话续用
+- **流式、思考、附件、工具** —— SSE 增量输出，思考过程单独放在 `reasoning_content`；OpenAI 风格的图片附件；Function Calling（`tools` / `tool_choice` → 标准 `tool_calls`）
+- **自带 Web 界面**（免构建、亮暗主题、响应式）—— **状态面板**（登录态、认证有效期、模型/别名、一键导入登录态）、**Playground**（流式对话、思考面板、附件、工具测试、原始报文 + 复制为 curl）、**会话页**（搜索 / provider 过滤 / 分页）与**实时画面**（只读浏览器画面，并能呈现捕获到的交互组件）
+- **Docker 友好** —— 镜像自带 Chromium；`WEB2API_HEADLESS=false` 在 Xvfb 下跑 headful（应对必须"真实显示器"的站点，如 ChatGPT 的 Sentinel）；`config.yaml` 已挂载，改配置只需 restart
 
 ## 支持的 provider
 
@@ -35,9 +30,9 @@
 |---|---|---|---|---|
 | **DeepSeek** | ✅ **稳定，推荐默认** | `deepseek-web`、`deepseek-r1-web` | `mode: auto`（账号密码）或手动 | 支持 headless。深度思考 / 智能搜索开关、图片附件、Function Calling 均已端到端验证 |
 | **ChatGPT** | ✅ **可用，但必须 headful** | `gpt-5-web`、`gpt-4o-web`、`o3-web` | **仅手动登录**（无密码登录：Google OAuth） | Sentinel 会拦 headless，必须 headful（`WEB2API_HEADLESS=false`，Docker 里靠 Xvfb）。会话 token 约 90 天，登录一次可长期复用 |
-| **Kimi** | ✅ **可用 —— 需手动登录** | `kimi-web` | **仅手动**（微信扫码 / 手机号 + 验证码，带易盾验证码） | 已端到端验证：输入、发送、正文提取（思考单独分离）、附件、会话复用（thread 恢复）。正文为**缓冲发送**（思考与正文同处一段），站点无停止按钮 → 靠稳定性判定结束。登录态在 localStorage → 用 `login.auth_local_storage: ["refresh_token"]` 解 JWT 的 `exp`，面板显示约 90 天并在到期前提醒 |
 | **豆包 Doubao** | ✅ **可用 —— 需手动登录** | `doubao-web` | **仅手动**（手机号验证码/扫码，无密码登录） | 已端到端验证（14.7s）并通过文本保真度回归（3/3 用例、覆盖率 1.00）。正文用**区分角色**的选择器（`.md-box-root` 也匹配用户提问）；被拆成多个容器的回答会**拼接**（`response_all_new`）+ **缓冲发送**（`stream_content: false`）。游客态也有输入框 → 登录态靠**反向标记**判定（[`docs/PROVIDER_DOUBAO.md`](docs/PROVIDER_DOUBAO.md)） |
 | **智谱清言 GLM** | ✅ **可用 —— 需人工过 WAF 一次 + 保活** | `glm-web` | **仅手动**（手机号验证码/扫码） | chatglm.cn 前置**阿里云 WAF 滑块**，headless 与 headful 自动化都被拦；在宿主人工过一次（`./scripts/login.sh glm`）并导入 state 后**容器内可复用**，但票据会过期需周期性重验。已端到端验证（19.7s、正文干净、思考分离）（[`docs/PROVIDER_GLM.md`](docs/PROVIDER_GLM.md)） |
+| **Kimi** | ✅ **可用 —— 需手动登录** | `kimi-web` | **仅手动**（微信扫码 / 手机号 + 验证码，带易盾验证码） | 已端到端验证：输入、发送、正文提取（思考单独分离）、附件、会话复用（thread 恢复）。正文为**缓冲发送**（思考与正文同处一段），站点无停止按钮 → 靠稳定性判定结束。登录态在 localStorage → 用 `login.auth_local_storage: ["refresh_token"]` 解 JWT 的 `exp`，面板显示约 90 天并在到期前提醒 |
 | **Qwen / 通义** | ⚠️ **实验性 —— 不稳定、响应慢、登录容易被墙** | `qwen3.7-plus-web` | `mode: auto` 或手动 | **默认禁用**（`enabled: false`，需要时改 `true`）。站点 UI 改版频繁、选择器易失效，响应明显更慢，登录常被网络/风控拦截（可能需要自备网络环境）——按"能用就用"对待，不建议生产使用 |
 
 > **文本捕获保真度**（2026-09-22 实测）：长文本、代码块、Markdown 表格三类用例下，
