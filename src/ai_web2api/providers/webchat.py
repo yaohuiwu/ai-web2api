@@ -141,6 +141,8 @@ class WebChatProvider(BaseProvider):
             logger.info("[%s] sending prompt (%d chars): %.60r", self.name, len(prompt), prompt)
             if self.net_enabled:
                 await self._reset_net_capture(page)
+            if self.net_observe:
+                self._observe_net(page)          # 观测型旁听（状态码/时序）
             await self._dismiss_overlays(page, reason="发送前")   # 弹窗会挡住输入/发送
             try:
                 await self._send_prompt(page, input_sel, prompt)
@@ -173,6 +175,7 @@ class WebChatProvider(BaseProvider):
             ):
                 yield chunk
         finally:
+            self._stop_observe(page)             # 摘掉旁听监听，避免跨请求累积
             # 无状态请求：用完即关；thread 模式：页面留给 ThreadManager 管理
             if thread_mode is None and thread_page is None:
                 await page.close()
@@ -729,6 +732,69 @@ class WebChatProvider(BaseProvider):
 
     # ---------- 网络接入 ----------
 
+    # ---------- 观测型旁听（不解析内容，只看时序/状态码） ----------
+
+    @property
+    def net_observe(self) -> bool:
+        """是否启用"观测型旁听"（``network.observe`` + ``url_pattern``）。"""
+        net = self.cfg.network
+        return bool(net.observe and net.url_pattern)
+
+    def _observe_net(self, page: Page) -> None:
+        """挂上响应监听：记录匹配 ``url_pattern`` 的响应对象（仅观测，不改页面）。"""
+        if not self.net_observe:
+            return
+        pattern = re.compile(self.cfg.network.url_pattern or "")
+        events: list = []
+
+        def on_response(resp) -> None:  # noqa: ANN001
+            try:
+                if pattern.search(resp.url):
+                    events.append(resp)
+            except Exception:  # noqa: BLE001  响应对象可能已失效
+                pass
+
+        page.on("response", on_response)
+        self._net_events = events
+        self._net_handler = on_response
+
+    def _stop_observe(self, page: Page) -> None:
+        handler = getattr(self, "_net_handler", None)
+        if handler is not None:
+            try:
+                page.remove_listener("response", handler)
+            except Exception:  # noqa: BLE001
+                pass
+        self._net_handler = None
+        self._net_events = []
+
+    def _net_summary(self) -> str:
+        """把最近一次匹配请求的时序概括成一行（超时/完成时都能用）。"""
+        events = getattr(self, "_net_events", None) or []
+        if not events:
+            return "网络旁听：未捕获到匹配请求（可能请求没发出，或 URL 规则不匹配）"
+        resp = events[-1]
+        timing: dict = {}
+        try:
+            timing = resp.request.timing or {}
+        except Exception:  # noqa: BLE001
+            pass
+        start = timing.get("requestStart")
+
+        def delta(key: str) -> float | None:
+            value = timing.get(key)
+            if value is None or start is None or value < 0:
+                return None
+            return (value - start) / 1000.0
+
+        fmt = lambda v: "—" if v is None else f"{v:.1f}s"  # noqa: E731
+        head, end = delta("responseStart"), delta("responseEnd")
+        state = "流已结束" if end is not None else "**流未结束**"
+        return (
+            f"网络旁听：{resp.request.method} {resp.url[:90]} status={resp.status} "
+            f"响应头={fmt(head)} 结束={fmt(end)} {state}"
+        )
+
     def _net_init_js(self, url_pattern: str) -> str:
         """生成 XHR 监听脚本：匹配 ``url_pattern`` 的请求把 responseText 存到全局量。"""
         g, d = self.NET_GLOBAL, self.NET_GLOBAL_DONE
@@ -988,7 +1054,8 @@ XMLHttpRequest.prototype.send = function (body) {{
             if elapsed > timeout:
                 raise ResponseTimeoutError(
                     f'provider "{self.name}" 发送后未检测到回复开始（{timeout:.0f}s）'
-                    f"；消息已发出但页面没有新回复容器（可能被限流/排队，或选择器失配）",
+                    f"；消息已发出但页面没有新回复容器（可能被限流/排队，或选择器失配）"
+                    + (("；" + self._net_summary()) if self.net_observe else ""),
                     provider=self.name,
                 )
             # 早期确认：一段时间内既无新容器、也无停止按钮 → 消息很可能是被静默丢弃了。
@@ -1066,6 +1133,8 @@ XMLHttpRequest.prototype.send = function (body) {{
                     hint = "；未检测到正文容器（页面可能仍在加载/校验）"
                 else:
                     hint = ""
+                if self.net_observe:
+                    hint += "；" + self._net_summary()
                 raise ResponseTimeoutError(
                     f'provider "{self.name}" 响应超时 ({timeout:.0f}s){hint}', provider=self.name
                 )
@@ -1116,8 +1185,10 @@ XMLHttpRequest.prototype.send = function (body) {{
                 stop_visible = any(vis)
                 if stop_visible:
                     stop_seen = True
-                elif stop_seen:
-                    done = True  # 出现过停止按钮且已消失 = 生成结束
+                elif stop_seen and stable >= getattr(cfg, "stop_settle_polls", 2):
+                    # 出现过停止按钮且已消失 = 生成结束；但**再等 N 拍无变化**才定稿（双确认）：
+                    # 站点常在按钮消失后才把最后一拍渲染完 → 立刻取会截断长回答/表格（实测）
+                    done = True
             if not done and stable >= stable_polls and elapsed > min_wait:
                 if last["content"]:
                     # 正文已开始：markdown 渐进渲染会有超过稳定窗口的停顿，放宽避免截断
@@ -1131,8 +1202,9 @@ XMLHttpRequest.prototype.send = function (body) {{
                 # 否则（正文容器尚未出现）→ 继续等，避免空正文提前结束（Qwen 实测）
             if done:
                 logger.info(
-                    "[%s] done content=%d chars thinking=%d chars elapsed=%.1fs",
+                    "[%s] done content=%d chars thinking=%d chars elapsed=%.1fs%s",
                     self.name, len(last["content"]), len(last["thinking"]), elapsed,
+                    ("  " + self._net_summary()) if self.net_observe else "",
                 )
                 if buffer_content:
                     # 收尾兜底：结束判定可能比最后一帧渲染早一拍 → 再等一拍重取一次，取更长的

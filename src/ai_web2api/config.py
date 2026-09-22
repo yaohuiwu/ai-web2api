@@ -92,7 +92,10 @@ class SelectorsConfig(BaseModel):
     widget_capture: Literal["none", "png", "html", "both"] = "none"
     response_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = [".ds-markdown"]
     thinking_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
-    stop_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 填了可加快"生成结束"判定
+    stop_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
+    # 停止按钮**消失后**，再要求 N 拍无变化才定稿（双确认）：
+    # 否则可能在最后一拍渲染完成前就取文本 → 长回答/表格被截断（实测 Kimi/豆包/GLM）
+    stop_settle_polls: int = 2  # 填了可加快"生成结束"判定
     login_check: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 存在即已登录（空 = 用 input）
     # 反向标记：**可见即视为未登录**；用于「游客态也有输入框」的站点（如豆包），
     # 否则 login_check 回退到 input 会把游客误判成已登录（手动登录命令也会直接退出）。
@@ -171,6 +174,9 @@ class NetworkConfig(BaseModel):
     """
 
     capture: bool = True
+    # 观测型旁听（**不解析内容**）：用 Playwright 的响应事件记录匹配请求的
+    # 状态码 / 响应头时间 / 结束时间。用于判断"卡住"是站点排队限流、长思考，还是流未结束。
+    observe: bool = False
     url_pattern: str | None = None
     grace_seconds: float | None = None
 

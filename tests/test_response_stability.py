@@ -176,3 +176,36 @@ async def test_busy_hint_dismisses_then_resends(monkeypatch):
     assert len(sent) == 1, f"繁忙提示后必须**重发一次**（实际重发 {len(sent)} 次）"
     assert any("答案" in (c.text or "") for c in chunks)
     assert state["gen_after_resend"] is True
+
+
+@pytest.mark.asyncio
+async def test_stop_button_requires_settle_before_done(monkeypatch):
+    """停止按钮消失后必须**再等 N 拍无变化**才定稿（否则最后一拍渲染未完成 → 截断）。"""
+    from ai_web2api.browser import extractor as ex
+    from ai_web2api.providers.webchat import WebChatProvider
+
+    prov = _prov(response_container=[".md"], thinking_container=[], stop_button=["button.stop"],
+                 stop_settle_polls=3)
+    page = _FakePage()
+    polls = {"n": 0}
+    stop_vis = {"n": 0}
+
+    async def fake_count(_p, _sel):
+        return 1
+
+    async def fake_extract(_p, _sel, index=-1):
+        polls["n"] += 1
+        return "答案"
+
+    async def fake_visible(_p, _sel):
+        stop_vis["n"] += 1
+        return stop_vis["n"] <= 1          # 第 1 拍可见，之后消失
+
+    monkeypatch.setattr(ex, "count_matches", fake_count)
+    monkeypatch.setattr(ex, "extract_markdown", fake_extract)
+    monkeypatch.setattr(WebChatProvider, "_is_visible", staticmethod(fake_visible))
+
+    chunks = [c async for c in prov._poll_response_dom(page, {".md": 0}, {})]
+    assert any("答案" in (c.text or "") for c in chunks)
+    # 停止按钮消失后还要稳定 3 拍 → 至少多轮询几次（不是一消失就返回）
+    assert stop_vis["n"] >= 3, f"应在按钮消失后继续确认稳定（_is_visible 只调了 {stop_vis['n']} 次）"

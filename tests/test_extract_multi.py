@@ -111,8 +111,10 @@ def test_kimi_enables_join_mode():
     root = Path(__file__).resolve().parent.parent
     kimi = next(p for p in load_config(root / "config.yaml").providers if p.name == "kimi")
     assert kimi.selectors.response_all_new is True
-    deepseek = next(p for p in load_config(root / "config.yaml").providers if p.name == "deepseek")
-    assert deepseek.selectors.response_all_new is False, "其它 provider 不应改变行为"
+    # 路线 1：**启用的** provider 一律打开拼接（防"多容器回答被截断"）
+    providers = {p.name: p for p in load_config(root / "config.yaml").providers}
+    for name in ("deepseek", "chatgpt", "doubao"):
+        assert providers[name].selectors.response_all_new is True, f"{name} 应打开 response_all_new"
 
 
 def test_join_mode_filters_thinking_blocks(monkeypatch):
