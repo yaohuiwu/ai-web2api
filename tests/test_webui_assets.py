@@ -148,6 +148,9 @@ def test_playground_polish():
     assert "wireMsgActions" in js and "copy-json" in js, "缺少复制/复制 JSON"
     assert "toggleRawPanel" in js and "function curlFor" in js, "缺少原始报文面板/curl 导出"
     assert "threadSearch" in html and "#threadSearch" in js, "缺少会话搜索"
+    assert "admin/threads?" in js, "侧栏搜索应走服务端（否则超出上限搜不到）"
+    assert "setTimeout(refreshThreads, 300)" in js, "侧栏搜索未防抖"
+    assert "会话页" in js, "侧栏未提供会话页入口"
     assert "advToggle" in html and ".toolbar-toggle" in css, "缺少窄屏高级项折叠"
     assert "msg-foot" in css and "#rawPanel" in css
 

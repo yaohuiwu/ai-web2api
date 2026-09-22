@@ -578,26 +578,23 @@ function setupToolsPanel() {
 
 // ---- 左侧会话列表（点击切换 thread，手动刷新）----
 function refreshThreads() {
-  fetch("/admin/threads")
+  const cur = $("#threadId").value.trim();
+  const search = $("#threadSearch");
+  const q = (search ? search.value.trim() : "");
+  // 服务端搜索（此前是在已加载列表里本地过滤 → 超出上限就搜不到）
+  const params = new URLSearchParams({ limit: "50" });
+  if (q) params.set("q", q);
+  fetch(`/admin/threads?${params}`)
     .then((r) => r.json())
     .then((data) => {
-      const cur = $("#threadId").value.trim();
       const list = $("#threadList");
-      const search = $("#threadSearch");
-      const q = (search ? search.value : "").trim().toLowerCase();
-      const items = (data.threads || []).filter(
-        (t) =>
-          !q ||
-          `${t.first_message || ""} ${t.thread_id} ${t.provider || ""} ${t.model || ""}`
-            .toLowerCase()
-            .includes(q)
-      );
+      const items = data.threads || [];
+      const total = data.total ?? items.length;
       list.innerHTML = "";
       if (!items.length) {
-        list.innerHTML =
-          `<div class="thread-item"><div class="empty">${
-            q ? "无匹配会话" : "暂无会话<br>发送消息后会出现在这里（可切换回访）"
-          }</div></div>`;
+        list.innerHTML = `<div class="thread-item"><div class="empty">${
+          q ? "无匹配会话" : "暂无会话<br>发送消息后会出现在这里（可切换回访）"
+        }</div></div>`;
         return;
       }
       for (const t of items) {
@@ -609,6 +606,12 @@ function refreshThreads() {
           `<div class="tid"><span class="tp">${esc(t.provider || "")}</span> ${esc(t.model || "")} · ${relTime(t.updated_at)}</div>`;
         item.onclick = () => switchThread(t.thread_id, t.loaded !== false);
         list.appendChild(item);
+      }
+      if (total > items.length) {
+        const more = document.createElement("div");
+        more.className = "thread-more";
+        more.innerHTML = `仅显示最近 ${items.length} / 共 ${total} 条 · <a href="/ui/threads.html">会话页 →</a>`;
+        list.appendChild(more);
       }
     })
     .catch(() => {});
@@ -673,7 +676,11 @@ $("#refreshThreads").onclick = refreshThreads;
 
 // ---- 工具条「更多」/ 侧栏搜索 / 原始报文 ----
 $("#advToggle").onclick = () => document.querySelector(".toolbar").classList.toggle("expanded");
-$("#threadSearch").addEventListener("input", refreshThreads);
+let threadSearchTimer = null;
+$("#threadSearch").addEventListener("input", () => {
+  clearTimeout(threadSearchTimer);
+  threadSearchTimer = setTimeout(refreshThreads, 300);
+});
 $("#rawBtn").onclick = toggleRawPanel;
 
 function curlFor(entry) {
