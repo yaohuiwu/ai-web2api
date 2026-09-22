@@ -123,3 +123,16 @@ def test_shared_header_footer_and_meta():
     assert ".nav a.active" in base and "footer .f-links" in base
     common = (WEBUI / "assets/js/common.js").read_text(encoding="utf-8")
     assert "function renderFooter" in common and "function toast" in common and "function copyText" in common
+
+
+def test_status_panel_polish():
+    js = (WEBUI / "assets/js/index.js").read_text(encoding="utf-8")
+    assert "function dotClass" in js, "provider 标签状态点未按认证状态着色"
+    assert "auth-bar" in js, "缺少认证有效期进度条"
+    assert "pv-summary" in js, "缺少 provider 摘要行"
+    assert "data-copy" in js, "thread_id 不可复制"
+    assert "playground.html?thread_id=" in js, "缺少「去 Playground 继续」"
+    css = (WEBUI / "assets/css/index.css").read_text(encoding="utf-8")
+    assert ".auth-bar" in css and ".row-actions" in css and ".kpi-top" in css
+    pg = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+    assert "thread_id" in pg and "URLSearchParams" in pg, "Playground 未支持 ?thread_id="

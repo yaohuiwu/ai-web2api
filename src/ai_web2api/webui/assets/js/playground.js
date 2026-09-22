@@ -612,3 +612,11 @@ $("#fileInput").addEventListener("change", (e) => {
 loadModels();
 refreshThreads();
 $("#input").focus();
+
+// 来自状态面板的「继续」链接：/ui/playground.html?thread_id=xxx
+const qsThread = new URLSearchParams(location.search).get("thread_id");
+if (qsThread) {
+  $("#threadId").value = qsThread;
+  $("#threadId").dispatchEvent(new Event("input"));
+  switchThread(qsThread, true);
+}

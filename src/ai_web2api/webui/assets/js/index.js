@@ -19,21 +19,36 @@ async function load() {
 }
 
 function renderKpis(s, t) {
+  const onOff = (v) => (v ? "开" : "关");
   const items = [
-    ["运行时间", fmtUptime(s.uptime_seconds)],
-    ["活跃会话", `${t.active} / ${t.max}`],
-    ["监听", `${s.host}:${s.port}`],
-    ["headless", s.headless ? "是" : "否"],
-    ["thread 持久化", s.thread_persist ? "开" : "关"],
-    ["定时检测", s.status_check ? "开" : "关"],
-    ["API Key", s.api_keys_configured ? "已启用" : "未启用"],
-    ["版本", s.version],
+    ["⏱", "运行时间", fmtUptime(s.uptime_seconds), ""],
+    ["💬", "活跃会话", `${t.active} / ${t.max}`, t.active >= t.max ? "warn" : ""],
+    ["🔌", "监听地址", `${s.host}:${s.port}`, ""],
+    ["🖥", "headless", s.headless ? "是" : "否", s.headless ? "" : "muted"],
+    ["💾", "thread 持久化", onOff(s.thread_persist), s.thread_persist ? "ok" : "muted"],
+    ["🩺", "定时检测", onOff(s.status_check), s.status_check ? "ok" : "muted"],
+    ["🔑", "API Key", s.api_keys_configured ? "已启用" : "未启用", s.api_keys_configured ? "ok" : "muted"],
+    ["🏷", "版本", s.version, ""],
   ];
   $("#kpis").innerHTML = items
-    .map(([k, v]) => `<div class="kpi"><div class="kpi-v">${esc(v)}</div><div class="kpi-k">${esc(k)}</div></div>`)
+    .map(
+      ([icon, k, v, tone]) => `<div class="kpi ${tone}" title="${esc(k)}">
+        <div class="kpi-top"><span class="kpi-i">${icon}</span><span class="kpi-k">${esc(k)}</span></div>
+        <div class="kpi-v">${esc(v)}</div>
+      </div>`
+    )
     .join("");
   $("#serverLine").textContent = `v${s.version} · ${s.host}:${s.port} · 运行 ${fmtUptime(s.uptime_seconds)}`;
   document.querySelectorAll("[data-version]").forEach((el) => (el.textContent = `v${s.version}`));
+}
+
+// 认证有效期的状态 → 状态点颜色（未登录/已过期 = 红，即将过期 = 黄）
+function dotClass(p) {
+  if (!p.logged_in) return "off";
+  const st = p.auth_expiry && p.auth_expiry.state;
+  if (st === "expired") return "off";
+  if (st === "soon") return "warn";
+  return "on";
 }
 
 function renderProviders(providers) {
@@ -41,7 +56,7 @@ function renderProviders(providers) {
   const detail = $("#providerDetail");
   if (!providers.length) {
     tabs.innerHTML = "";
-    detail.innerHTML = `<div class="empty">未配置任何 provider</div>`;
+    detail.innerHTML = `<div class="empty"><span class="big">🔌</span>未配置任何 provider</div>`;
     selectedProvider = null;
     return;
   }
@@ -49,7 +64,7 @@ function renderProviders(providers) {
   tabs.innerHTML = providers
     .map(
       (p) => `<button class="tab ${p.name === selectedProvider ? "active" : ""}" data-name="${esc(p.name)}">
-        <span class="dot ${p.logged_in ? "on" : "off"}"></span>${esc(p.name)}
+        <span class="dot ${dotClass(p)}"></span>${esc(p.name)}
         <span class="tab-sub">${esc(p.default_model || "")}</span>
       </button>`
     )
@@ -60,9 +75,15 @@ function renderProviders(providers) {
 function renderProviderDetail(p) {
   const detail = $("#providerDetail");
   if (!p) { detail.innerHTML = ""; return; }
-  const badge = p.logged_in
-    ? `<span class="badge ok">✓ 已登录</span>`
-    : `<span class="badge no">✗ 未登录</span>`;
+  const badge = !p.logged_in
+    ? `<span class="badge no">✗ 未登录</span>`
+    : (p.auth_expiry && (p.auth_expiry.state === "soon" || p.auth_expiry.state === "expired"))
+      ? `<span class="badge warn">✓ 已登录 · 认证${p.auth_expiry.state === "expired" ? "已过期" : "即将过期"}</span>`
+      : `<span class="badge ok">✓ 已登录</span>`;
+  const threadCount = ((lastData && lastData.threads && lastData.threads.list) || []).filter(
+    (x) => x.provider === p.name
+  ).length;
+  const summary = `${p.models.length} 个模型 · ${Object.keys(p.model_aliases || {}).length} 个别名 · ${threadCount} 个活跃会话`;
   const chips =
     [
       ...p.models.map((m) => `<span class="chip">${esc(m)}</span>`),
@@ -114,6 +135,12 @@ function renderProviderDetail(p) {
     if (ae.login_at_source === "state_file") loginText += " · 按 state.json 推算";
     if (validityDays != null) loginText += ` · 推算有效期约 ${validityDays} 天`;
   }
+  const aeClsExtra = (() => {
+    // 有效期进度条：剩余 / 推算有效期（无推算值时不显示）
+    if (aeState === "unknown" || days == null || !validityDays) return "";
+    const pct = Math.max(0, Math.min(100, Math.round((days / validityDays) * 100)));
+    return `<span class="auth-bar ${esc(aeState)}"><i style="width:${pct}%"></i></span>`;
+  })();
   // 仅手动认证 provider 快过期/已过期时提醒（自动认证无需人工干预）
   const manualWarn = p.login_mode === "manual" && (aeState === "soon" || aeState === "expired");
   const expiryCard = manualWarn
@@ -133,10 +160,11 @@ function renderProviderDetail(p) {
     </div>
     ${notice}
     ${expiryCard}
+    <div class="pv-summary">${esc(summary)}</div>
     <dl class="kv">
       <dt>地址</dt><dd class="mono">${esc(p.url)}</dd>
       <dt>登录模式</dt><dd>${esc(p.login_mode)} · ${p.has_state_file ? "state.json ✓" : "state.json ✗（无持久化登录态）"}</dd>
-      <dt>认证有效期</dt><dd class="auth-${esc(aeState || "unknown")}">${aeText}</dd>
+      <dt>认证有效期</dt><dd class="auth-${esc(aeState || "unknown")}">${aeText}${aeClsExtra}</dd>
       <dt>首次登录</dt><dd class="mono">${loginText}</dd>
       <dt>认证信息更新</dt><dd class="mono">${savedText}</dd>
       <dt>默认模型</dt><dd class="mono">${esc(p.default_model || "—")}</dd>
@@ -185,23 +213,23 @@ function initManualPanel() {
 }
 
 async function actLoginStatus(name) {
-  const btn = event.target; btn.disabled = true;
+  const btn = event.target; btn.disabled = true; btn.classList.add("loading");
   try {
     const r = await api(`/admin/${name}/login/status`);
     toast(`${name}: ${r.logged_in ? "已登录 ✓" : "未登录 ✗"}`);
     await load();
   } catch (e) { toast(`失败: ${e.message}`); }
-  finally { btn.disabled = false; }
+  finally { btn.disabled = false; btn.classList.remove("loading"); }
 }
 
 async function actAutoLogin(name) {
-  const btn = event.target; btn.disabled = true;
+  const btn = event.target; btn.disabled = true; btn.classList.add("loading");
   try {
     const r = await api(`/admin/${name}/login/auto`, { method: "POST" });
     toast(r.already_logged_in ? `${name}: 已登录，无需重复登录` : `${name}: ${r.ok ? "自动登录成功 ✓" : "失败: " + (r.reason || "")}`);
     await load();
   } catch (e) { toast(`失败: ${e.message}`); }
-  finally { btn.disabled = false; }
+  finally { btn.disabled = false; btn.classList.remove("loading"); }
 }
 
 function actManualLogin(name) {
@@ -232,23 +260,23 @@ async function actImportState(name) {
 }
 
 async function actScreenshot(name) {
-  const btn = event.target; btn.disabled = true;
+  const btn = event.target; btn.disabled = true; btn.classList.add("loading");
   try {
     const r = await api(`/admin/${name}/login/screenshot`, { method: "POST" });
     toast(`${name}: ${r.saved ? "已抓取截图" : "截图失败"}`);
     await load();
   } catch (e) { toast(`失败: ${e.message}`); }
-  finally { btn.disabled = false; }
+  finally { btn.disabled = false; btn.classList.remove("loading"); }
 }
 
 async function actLogout(name) {
-  const btn = event.target; btn.disabled = true;
+  const btn = event.target; btn.disabled = true; btn.classList.add("loading");
   try {
     await api(`/admin/${name}/login/logout`, { method: "POST" });
     toast(`${name}: 已退出登录`);
     await load();
   } catch (e) { toast(`失败: ${e.message}`); }
-  finally { btn.disabled = false; }
+  finally { btn.disabled = false; btn.classList.remove("loading"); }
 }
 
 function renderThreads(t) {
@@ -256,7 +284,7 @@ function renderThreads(t) {
   const wrap = $("#threads");
   const list = t.list || [];
   if (!list.length) {
-    wrap.innerHTML = `<div class="empty">当前没有会话（发送消息后会出现在这里，可在 Playground 查看历史）</div>`;
+    wrap.innerHTML = `<div class="empty"><span class="big">💬</span>当前没有会话 —— 在 Playground 发一条消息就会出现在这里</div>`;
     return;
   }
   const pct = Math.min(100, Math.round((t.active / Math.max(1, t.max)) * 100));
@@ -267,17 +295,24 @@ function renderThreads(t) {
         <thead><tr><th>thread_id</th><th>provider</th><th>model</th><th>状态</th><th>URL</th><th></th></tr></thead>
         <tbody>${list.map((s) => `
           <tr>
-            <td class="mono">${esc(s.thread_id)}</td>
-            <td>${esc(s.provider)}</td>
+            <td class="mono">
+              <span title="${esc(s.thread_id)}">${esc(s.thread_id)}</span>
+              <button class="btn sm copy" data-copy="${esc(s.thread_id)}" title="复制 thread_id" aria-label="复制 thread_id">⧉</button>
+            </td>
+            <td><span class="pill">${esc(s.provider)}</span></td>
             <td class="mono">${esc(s.model || "")}</td>
             <td>${s.loaded === false
               ? `<span class="pill">存档</span>`
               : `<span class="pill live">活跃 · ${s.idle_seconds ?? 0}s</span>`}</td>
             <td class="mono" title="${esc(s.page_url || "")}">${esc(s.url_id || "—")}</td>
-            <td><button class="btn danger sm" onclick="killThread('${esc(s.thread_id)}')">销毁</button></td>
+            <td class="row-actions">
+              <a class="btn sm" href="/ui/playground.html?thread_id=${encodeURIComponent(s.thread_id)}" title="在 Playground 继续该会话">继续</a>
+              <button class="btn danger sm" onclick="killThread('${esc(s.thread_id)}')">销毁</button>
+            </td>
           </tr>`).join("")}</tbody>
       </table>
     </div>`;
+  wrap.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => copyText(b.dataset.copy)));
 }
 
 async function killThread(id) {
