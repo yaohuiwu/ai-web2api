@@ -15,6 +15,27 @@
 
 **Web 界面 `/ui/`**：状态面板（登录态 + **认证有效期倒计时**、provider 模型/别名、一键导入登录态）、**Playground**（流式对话、思考面板、附件上传、Function Calling 测试、原始报文 + 复制为 curl、等待响应秒数提示）、**会话页**（搜索 / provider 过滤 / 分页加载更多）。支持亮暗主题与响应式布局。
 
+## 功能特性
+
+- **OpenAI 兼容 API** —— `/v1/chat/completions`（流式 SSE + 非流式）与 `/v1/models`；OpenAI SDK、LangChain / llama_index 及任何 OpenAI 客户端可直接接入，可选 API Key 鉴权
+- **多 provider** —— 开箱即用 DeepSeek 与 ChatGPT，可选 Qwen/通义（见下表）
+- **真实浏览器自动化，不逆向接口** —— Playwright 驱动真实页面（纯 DOM 自动化），Web 改版只需改 `config.yaml` 里的选择器
+- **登录态跨重启保持** —— `storage_state` 持久化、自动登录、一条命令手动登录、UI 导入登录态，以及手动认证 provider 的**认证有效期倒计时 + 到期提醒**
+- **流式输出，思考分离** —— 增量 DOM 提取转成 SSE 增量；模型的思考过程单独放在 `reasoning_content`
+- **会话绑定（`thread_id`）** —— 同一 Web 会话跨请求复用、不同 thread 并行，会话与消息落 SQLite，**多轮记忆跨服务重启保持**
+- **附件 / 图片识别** —— OpenAI 风格的多部分 `content` + `image_url`（data URL 或 http 外链），经页面真实上传
+- **Function Calling** —— 原生 `tools` / `tool_choice`，以 prompt 注入实现，再解析回标准 `tool_calls`（支持流式）
+- **自带 Web 界面** —— 状态面板（登录态、认证有效期、模型/别名、一键导入登录态）、Playground（流式对话、思考面板、附件预览、工具测试、原始报文 + 复制为 curl、等待秒数）与会话页（搜索 / provider 过滤 / 分页）——亮暗主题、响应式布局
+- **Docker 友好** —— 镜像自带 Chromium；`WEB2API_HEADLESS=false` 在 Xvfb 下跑 headful，应对必须"真实显示器"的站点（如 ChatGPT 的 Sentinel）
+
+## 支持的 provider
+
+| Provider | 状态 | 对外模型 | 登录方式 | 说明 |
+|---|---|---|---|---|
+| **DeepSeek** | ✅ **稳定，推荐默认** | `deepseek-web`、`deepseek-r1-web` | `mode: auto`（账号密码）或手动 | 支持 headless。深度思考 / 智能搜索开关、图片附件、Function Calling 均已端到端验证 |
+| **ChatGPT** | ✅ **可用，但必须 headful** | `gpt-5-web`、`gpt-4o-web`、`o3-web` | **仅手动登录**（无密码登录：Google OAuth） | Sentinel 会拦 headless，必须 headful（`WEB2API_HEADLESS=false`，Docker 里靠 Xvfb）。会话 token 约 90 天，登录一次可长期复用 |
+| **Qwen / 通义** | ⚠️ **实验性 —— 不稳定、响应慢、登录容易被墙** | `qwen3.7-plus-web` | `mode: auto` 或手动 | **默认禁用**（`enabled: false`，需要时改 `true`）。站点 UI 改版频繁、选择器易失效，响应明显更慢，登录常被网络/风控拦截（可能需要自备网络环境）——按"能用就用"对待，不建议生产使用 |
+
 ## 快速开始
 
 ### 方式一：Docker Compose（推荐，镜像自带 Chromium）

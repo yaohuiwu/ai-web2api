@@ -39,3 +39,31 @@ def test_readme_documents_login_shortcuts():
     for name in ("README.md", "README.zh-CN.md"):
         body = (ROOT / name).read_text(encoding="utf-8")
         assert "./scripts/login.sh" in body and "ai-web2api login" in body, name
+
+
+def test_readme_features_block_and_provider_table():
+    """开头要有 Feature 块 + provider 支持状态表（Qwen 如实标注不稳定/慢/登录易被墙）。"""
+    cases = {
+        "README.md": {
+            "feature_head": "## Features",
+            "table_head": "## Supported providers",
+            "quick_start": "## Quick start",
+            "tokens": ["DeepSeek", "ChatGPT", "Qwen", "unstable", "slow", "blocked", "enabled: false"],
+        },
+        "README.zh-CN.md": {
+            "feature_head": "## 功能特性",
+            "table_head": "## 支持的 provider",
+            "quick_start": "## 快速开始",
+            "tokens": ["DeepSeek", "ChatGPT", "Qwen", "不稳定", "登录容易被墙", "enabled: false"],
+        },
+    }
+    for name, spec in cases.items():
+        body = (ROOT / name).read_text(encoding="utf-8")
+        for t in spec["tokens"]:
+            assert t in body, f"{name} 缺少 {t!r}"
+        # 三块顺序：Features → providers 表 → Quick start（都在开头）
+        i_f = body.index(spec["feature_head"])
+        i_t = body.index(spec["table_head"])
+        i_q = body.index(spec["quick_start"])
+        assert i_f < i_t < i_q, f"{name} 段落顺序不对（Features={i_f} 表={i_t} QuickStart={i_q}）"
+        assert i_f < 2500, f"{name} 的 Feature 块应位于开头（当前字符偏移 {i_f}）"

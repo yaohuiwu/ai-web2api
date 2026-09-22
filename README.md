@@ -15,6 +15,27 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 
 **Web UI at `/ui/`**: status dashboard (login state + **auth expiry countdown**, per-provider models/aliases, one-click import of login state), **Playground** (chat with streaming, thinking panel, attachment upload, function-calling tester, raw request/response + copy-as-curl, waiting indicator with elapsed seconds), and a **Threads** page (search, provider filter, pagination). Light/dark theme, responsive layout.
 
+## Features
+
+- **OpenAI-compatible API** — `/v1/chat/completions` (streaming SSE + non-streaming) and `/v1/models`; drop-in with the OpenAI SDK, LangChain / llama_index and any OpenAI client, with optional API-key auth
+- **Multiple web providers** — DeepSeek and ChatGPT out of the box, Qwen/Tongyi optional (see the table below)
+- **Real-browser automation, no reverse engineering** — Playwright drives the actual page (pure DOM automation), so a site redesign only means updating selectors in `config.yaml`
+- **Login state that survives restarts** — `storage_state` persistence, automatic login, one-command manual login, state import from the UI, and an **auth-expiry countdown + reminder** for manual providers
+- **Streaming, with thinking** — incremental DOM extraction turned into SSE deltas; the model's thinking comes back separately as `reasoning_content`
+- **Thread binding (`thread_id`)** — reuse one web conversation across requests, run different threads in parallel, and persist threads + messages in SQLite so **multi-turn memory survives service restarts**
+- **Attachments / image understanding** — OpenAI-style multi-part `content` with `image_url` (data URL or http link), uploaded through the page
+- **Function calling** — native `tools` / `tool_choice`, implemented by prompt injection and parsed back into standard `tool_calls` (streaming included)
+- **Built-in web UI** — status dashboard (login state, auth expiry, models/aliases, one-click state import), Playground (streaming chat, thinking panel, attachment preview, tool tester, raw request/response + copy-as-curl, elapsed-time indicator) and a Threads page (search, provider filter, pagination) — light/dark theme, responsive
+- **Docker-ready** — the image ships Chromium; `WEB2API_HEADLESS=false` runs headful under Xvfb for sites that insist on a real display (e.g. ChatGPT's Sentinel)
+
+## Supported providers
+
+| Provider | Status | Exposed models | Login | Notes |
+|---|---|---|---|---|
+| **DeepSeek** | ✅ **Stable — recommended default** | `deepseek-web`, `deepseek-r1-web` | `mode: auto` (username/password) or manual | Works headless. Thinking + smart-search toggles, image attachments and function calling are all verified end to end |
+| **ChatGPT** | ✅ **Works — headful only** | `gpt-5-web`, `gpt-4o-web`, `o3-web` | **manual only** (no password login: Google OAuth) | Sentinel blocks headless, so it must run headful (`WEB2API_HEADLESS=false`, under Xvfb in Docker). The session token lasts ~90 days — log in once and reuse it |
+| **Qwen / Tongyi** | ⚠️ **Experimental — unstable, slow, login easily blocked** | `qwen3.7-plus-web` | `mode: auto` or manual | **Disabled by default** (`enabled: false`; set `true` to try). The site's UI selectors change often, responses are noticeably slower, and login is frequently blocked by network/risk control — treat it as best-effort, not production |
+
 ## Quick start
 
 ### Option 1: Docker Compose (recommended; the image ships Chromium)
