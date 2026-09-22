@@ -150,3 +150,71 @@
 3. 要不要看**弹窗/新标签**？—— 决定是否做 P3/X11（微信扫码、Google OAuth 弹窗属于这一类）。
 4. 安全基线选哪个：**默认关闭 + 必须配 token**（推荐）？还是**只允许 127.0.0.1 访问直播接口**？
 5. 默认参数：**5 fps / JPEG q=50 / 最宽 1280**、暂停按钮、生成中自动降到 1 fps —— 可以吗？
+
+---
+
+# 附录：P1 实施规格（**本次范围：只读"实时看见"**）
+
+> 阶段目标：**能实时看见**当前 provider 的浏览器画面。**不做**输入注入 / WS / X11 抓屏 / 认证。
+
+## P1-1 范围
+
+**做**
+- `GET /admin/{p}/screen.jpg?quality=&clip=` —— 单帧 JPEG（调试/快照）
+- `GET /admin/{p}/stream.mjpg?fps=&quality=&clip=` —— MJPEG 直播（`<img>` 原生）
+- `GET /admin/{p}/screen/state` —— `{available, streaming, viewers, fps, quality, page_url, viewport, busy}`
+- 新页面 `/ui/browser.html`：provider 切换 + 直播 + fps/画质 + 暂停/继续 + 保存当前帧 + 状态行
+- 状态面板 provider 详情加「**查看画面 →**」（深链 `?provider=kimi`）
+- 配置：`server.live_view: true`（总开关）、`server.live_control: false`（预留）、`server.live_fps: 5`、`server.live_quality: 50`
+
+**不做（P2+）**
+- 输入注入（点击/键盘）→ 故 P1 的价值是"看得见"，登录操作仍在真实窗口/宿主进行
+- WebSocket（理由见 §7）、X11 整窗抓屏、认证（按决定；用 §5.4 的非认证缓解）
+
+## P1-2 参数与语义
+
+| 参数 | 取值 | 说明 |
+|---|---|---|
+| `quality` | 1–95，默认 `live_quality`(50) | 越界夹取；实测 q=50≈31KB/帧 |
+| `fps` | 0.2–15，默认 `live_fps`(5) | 直播用；`busy` 时**自动降到 min(fps,1)** |
+| `clip` | `x,y,w,h` 4 个非负整数 | 只拍局部（如对话区），是**唯一的服务端带宽杠杆** |
+
+> **不做服务端缩放**（原设计的 `max_width`）：项目无图像库，为一次"缩图"引入 Pillow 不值当；
+> 带宽用 `quality` + `clip` 控制，显示尺寸交给前端 CSS。
+
+**页面选择顺序**（不主动创建 context/page，避免"看一眼"把浏览器拉起来）：
+1. 该 provider **最近的活跃 thread 页面**（`ThreadSession.page` 且未关闭）
+2. 该 provider 已有 context 的 `pages[-1]`
+3. 都没有 → `503 {"error":{"message":"没有可截图的页面…"}}`
+
+**接口细节**
+- 响应头：`Cache-Control: no-store`；直播额外 `X-Accel-Buffering: no`（防 nginx 缓冲打断 MJPEG）
+- `live_view: false` → 三个接口一律 **403**（含可读错误信息）
+- **每 provider 一个采集循环**，多观众**扇出同一帧**；首个观众的 `fps/quality` 生效并在 `state` 里展示
+- 观众队列容量 **1**（慢消费者丢旧帧，不做积压）
+- 最后一个观众离开 → **5s 宽限后停采集**；无人观看时**零开销**
+
+## P1-3 安全（无认证，按已定）
+
+- 默认 `live_view: true`（开箱可用）+ 服务启动打 WARNING：`直播接口无鉴权：同网段可见浏览器画面`
+- `live_control` 字段**预留**且默认 `false`（P1 无输入通道，写上只为配置形态稳定）
+- UI 画面页顶部常驻黄条：`本接口未鉴权，请勿对外暴露`
+- 审计：开始/结束观看各记一行日志（provider / 观众数）
+- 红线见 §5.4：公网暴露必须自加反代鉴权
+
+## P1-4 验收标准
+
+1. `screen.jpg` 返回 JPEG（`FF D8`）且尺寸=页面视口；`quality=10` 体积明显小于 `quality=90`
+2. `stream.mjpg` 3 秒内 ≥2 帧、boundary 格式正确；关闭页面后 `state.viewers` 归 0 且采集循环停止
+3. `live_view: false` → 三接口 403；无可用页面 → 503 且文案可读
+4. 生成中 `state.busy=true` 且帧率自动降到 1（日志可见），**直播开启时普通 completion 仍成功**
+5. `/ui/browser.html`：能看图、暂停后帧不再增长、切 provider 生效、`?provider=` 深链生效
+6. 页面显示 `page_url` + 视口尺寸 + 观众数；黄条提示存在
+
+## P1-5 提交拆分
+
+| # | 提交 | 内容 |
+|---|---|---|
+| C1 | `feat(live): single-frame screen.jpg + screen/state + config` | 取页/截帧/错误语义/`SerialGate.busy`/访问器 + 单测 |
+| C2 | `feat(live): MJPEG stream with fan-out and auto-stop` | 采集循环/扇出/丢帧/宽限自停 + 单测 |
+| C3 | `ui(live): browser.html live view page + entry + docs` | 页面/nav/入口按钮/README + 静态与 Playwright 验证 |
