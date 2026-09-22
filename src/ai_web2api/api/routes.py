@@ -527,10 +527,26 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
     # ---------------- admin：会话绑定管理 ----------------
 
     @router.get("/admin/threads")
-    async def threads_list():
+    async def threads_list(
+        q: str | None = None,
+        provider: str | None = None,
+        limit: int = 0,
+        offset: int = 0,
+        order: str = "desc",
+    ):
+        """会话列表（过滤/分页/排序）。``limit=0`` = 不限制（兼容旧调用方）。"""
         if threads is None:
-            return {"threads": [], "active": 0, "max": 0}
-        return {"threads": threads.list(), "active": threads.active_count(), "max": threads.max_threads}
+            return {
+                "threads": [], "total": 0, "limit": limit, "offset": offset,
+                "has_more": False, "active": 0, "max": 0,
+            }
+        return threads.page(
+            q=q,
+            provider=provider,
+            limit=max(0, min(limit, 500)),
+            offset=max(0, offset),
+            order="asc" if order == "asc" else "desc",
+        )
 
     @router.delete("/admin/threads/{thread_id}")
     async def threads_delete(thread_id: str):

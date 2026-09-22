@@ -157,6 +157,48 @@ class ThreadManager:
     def active_count(self) -> int:
         return len(self._sessions)
 
+    def page(
+        self,
+        *,
+        q: str | None = None,
+        provider: str | None = None,
+        limit: int = 0,
+        offset: int = 0,
+        order: str = "desc",
+    ) -> dict:
+        """过滤 + 分页 + 排序（供会话独立页）。
+
+        ``limit<=0`` 表示不限制（保持旧调用方行为）。过滤在**合并后的列表**上做：
+        内存活跃会话必须参与合并，SQL 单独分页会漏掉它们；当前量级足够。
+        匹配：``q`` 大小写不敏感，命中 title/thread_id/provider/model 任一。
+        """
+        items = self.list()
+        if provider:
+            items = [d for d in items if (d.get("provider") or "") == provider]
+        needle = (q or "").strip().lower()
+        if needle:
+            def hit(d: dict) -> bool:
+                return needle in " ".join(
+                    str(d.get(k) or "")
+                    for k in ("first_message", "thread_id", "provider", "model")
+                ).lower()
+
+            items = [d for d in items if hit(d)]
+        if order == "asc":
+            items.reverse()  # list() 已按时间倒序
+        total = len(items)
+        offset = max(0, offset)
+        window = items[offset:] if limit <= 0 else items[offset : offset + limit]
+        return {
+            "threads": window,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": (offset + len(window)) < total,
+            "active": self.active_count(),
+            "max": self.max_threads,
+        }
+
     @property
     def max_threads(self) -> int:
         return self._max
