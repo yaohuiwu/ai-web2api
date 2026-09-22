@@ -52,9 +52,9 @@
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/admin/{p}/screen.jpg?quality=50&max_width=1280&clip=…` | **单帧** JPEG（`Cache-Control: no-store`）。P0 前端轮询它即可"近乎实时"，零新依赖 |
-| GET | `/admin/{p}/stream.mjpg?fps=5&quality=50&max_width=1280` | **MJPEG 流**（`multipart/x-mixed-replace; boundary=frame`），`<img src>` 原生支持，无需 JS 解析（P1） |
-| GET | `/admin/{p}/screen/state` | `{available, streaming, fps, viewers, page_url, viewport, active_request, error?}` |
+| GET | `/admin/{p}/screen.jpg?quality=50&clip=…&thread_id=…` | **单帧** JPEG（`Cache-Control: no-store`）。P0 前端轮询它即可"近乎实时"，零新依赖 |
+| GET | `/admin/{p}/stream.mjpg?fps=5&quality=50&clip=…&thread_id=…` | **MJPEG 流**（`multipart/x-mixed-replace; boundary=frame`），`<img src>` 原生支持，无需 JS 解析（P1） |
+| GET | `/admin/{p}/screen/state?thread_id=…` | `{available, shown_thread_id, page_url, viewport, viewers, fps, busy, error?}` |
 | WS | `/admin/{p}/live` | 双向：帧下行 + 输入上行。**P2+ 可选 —— 先不做**，理由见 §8 |
 | POST | `/admin/{p}/screen/input` | 备选（无 WS 也能控制）：`{type:"click|move|wheel|key|text", …}`（P2） |
 
@@ -65,7 +65,11 @@
 - 新模块 `src/ai_web2api/browser/live.py`：
   - **每 provider 一个采集任务**，多观众**扇出**同一帧（不重复截图）；**最后一个观众离开即停**（+ 5s 宽限），无人观看时零开销。
   - 帧参数：默认 `fps=5`、`quality=50`、`max_width=1280`（超出等比缩放）；`clip` 可选（例如只看 `.chat-content-item-assistant`）。
-  - **取页策略**：优先该 provider **正在被自动化使用的那张 page**（`ThreadSession.page` / `login` 页），否则 `context.pages[-1]`；**没有 context 时默认不创建**（避免"看一眼"就把浏览器拉起来）。
+  - **取页策略**（P1 修正）：① `?thread_id=` 指定的会话 → ② 该 provider **最近使用**的会话页面
+    （按 `last_used` 倒序）→ ③ `context.pages[-1]`；**没有 context 时默认不创建**。
+    ⚠ ②必须按"最近使用"排序——**曾按 dict 插入顺序（= 最早创建）取页，导致"正在聊 A，画面却是 B"**；
+    现在画面跟随你正在用的会话，`/ui/browser.html?provider=X&thread_id=Y` 可精确固定（会话页每张卡片有「画面」入口）。
+    多会话并存时，同一 context 里每个会话各有一张 page，因此能精确切换。
   - **与自动化互斥**：截图是只读，但会占 CPU/CDP → 检测到该 provider 有活跃请求时**自动降帧**（5→1 fps）并在 state 里标注，避免拖慢生成。提供 `?fps=0`（暂停）。
   - 失败处理：页面崩/关 → 推一帧占位（提示原因）并结束循环；`state` 里带 `error`。
 - 沿用现有 `BrowserManager`（`get_context` 已是异步+懒加载），**不改**浏览器模型。

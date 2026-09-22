@@ -83,7 +83,7 @@ async def test_serial_gate_busy_flag():
 
 @pytest.mark.asyncio
 async def test_frame_once_without_page_is_none():
-    async def resolver(_name: str):
+    async def resolver(_name: str, _focus=None):
         return None
 
     live = LiveController(resolver)
@@ -95,7 +95,7 @@ async def test_frame_once_without_page_is_none():
 async def test_frame_once_passes_options_to_screenshot():
     page = _StubPage()
 
-    async def resolver(_name: str):
+    async def resolver(_name: str, _focus=None):
         return page
 
     live = LiveController(resolver)
@@ -111,7 +111,7 @@ async def test_fanout_shares_one_capture_per_tick_and_autostops():
     """多观众共享同一帧（扇出），全部离开后自动停。"""
     page = _StubPage()
 
-    async def resolver(_name: str):
+    async def resolver(_name: str, _focus=None):
         return page
 
     live = LiveController(resolver, grace=0.1)
@@ -140,7 +140,7 @@ async def test_busy_downgrades_fps():
     """有请求在跑 → 自动降到 1 fps（避免抢占自动化的 CPU）。"""
     page = _StubPage()
 
-    async def resolver(_name: str):
+    async def resolver(_name: str, _focus=None):
         return page
 
     live = LiveController(resolver, busy_checker=lambda _p: True, grace=0.05)
@@ -158,7 +158,7 @@ async def test_busy_downgrades_fps():
 async def test_stream_stops_when_page_disappears():
     holder: dict = {"page": _StubPage()}
 
-    async def resolver(_name: str):
+    async def resolver(_name: str, _focus=None):
         return holder["page"]
 
     live = LiveController(resolver, grace=0.05)
@@ -254,7 +254,7 @@ def test_stream_mjpg_sends_frames(tmp_path: Path, monkeypatch):
     page = _StubPage()
     monkeypatch.setattr(BrowserManager, "active_context", lambda self, name: _StubCtx(page))
 
-    async def bounded_subscribe(self, provider, opts):
+    async def bounded_subscribe(self, provider, opts, focus=None):
         for _ in range(2):
             yield JPEG
 
@@ -267,3 +267,46 @@ def test_stream_mjpg_sends_frames(tmp_path: Path, monkeypatch):
     body = r.content
     assert body.count(b"--frame\r\nContent-Type: image/jpeg\r\n") == 2
     assert body.count(JPEG) == 2
+
+
+# ---------- 选页：最近使用优先 / focus 精确指定 ----------
+
+
+@pytest.mark.asyncio
+async def test_live_pages_sorted_by_last_used(tmp_path):
+    """关键回归：字典顺序是"最早创建"，会让画面停在你没在用的会话上 → 必须按 last_used 倒序。"""
+    from types import SimpleNamespace
+
+    from ai_web2api.config import ServerConfig
+    from ai_web2api.core.threads import ThreadManager
+
+    tm = ThreadManager(ServerConfig(thread_persist=False), tmp_path)
+    old_page, new_page = _StubPage("https://x/old"), _StubPage("https://x/new")
+    tm._sessions["t-old"] = SimpleNamespace(  # type: ignore[assignment]
+        thread_id="t-old", page=old_page, provider=SimpleNamespace(name="kimi"), last_used=100.0
+    )
+    tm._sessions["t-new"] = SimpleNamespace(  # type: ignore[assignment]
+        thread_id="t-new", page=new_page, provider=SimpleNamespace(name="kimi"), last_used=200.0
+    )
+    pages = tm.live_pages("kimi")
+    assert [tid for tid, _ in pages] == ["t-new", "t-old"], "最近使用的会话必须排最前"
+    assert pages[0][1] is new_page
+    assert tm.live_pages("chatgpt") == []          # 别的 provider 不受影响
+
+
+@pytest.mark.asyncio
+async def test_focus_pins_specific_thread():
+    """focus=thread_id 时画面应切到该会话（即使它不是最近使用的）。"""
+    picked: list[tuple] = []
+
+    async def resolver(name: str, focus=None):
+        picked.append((name, focus))
+        return _StubPage()
+
+    live = LiveController(resolver)
+    await live.frame_once("kimi", FrameOptions(), "auto-abc")
+    assert picked == [("kimi", "auto-abc")]
+    await live.subscribe("kimi", FrameOptions(fps=15), "auto-abc").__anext__()  # 记录 focus
+    assert picked[-1] == ("kimi", "auto-abc")
+    assert live.state("kimi", "auto-abc")["focus"] == "auto-abc"
+    assert live.state("kimi")["focus"] is None     # 默认流与 focus 流互不干扰

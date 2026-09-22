@@ -26,7 +26,7 @@
 - **附件 / 图片识别** —— OpenAI 风格的多部分 `content` + `image_url`（data URL 或 http 外链），经页面真实上传
 - **Function Calling** —— 原生 `tools` / `tool_choice`，以 prompt 注入实现，再解析回标准 `tool_calls`（支持流式）
 - **自带 Web 界面** —— 状态面板（登录态、认证有效期、模型/别名、一键导入登录态）、Playground（流式对话、思考面板、附件预览、工具测试、原始报文 + 复制为 curl、等待秒数）会话页（搜索 / provider 过滤 / 分页）与**实时画面页**（只读直播）——亮暗主题、响应式布局
-- **实时画面（只读）** —— 在 UI 里看该 provider 的真实浏览器界面（`/ui/browser.html`，MJPEG 5fps）；多观众共享同一帧、无人观看自动停、生成中自动降到 1fps。**接口暂不鉴权**，请勿对外暴露（`server.live_view`）
+- **实时画面（只读）** —— 在 UI 里看该 provider 的真实浏览器界面（`/ui/browser.html`，MJPEG 5fps）——**跟随你正在聊的会话**，会话页每张卡片也能直接跳转（`?thread_id=`）；多观众共享同一帧、无人观看自动停、生成中自动降到 1fps。**接口暂不鉴权**，请勿对外暴露（`server.live_view`）
 - **Docker 友好** —— 镜像自带 Chromium；`WEB2API_HEADLESS=false` 在 Xvfb 下跑 headful，应对必须"真实显示器"的站点（如 ChatGPT 的 Sentinel）
 
 ## 支持的 provider

@@ -540,31 +540,44 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
 
     # ---------------- admin：实时画面 Live View（只读，见 docs/LIVE_VIEW.md） ----------------
 
-    async def _live_page(name: str):
-        """选页（**不创建**）：① 活跃 thread 页面 ② 已有 context 的最后一个页面 ③ None。"""
-        if threads is not None:
-            for page in threads.pages_for(name):
-                try:
-                    if not page.is_closed():
-                        return page
-                except Exception:  # noqa: BLE001  页面刚关闭会抛
-                    continue
+    async def _live_page(name: str, focus: str | None = None):
+        """选页（**不创建**），返回 ``(page, thread_id)``。
+
+        顺序：① ``focus`` 指定的会话 → ② 该 provider **最近使用**的会话页面
+        → ③ 已有 context 的最后一个页面 → ④ None。
+
+        ⚠ ②必须按"最近使用"排序：字典顺序是"最早创建"，会让画面停在你没在用的那个会话上。
+        """
+        candidates = threads.live_pages(name) if threads is not None else []
+        if focus:
+            candidates.sort(key=lambda item: item[0] != focus)   # 命中的排最前
+        for thread_id, page in candidates:
+            try:
+                if not page.is_closed():
+                    return page, thread_id
+            except Exception:  # noqa: BLE001  页面刚关闭会抛
+                continue
         ctx = registry.browser.active_context(name)
         if ctx is not None:
             for page in reversed(ctx.pages):
                 try:
                     if not page.is_closed():
-                        return page
+                        return page, None
                 except Exception:  # noqa: BLE001
                     continue
-        return None
+        return None, None
 
     def _live_busy(name: str) -> bool:
         provider = registry.providers().get(name)
         gate = getattr(provider, "gate", None) if provider is not None else None
         return bool(gate is not None and gate.busy)
 
-    live = LiveController(_live_page, busy_checker=_live_busy)
+    async def _live_resolve(name: str, focus: str | None = None):
+        """给 LiveController 用：只要 page（thread_id 由 _live_page 单独提供）。"""
+        page, _tid = await _live_page(name, focus)
+        return page
+
+    live = LiveController(_live_resolve, busy_checker=_live_busy)
 
     def _live_disabled():
         return JSONResponse(
@@ -584,7 +597,12 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         )
 
     @router.get("/admin/{name}/screen.jpg")
-    async def screen_jpg(name: str, quality: int | None = None, clip: str | None = None):
+    async def screen_jpg(
+        name: str,
+        quality: int | None = None,
+        clip: str | None = None,
+        thread_id: str | None = None,
+    ):
         """单帧 JPEG（只读）。``quality`` 1-95、``clip=x,y,w,h`` 可选。"""
         if not registry.config.server.live_view:
             return _live_disabled()
@@ -594,7 +612,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             quality=quality, clip=clip, default_quality=registry.config.server.live_quality
         )
         try:
-            frame = await live.frame_once(name, opts)
+            frame = await live.frame_once(name, opts, thread_id)
         except Exception as exc:  # noqa: BLE001
             return JSONResponse(
                 status_code=503, content={"error": {"message": f"截图失败：{exc}"}}
@@ -612,6 +630,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         fps: float | None = None,
         quality: int | None = None,
         clip: str | None = None,
+        thread_id: str | None = None,
     ):
         """MJPEG 直播（只读）：浏览器 `<img src>` 原生渲染。
 
@@ -621,7 +640,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             return _live_disabled()
         if name not in registry.providers():
             return _live_unknown(name)
-        if await _live_page(name) is None:
+        if (await _live_page(name, thread_id))[0] is None:
             return _live_no_page(name)
         opts = parse_frame_options(
             fps=fps,
@@ -632,7 +651,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         )
 
         async def gen():
-            async for frame in live.subscribe(name, opts):
+            async for frame in live.subscribe(name, opts, thread_id):
                 if await request.is_disconnected():
                     break
                 yield mjpeg_part(frame)
@@ -644,13 +663,13 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         )
 
     @router.get("/admin/{name}/screen/state")
-    async def screen_state(name: str):
-        """直播状态：可用性 / 观众数 / 参数 / 页面信息 / 是否正在生成。"""
+    async def screen_state(name: str, thread_id: str | None = None):
+        """直播状态：可用性 / 观众数 / 参数 / 页面信息 / 是否正在生成 / 当前画面来自哪个会话。"""
         if not registry.config.server.live_view:
             return _live_disabled()
         if name not in registry.providers():
             return _live_unknown(name)
-        page = await _live_page(name)
+        page, shown_thread = await _live_page(name, thread_id)
         page_url = None
         viewport = None
         if page is not None:
@@ -663,10 +682,11 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         return {
             "provider": name,
             "available": page is not None,
+            "shown_thread_id": shown_thread,     # 画面来自哪个会话（None = 非会话页，如登录页）
             "page_url": page_url,
             "viewport": viewport,
             "busy": _live_busy(name),
-            **live.state(name),
+            **live.state(name, thread_id),
         }
 
     # ---------------- admin：会话绑定管理 ----------------

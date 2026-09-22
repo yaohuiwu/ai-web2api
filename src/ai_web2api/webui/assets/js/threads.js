@@ -87,6 +87,7 @@ function card(t) {
     </div>
     <div class="tc-actions">
       <a class="btn sm" href="${href}" title="在 Playground 续用该会话">继续</a>
+      <a class="btn sm" href="/ui/browser.html?provider=${encodeURIComponent(t.provider || "")}&thread_id=${encodeURIComponent(id)}" title="实时查看该会话的浏览器画面">画面</a>
       <button class="btn sm" data-copy="${esc(id)}" title="复制 thread_id" aria-label="复制 thread_id">⧉</button>
       <button class="btn danger sm" data-kill="${esc(id)}" title="销毁（释放浏览器页面，保留历史）">销毁</button>
     </div>

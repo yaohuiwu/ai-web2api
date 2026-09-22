@@ -2,9 +2,18 @@
 let provider = null;
 let paused = false;
 let stateTimer = null;
+// ?thread_id=xxx → 固定看这个会话的页面；不传则跟随"最近使用"的会话
+let pinnedThread = new URLSearchParams(location.search).get("thread_id");
 
 function streamUrl(p) {
-  return `/admin/${encodeURIComponent(p)}/stream.mjpg?fps=${$("#fps").value}&quality=${$("#quality").value}`;
+  const q = new URLSearchParams({ fps: $("#fps").value, quality: $("#quality").value });
+  if (pinnedThread) q.set("thread_id", pinnedThread);
+  return `/admin/${encodeURIComponent(p)}/stream.mjpg?${q}`;
+}
+
+function stateUrl(p) {
+  const q = pinnedThread ? `?thread_id=${encodeURIComponent(pinnedThread)}` : "";
+  return `/admin/${encodeURIComponent(p)}/screen/state${q}`;
 }
 
 function showPlaceholder(text, spinner = false) {
@@ -34,10 +43,13 @@ function stop(reason) {
 
 async function refreshState() {
   try {
-    const st = await api(`/admin/${encodeURIComponent(provider)}/screen/state`);
+    const st = await api(stateUrl(provider));
     const vp = st.viewport ? `${st.viewport.width}×${st.viewport.height}` : "—";
+    const from = st.shown_thread_id
+      ? `会话 <b class="mono">${esc(st.shown_thread_id)}</b>`
+      : "非会话页（登录页等）";
     $("#status").innerHTML =
-      `页面 <span class="mono">${esc(st.page_url || "—")}</span> · 视口 ${vp} · 观众 ${st.viewers}` +
+      `${from} · 视口 ${vp} · 观众 ${st.viewers} · <span class="mono">${esc(st.page_url || "—")}</span>` +
       (st.busy ? ' · <b>⏳ 生成中（自动降帧 1fps）</b>' : "") +
       (st.error ? ` · <span class="err">${esc(st.error)}</span>` : "");
     if (!st.available && !paused) {
@@ -81,6 +93,7 @@ $("#live").addEventListener("load", () => {
 });
 $("#provider").addEventListener("change", (e) => {
   provider = e.target.value;
+  pinnedThread = null;   // 固定的 thread 可能不属于新 provider → 回到"跟随最近使用"
   start();
 });
 for (const id of ["#fps", "#quality"]) {

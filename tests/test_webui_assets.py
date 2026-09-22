@@ -240,3 +240,13 @@ def test_playground_model_switch_unbinds_thread():
     # 切换会话时同步模型 + 提示绑定关系
     assert "switchThread(t.thread_id, t.loaded !== false, t.model)" in js
     assert "该会话绑定模型" in js
+
+
+def test_live_view_follows_active_session():
+    """画面必须能看"你正在聊的那个会话"：MRU 选页 + ?thread_id= 固定 + 显示来源。"""
+    js = (WEBUI / "assets/js/browser.js").read_text(encoding="utf-8")
+    assert "pinnedThread" in js and "thread_id" in js, "未支持 ?thread_id= 固定会话"
+    assert "shown_thread_id" in js, "未显示画面来自哪个会话"
+    assert "pinnedThread = null" in js, "切换 provider 时应解除固定"
+    tj = (WEBUI / "assets/js/threads.js").read_text(encoding="utf-8")
+    assert "browser.html?provider=" in tj and "thread_id=" in tj, "会话页缺「画面」入口"

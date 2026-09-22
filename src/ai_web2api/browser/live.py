@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 MIN_QUALITY, MAX_QUALITY = 1, 95
 MIN_FPS, MAX_FPS = 0.2, 15.0
 
-PageResolver = Callable[[str], Awaitable[Page | None]]
+PageResolver = Callable[[str, str | None], Awaitable[Page | None]]  # (provider, focus thread_id)
 BusyChecker = Callable[[str], bool]
 
 
@@ -106,8 +106,9 @@ async def capture(page: Page, opts: FrameOptions, *, timeout_ms: float = 10_000)
 class _Stream:
     """某 provider 的采集循环状态。"""
 
-    def __init__(self, provider: str, opts: FrameOptions) -> None:
+    def __init__(self, provider: str, opts: FrameOptions, focus: str | None = None) -> None:
         self.provider = provider
+        self.focus = focus
         self.opts = opts
         self.queues: set[asyncio.Queue] = set()
         self.task: asyncio.Task | None = None
@@ -156,35 +157,40 @@ class LiveController:
 
     # ---------- 单帧 ----------
 
-    async def frame_once(self, provider: str, opts: FrameOptions) -> bytes | None:
-        """截一帧；无可用页面返回 None。"""
-        page = await self._resolve(provider)
+    async def frame_once(
+        self, provider: str, opts: FrameOptions, focus: str | None = None
+    ) -> bytes | None:
+        """截一帧；无可用页面返回 None。``focus`` = 指定 thread_id（不传则取最近使用的页面）。"""
+        page = await self._resolve(provider, focus)
         if page is None:
             return None
         return await capture(page, opts)
 
-    async def has_page(self, provider: str) -> bool:
-        return await self._resolve(provider) is not None
+    async def has_page(self, provider: str, focus: str | None = None) -> bool:
+        return await self._resolve(provider, focus) is not None
 
     # ---------- 直播 ----------
 
-    def stream(self, provider: str, opts: FrameOptions) -> _Stream:
-        """取（或创建）该 provider 的采集流；已存在时**沿用首个观众的参数**。"""
-        st = self._streams.get(provider)
+    def stream(self, provider: str, opts: FrameOptions, focus: str | None = None) -> _Stream:
+        """取（或创建）采集流；键为 (provider, focus)。已存在时**沿用首个观众的参数**。"""
+        key = (provider, focus or "")
+        st = self._streams.get(key)
         if st is None or (not st.running and not st.queues):
-            st = _Stream(provider, opts)
-            self._streams[provider] = st
+            st = _Stream(provider, opts, focus)
+            self._streams[key] = st
         return st
 
-    async def subscribe(self, provider: str, opts: FrameOptions) -> AsyncIterator[bytes]:
-        st = self.stream(provider, opts)
+    async def subscribe(
+        self, provider: str, opts: FrameOptions, focus: str | None = None
+    ) -> AsyncIterator[bytes]:
+        st = self.stream(provider, opts, focus)
         queue: asyncio.Queue = asyncio.Queue(maxsize=1)
         st.queues.add(queue)
         if not st.running:
             st.task = asyncio.create_task(self._run(st))
         logger.info(
-            "live: +观众 provider=%s viewers=%d fps=%.1f quality=%d",
-            provider, len(st.queues), st.opts.fps, st.opts.quality,
+            "live: +观众 provider=%s focus=%s viewers=%d fps=%.1f quality=%d",
+            provider, st.focus or "-", len(st.queues), st.opts.fps, st.opts.quality,
         )
         try:
             while True:
@@ -209,7 +215,7 @@ class LiveController:
             while st.queues:
                 fps = min(st.opts.fps, 1.0) if self._busy(st.provider) else st.opts.fps
                 try:
-                    page = await self._resolve(st.provider)
+                    page = await self._resolve(st.provider, st.focus)
                     if page is None:
                         st.error = "没有可截图的页面"
                         break
@@ -233,12 +239,13 @@ class LiveController:
 
     # ---------- 状态 ----------
 
-    def state(self, provider: str) -> dict:
-        st = self._streams.get(provider)
+    def state(self, provider: str, focus: str | None = None) -> dict:
+        st = self._streams.get((provider, focus or ""))
         if st is None:
             return {"streaming": False, "viewers": 0, "fps": None, "quality": None,
-                    "last_frame_ago": None, "error": None}
+                    "last_frame_ago": None, "error": None, "focus": focus}
         return {
+            "focus": st.focus,
             "streaming": st.running and bool(st.queues),
             "viewers": len(st.queues),
             "fps": st.opts.fps,

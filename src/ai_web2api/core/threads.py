@@ -154,13 +154,20 @@ class ThreadManager:
         out.sort(key=lambda d: d.get("updated_at") or d.get("created_at") or 0, reverse=True)
         return out
 
-    def pages_for(self, provider: str) -> list[Page]:
-        """该 provider 活跃会话的页面（供实时画面选页；**不创建**任何页面）。"""
-        return [
-            s.page
+    def live_pages(self, provider: str) -> list[tuple[str, Page]]:
+        """该 provider 活跃会话的 (thread_id, page)，**最近使用在前**（供实时画面选页）。
+
+        ⚠ 必须按 ``last_used`` 排序：字典顺序是"最早创建"，会让画面停在另一个会话上
+        （用户表现：正在聊 A，画面却是 B）。**不创建**任何页面。
+        """
+        sessions = [
+            s
             for s in self._sessions.values()
-            if getattr(s, "page", None) is not None and getattr(s.provider, "name", None) == provider
+            if getattr(s, "page", None) is not None
+            and getattr(s.provider, "name", None) == provider
         ]
+        sessions.sort(key=lambda s: getattr(s, "last_used", 0.0), reverse=True)
+        return [(s.thread_id, s.page) for s in sessions]
 
     def active_count(self) -> int:
         return len(self._sessions)
