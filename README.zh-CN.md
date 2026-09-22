@@ -195,7 +195,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 - Playground（`/ui/playground.html`）左侧会话列表来自该库：点会话即从 `GET /admin/threads/{id}/messages` 回填历史；输入框回车在输入法（IME）组词时不会误发送
 - **会话页 `/ui/threads.html`**：卡片列表（标题、最新在上）、**文本搜索**（title / thread_id / provider / model）、provider 过滤、每页 20/50/100、**加载更多**，以及「继续（Playground）/ 复制 ID / 销毁」。后端 `GET /admin/threads?q=&provider=&limit=&offset=&order=` 返回 `total` / `has_more`；`limit=0`（默认）仍返回全部，旧调用方不受影响
 - Playground 侧栏搜索也走**服务端**（300ms 防抖）；超出加载上限时提示并提供会话页入口
-- 同一 thread 切换 model 会报 409（创建时绑定 provider+model）
+- 同一 thread 切换 model 会报 409（创建时绑定 provider+model）；**Playground 会自动解绑**该会话并改为新会话（不再报错）
 - 页面忙（上一请求未完成，新消息被 Web 端排队）→ 20s 内返回 409 `thread_busy` 并销毁会话（配置 `thread_busy_timeout`），客户端稍后重试即自动重建；上一请求未释放（客户端中断）→ 60s 内返回 504 `thread_timeout` 并销毁。请求均**有界**，不会无限挂起
 - **跨重启持久化**（`server.thread_persist: true`，默认开）：会话元数据与消息历史统一落盘到 SQLite（`profiles/threads.db`）——每次请求完成后写入本轮 user/assistant（含思考），并记录绑定页的 DeepSeek 会话 id（URL 末段 `/a/chat/s/<uuid>`）。服务重启后，同 `thread_id` 的请求会自动 `goto` 该会话 URL 恢复——**多轮记忆跨重启保持**（DeepSeek 不删用户会话）。TTL 空闲回收/服务关闭**保留**；`DELETE /admin/threads/{id}`、页面失效/超时/忙错误**删除**（含历史，下次同 id 开全新会话）。恢复时切换 model 同样 409。旧版 `profiles/<provider>/threads.json` 在启动时自动迁移进库并删除
 

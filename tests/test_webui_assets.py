@@ -229,3 +229,14 @@ def test_live_view_page():
         assert "/ui/browser.html" in (WEBUI / name).read_text(encoding="utf-8"), name
     idx = (WEBUI / "assets/js/index.js").read_text(encoding="utf-8")
     assert "/ui/browser.html?provider=" in idx, "provider 详情缺「查看画面」入口"
+
+
+def test_playground_model_switch_unbinds_thread():
+    """换模型：自动解绑已绑定会话（否则服务端 409 thread_mismatch）——用户可感知的修复。"""
+    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+    assert "let boundThreadModel" in js
+    assert "function applyThreadModel" in js
+    assert 'boundThreadModel' in js and '已自动改为新会话' in js
+    # 切换会话时同步模型 + 提示绑定关系
+    assert "switchThread(t.thread_id, t.loaded !== false, t.model)" in js
+    assert "该会话绑定模型" in js

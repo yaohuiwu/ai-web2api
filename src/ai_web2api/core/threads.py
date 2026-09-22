@@ -320,8 +320,21 @@ class ThreadManager:
                     if restore_url is None:
                         raise RuntimeError("session_url 模板未配置")
                     await page.goto(restore_url, wait_until="domcontentloaded", timeout=30000)
-                    await page.wait_for_timeout(2000)  # SPA 渲染会话页
-                    sel = await extractor.first_match(page, provider.cfg.selectors.input)
+                    # SPA 渲染会话页需要时间（ChatGPT 实测 >2s）：**等输入框出现**而不是死等固定时长，
+                    # 否则会把"还没渲染完"误判为"恢复失败"→ 退回新会话（用户表现为"没接着聊"）。
+                    sel = await extractor.wait_first_match(
+                        page, provider.cfg.selectors.input, timeout=20.0
+                    )
+                    if sel is None:
+                        # 有些站点首帧不完整（导航被 SPA 接管）→ reload 再等一次
+                        logger.info("thread %s restore: input not ready, reloading once", thread_id)
+                        try:
+                            await page.reload(wait_until="domcontentloaded", timeout=30000)
+                        except Exception:  # noqa: BLE001
+                            pass
+                        sel = await extractor.wait_first_match(
+                            page, provider.cfg.selectors.input, timeout=10.0
+                        )
                     if sel is not None:
                         logger.info(
                             "thread %s restored from url_id=%s (model=%s)",

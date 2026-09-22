@@ -604,7 +604,7 @@ function refreshThreads() {
         item.innerHTML =
           `<div class="tt">${esc(title)}${t.loaded === false ? ' <span class="arch">存档</span>' : ""}</div>` +
           `<div class="tid"><span class="tp">${esc(t.provider || "")}</span> ${esc(t.model || "")} · ${relTime(t.updated_at)}</div>`;
-        item.onclick = () => switchThread(t.thread_id, t.loaded !== false);
+        item.onclick = () => switchThread(t.thread_id, t.loaded !== false, t.model);
         list.appendChild(item);
       }
       if (total > items.length) {
@@ -613,8 +613,9 @@ function refreshThreads() {
         more.innerHTML = `仅显示最近 ${items.length} / 共 ${total} 条 · <a href="/ui/threads.html">会话页 →</a>`;
         list.appendChild(more);
       }
+      return items;   // 返回列表（深链/绑定提示要用）
     })
-    .catch(() => {});
+    .catch(() => []);
 }
 
 function historyAtts(m) {
@@ -637,7 +638,19 @@ function renderHistory(msgs) {
   }
 }
 
-async function switchThread(tid, loaded = true) {
+// 当前会话绑定的模型（同一 thread 不能换模型；换了就自动解绑成新会话）
+let boundThreadModel = null;
+
+function applyThreadModel(tid, model) {
+  boundThreadModel = model || null;
+  if (!model) return;
+  const sel = $("#model");
+  if ([...sel.options].some((o) => o.value === model) && sel.value !== model) sel.value = model;
+  addMeta(`该会话绑定模型 ${model} · 续用只发最后一条；换模型会自动改为新会话`);
+}
+
+async function switchThread(tid, loaded = true, model = null) {
+  applyThreadModel(tid, model);
   if (streaming) return;
   const el = $("#threadId");
   el.value = tid;
@@ -673,6 +686,17 @@ function newChat() {
 
 $("#newChat").onclick = newChat;
 $("#refreshThreads").onclick = refreshThreads;
+
+// 换模型：若当前挂着绑定会话，自动解绑（否则服务端会 409 thread_mismatch）
+$("#model").addEventListener("change", () => {
+  const tid = $("#threadId").value.trim();
+  const picked = $("#model").value;
+  if (!tid || !boundThreadModel || picked === boundThreadModel) return;
+  $("#threadId").value = "";
+  $("#threadId").dispatchEvent(new Event("input"));
+  addMeta(`已切换到 ${picked}：会话 ${tid} 绑定的是 ${boundThreadModel}，已自动改为新会话（同一会话不能换模型）`);
+  boundThreadModel = null;
+});
 
 // ---- 工具条「更多」/ 侧栏搜索 / 原始报文 ----
 $("#advToggle").onclick = () => document.querySelector(".toolbar").classList.toggle("expanded");
@@ -735,5 +759,8 @@ const qsThread = new URLSearchParams(location.search).get("thread_id");
 if (qsThread) {
   $("#threadId").value = qsThread;
   $("#threadId").dispatchEvent(new Event("input"));
-  switchThread(qsThread, true);
+  refreshThreads().then((items) => {
+    const t = (items || []).find((x) => x.thread_id === qsThread);
+    switchThread(qsThread, t ? t.loaded !== false : true, t ? t.model : null);
+  });
 }
