@@ -1,6 +1,8 @@
 # UI 打磨 + 手动登录易用性（设计，待 review）
 
-> 状态：**待 review**（未实现）。目标：① 让 `/ui` 看起来像一个正经开源项目；② 让手动登录的命令更好用。
+> 状态：**已实现**（A0–A4 + B1–B3；B3 按 review 结论**不区分本机/Docker**，单一命令 + 自动带 `--import-url`）。
+> 提交：`d357ebd`(A0) `0b16877`(A1) `7c10d82`(A2) `24299c5`(A3) `918b564`(A4) `1697320`(B1) `f6da398`(B2) `0cd9a32`(B3)。
+> 目标：① 让 `/ui` 看起来像一个正经开源项目；② 让手动登录的命令更好用。
 > 约束：**只动静态资产 + CLI**，不改 OpenAI 兼容行为；每个阶段独立可验证、可回滚。
 
 ## 0. 现状盘点
@@ -109,10 +111,18 @@
 | 7 | `scripts: login.sh + README 一行命令` | B2 |
 | 8 | `ui: login tabs (local/docker/paste)` | B3 |
 
-## 待确认
+## 结论（review 已定）
 
-1. **UI 范围**：全做（1–5），还是先做 1–3（基础+状态面板）？
-2. **暗色主题**要不要（开源项目标配，成本中等）？
-3. **Quickstart（curl/SDK 片段）**要不要？
-4. 手动登录：接受新增 console script `ai-web2api` + `scripts/login.sh` 吗？
-5. UI 里要不要区分「本机 / Docker」两套登录命令（B3）？
+1. **UI 范围**：全做（A0–A4）。
+2. **暗色主题**：要 —— 已实现 `tokens.css` + `theme.js`（跟随系统 + 手动切换 + localStorage）。
+3. **Quickstart**：要 —— 已实现 `#quickstart` 面板（curl / Python / Node 片段，按 `location.origin` 生成）。
+4. **console script + 脚本**：接受 —— `ai-web2api` 已声明并实测；`scripts/login.sh` 已提供。
+5. **本机/Docker 两套命令**：**不需要** —— 改为**单一命令 + 自动带 `--import-url <当前 origin>`**，
+   并在文案里说明「Docker 请在宿主执行」（`scripts/login.sh` 已自动处理导入地址）。
+
+### 实现要点补充
+- 色值**只允许**出现在 `tokens.css`（有测试 `test_no_hardcoded_colors_outside_tokens` 兜底）。
+- Playground 支持 `?thread_id=xxx`（状态面板「继续」直接跳转续用会话）。
+- 原始报文抽屉（`rawLog` 此前只存不展示）：展示最近 5 条 + 「复制为 curl」。
+- 消息底部信息行：角色 / 时间 / **首字延迟 + 总耗时** / 复制 / 复制 JSON。
+- 窄屏：高级选项折叠（`⚙ 更多`）、侧栏收窄、气泡变宽。
