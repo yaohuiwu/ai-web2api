@@ -111,6 +111,11 @@ _MD_JS = r"""
       return;
     }
     if (tag === "img") { pushImg(node, list); return; }
+    if (tag === "iframe") {   // 交互组件（如 Kimi 的 kimi-canvas 地图/小部件）→ 至少给出入口
+      const src = node.getAttribute("src") || "";
+      if (src) list.push("\n[🧩 交互组件](" + src + ")\n");
+      return;
+    }
     if (["strong","b"].includes(tag)) { list.push("**" + node.textContent + "**"); return; }
     if (["em","i"].includes(tag)) { list.push("*" + node.textContent + "*"); return; }
     if (tag === "a") { list.push("[" + node.textContent + "](" + node.href + ")"); return; }
@@ -181,6 +186,24 @@ async def extract_markdown(page: Page, selector: str | None, index: int | None =
     return await page.evaluate(f"({_MD_JS})({json.dumps(selector)}, {index if index is not None else -1})")
 
 
+async def extract_markdown_parts(page: Page, selector: str | None, start: int) -> list[str]:
+    """从第 ``start`` 个匹配元素起，逐个提取（**不去重、不过滤**），供调用方自行筛选。
+
+    典型用途：拼接多容器回答时，按内容剔除"其实是思考"的块。
+    """
+    if not selector:
+        return []
+    count = await count_matches(page, selector)
+    if count <= 0:
+        return []
+    parts: list[str] = []
+    for i in range(max(0, min(start, count)), count):
+        text = (await extract_markdown(page, selector, i)).strip()
+        if text:
+            parts.append(text)
+    return parts
+
+
 async def extract_markdown_from(page: Page, selector: str | None, start: int) -> str:
     """从第 ``start`` 个匹配元素起，把**后面的全部**依次提取并拼接（空行分隔）。
 
@@ -190,12 +213,8 @@ async def extract_markdown_from(page: Page, selector: str | None, start: int) ->
     """
     if not selector:
         return ""
-    count = await count_matches(page, selector)
-    if count <= 0:
-        return ""
     parts: list[str] = []
-    for i in range(max(0, min(start, count)), count):
-        text = (await extract_markdown(page, selector, i)).strip()
-        if text and (not parts or parts[-1] != text):
+    for text in await extract_markdown_parts(page, selector, start):
+        if not parts or parts[-1] != text:      # 去重（容器重渲染兜底）
             parts.append(text)
     return "\n\n".join(parts)

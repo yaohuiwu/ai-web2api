@@ -92,6 +92,11 @@ class BrowserManager:
             return locale or "zh-CN"
         return f"{locale},{base};q=0.9"
 
+    @property
+    def profiles_dir(self) -> Path:
+        """登录态/历史/组件等持久化根目录（只读用途）。"""
+        return self._profiles_dir
+
     def state_path(self, provider: str) -> Path:
         return self._profiles_dir / provider / "state.json"
 

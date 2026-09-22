@@ -23,6 +23,7 @@ from ..browser import extractor
 from ..browser.live import MJPEG_BOUNDARY, LiveController, capture, mjpeg_part, parse_frame_options
 from ..core.auth_expiry import compute_for_state_file
 from ..core.repo_info import repo_info
+from ..core.widgets import WidgetStore
 from ..core.errors import (
     ProviderError,
     RateLimitedError,
@@ -117,6 +118,7 @@ async def _stream_fc(
     thinking: str | None,
     tool_calls: list[dict] | None,
     finish: str,
+    widgets: list[dict] | None = None,
 ):
     """Function Calling 的流式输出：先缓冲后发（工具场景无法边流边发）。
 
@@ -236,7 +238,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                     await tm.persist(thread_id)
                     await tm.save_turn(
                         thread_id, provider.name, resolved, user_text, content, thinking,
-                        _history_attachments(attachments),
+                        _history_attachments(attachments), provider.take_widgets(),
                     )
                 except asyncio.TimeoutError:
                     await tm.close(thread_id)
@@ -253,12 +255,16 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                     parse_tool_response(content, req.tools) if req.tools else (content, None, "stop")
                 )
                 return StreamingResponse(
-                    _stream_fc(chat_id, model, thread_id, c, thinking, calls, finish),
+                    _stream_fc(
+                        chat_id, model, thread_id, c, thinking, calls, finish,
+                        provider.take_widgets(),
+                    ),
                     media_type="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
                 )
 
             if req.stream:
+                sink: dict = {}
 
                 async def _gen():
                     # 同一 thread 串行（session.lock）：页面只有一个输入框
@@ -280,6 +286,9 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                             yield chunk
                         await tm.persist(thread_id)  # 正常完成 → 落盘会话 URL id（重启可恢复）
                         # 历史入库（best-effort，内部已捕获异常，不影响流式响应）
+                        widgets = provider.take_widgets()
+                        if widgets and sink is not None:
+                            sink["widgets"] = widgets
                         await tm.save_turn(
                             thread_id,
                             provider.name,
@@ -288,12 +297,13 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                             "".join(content_parts),
                             "".join(thinking_parts) or None,
                             _history_attachments(attachments),
+                            widgets,
                         )
                     finally:
                         session.lock.release()
 
                 return StreamingResponse(
-                    _stream_thread_completions(_gen(), chat_id, model, thread_id, tm),
+                    _stream_thread_completions(_gen(), chat_id, model, thread_id, tm, sink),
                     media_type="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
                 )
@@ -308,7 +318,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 # 历史入库（best-effort）
                 await tm.save_turn(
                     thread_id, provider.name, resolved, user_text, content, thinking,
-                    _history_attachments(attachments),
+                    _history_attachments(attachments), provider.take_widgets(),
                 )
             except asyncio.TimeoutError:
                 await tm.close(thread_id)  # 销毁：页面关闭强制打断挂起的 Playwright 调用
@@ -321,12 +331,14 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             except ThreadBusyError:
                 await tm.close(thread_id)  # 页面忙（上一请求未完成）→ 销毁，客户端可重建
                 raise
-            message = ResponseMessage(content=content, reasoning_content=thinking)
+            widgets = provider.take_widgets()
+            message = ResponseMessage(content=content, reasoning_content=thinking, widgets=widgets or None)
             finish = "stop"
             if fc_active and req.tools:
                 content, calls, finish = parse_tool_response(content, req.tools)
                 message = ResponseMessage(
-                    content=content, reasoning_content=thinking, tool_calls=calls
+                    content=content, reasoning_content=thinking, tool_calls=calls,
+                    widgets=widgets or None,
                 )
             return ChatCompletionResponse(
                 id=chat_id,
@@ -420,18 +432,23 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             # 流中途失败：记录并结束流（客户端看到截断，日志里有原因）
             logger.error("stream error for %s: %s", model, e.message)
             return
+        widgets = provider.take_widgets()
+        tail = {"widgets": widgets} if widgets else {}
         yield _sse(
             {
                 "id": chat_id,
                 "object": "chat.completion.chunk",
                 "created": created,
                 "model": model,
+                **tail,
                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
             }
         )
         yield "data: [DONE]\n\n"
 
-    async def _stream_thread_completions(agen, chat_id, model, thread_id, threads: ThreadManager | None):
+    async def _stream_thread_completions(
+        agen, chat_id, model, thread_id, threads: ThreadManager | None, sink: dict | None = None
+    ):
         """会话绑定模式的 SSE：与 _stream_completions 相同，另回显 thread_id，
         流中途页面失效（ThreadExpiredError）时销毁会话并结束流。"""
         created = int(time.time())
@@ -459,7 +476,9 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             yield _sse({**meta, "choices": [{"index": 0, "delta": {"content": f"\n\n[错误] {e.message}"}, "finish_reason": None}]})
             yield "data: [DONE]\n\n"
             return
-        yield _sse({**meta, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+        widgets = (sink or {}).get("widgets") or []
+        tail = {"widgets": widgets} if widgets else {}
+        yield _sse({**meta, **tail, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
         yield "data: [DONE]\n\n"
 
     # ---------------- admin：系统状态 ----------------
@@ -594,6 +613,43 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         return JSONResponse(
             status_code=503,
             content={"error": {"message": f"没有可截图的页面（{name} 当前未打开任何页面）"}},
+        )
+
+    _widgets_store_holder: dict = {}
+
+    def _widgets_store() -> WidgetStore:
+        """懒创建：只有真正访问组件文件接口时才依赖 ``registry.config``。"""
+        store = _widgets_store_holder.get("store")
+        if store is None:
+            store = WidgetStore(registry.config.profiles_dir)
+            _widgets_store_holder["store"] = store
+        return store
+
+    @router.get("/admin/{name}/widgets/{widget_id}.png")
+    async def widget_png(name: str, widget_id: str):
+        """交互组件截图（保真兜底）。"""
+        path = _widgets_store().path(name, widget_id, "png")
+        if path is None:
+            return JSONResponse(status_code=404, content={"error": {"message": "组件不存在"}})
+        return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+    @router.get("/admin/{name}/widgets/{widget_id}.html")
+    async def widget_html(name: str, widget_id: str):
+        """交互组件 HTML（含内联脚本）。
+
+        ⚠ 直接打开会在**同源**下执行组件脚本 → 用 CSP `sandbox` 强制降级为不透明源
+        （只允许脚本，不允许访问宿主页面/DOM），Playground 侧另有 iframe sandbox。
+        """
+        path = _widgets_store().path(name, widget_id, "html")
+        if path is None:
+            return JSONResponse(status_code=404, content={"error": {"message": "组件不存在"}})
+        return Response(
+            content=path.read_bytes(),
+            media_type="text/html; charset=utf-8",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Security-Policy": "sandbox allow-scripts",
+            },
         )
 
     @router.post("/admin/{name}/dismiss")

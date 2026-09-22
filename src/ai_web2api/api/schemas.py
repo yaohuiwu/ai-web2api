@@ -167,9 +167,12 @@ class ChatCompletionRequest(BaseModel):
 
 
 class ResponseMessage(BaseModel):
+    """非标准扩展：``reasoning_content`` = 思考过程，``widgets`` = 交互组件（iframe）元数据。"""
+
     role: str = "assistant"
     content: str | None = None
     reasoning_content: str | None = None
+    widgets: list[dict] | None = None
     tool_calls: list[ToolCallOut] | None = None
 
 

@@ -75,6 +75,9 @@ class BaseProvider(abc.ABC):
         self.name = cfg.name  # 覆盖类属性：同一驱动类可服务多个 provider 实例（context/登录态按名字隔离）
         self.browser = browser
         self.gate = SerialGate(cfg.queue.max_size, cfg.queue.timeout)
+        # 本轮捕获的交互组件（iframe widget）元数据；每轮发送前清空，路由 take_widgets() 取走
+        self._widgets: list[dict] = []
+        self._widget_store_obj = None
 
     # ---------- 对外接口 ----------
 

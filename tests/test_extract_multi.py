@@ -83,12 +83,12 @@ async def test_provider_picks_join_mode_by_config(monkeypatch):
         seen.append("single")
         return "single"
 
-    async def joined(page, sel, start):
+    async def joined_parts(page, sel, start):
         seen.append("joined")
-        return "joined"
+        return ["joined"]
 
     monkeypatch.setattr(extractor, "extract_markdown", single)
-    monkeypatch.setattr(extractor, "extract_markdown_from", joined)
+    monkeypatch.setattr(extractor, "extract_markdown_parts", joined_parts)
 
     def _prov(**sel):
         cfg = ProviderConfig.model_validate(
@@ -113,3 +113,127 @@ def test_kimi_enables_join_mode():
     assert kimi.selectors.response_all_new is True
     deepseek = next(p for p in load_config(root / "config.yaml").providers if p.name == "deepseek")
     assert deepseek.selectors.response_all_new is False, "其它 provider 不应改变行为"
+
+
+def test_join_mode_filters_thinking_blocks(monkeypatch):
+    """拼接多容器时，按**内容**剔除"其实是思考"的块（下标错位也能挡住）。"""
+    import asyncio
+
+    from ai_web2api.config import ProviderConfig
+    from ai_web2api.providers.webchat import WebChatProvider
+
+    class _StubBrowser:
+        default_locale = "zh-CN"
+
+    cfg = ProviderConfig.model_validate(
+        {
+            "name": "kimi",
+            "url": "https://www.kimi.com/",
+            "models": [{"name": "kimi-web"}],
+            "selectors": {"response_all_new": True},
+        }
+    )
+    prov = WebChatProvider(cfg, _StubBrowser())  # type: ignore[arg-type]
+
+    async def parts(_page, _sel, _start):
+        return [
+            'The user says "再给生成一次". I will call showwidget again.',   # = 思考，应剔除
+            "路线数据已确认。现在把这套环线做成可交互的地图规划。",               # 过程性文本，保留
+            "已重新生成，内容与上一版一致：点 Day 1-4 标签切换每日行程。",          # 正文
+        ]
+
+    monkeypatch.setattr(extractor, "extract_markdown_parts", parts)
+    thinking = 'The user says "再给生成一次". I will call showwidget again. I will render it again.'
+    out = asyncio.run(prov._extract_content(None, ".md", 0, thinking))
+    assert "The user says" not in out, out
+    assert "已重新生成" in out and "路线数据已确认" in out
+
+
+def test_looks_like_thinking_helper():
+    from ai_web2api.providers.webchat import WebChatProvider
+
+    think = "我们需要先确认目的地和天数，再给出路线。"
+    assert WebChatProvider._looks_like_thinking(think, think) is True
+    assert WebChatProvider._looks_like_thinking("我们需要先确认目的地", think) is True   # 子串
+    assert WebChatProvider._looks_like_thinking("已重新生成，内容与上一版一致", think) is False
+    assert WebChatProvider._looks_like_thinking("任意正文", "") is False
+
+
+# ---------- 交互组件（iframe）：中间结果不能完全丢 ----------
+
+
+class _BodyLoc:
+    def __init__(self, text, fail=False):
+        self._text = text
+        self._fail = fail
+
+    async def inner_text(self, timeout=0):
+        if self._fail:
+            raise RuntimeError("frame detached")
+        return self._text
+
+
+class _Frame:
+    def __init__(self, url, text="", fail=False):
+        self.url = url
+        self._loc = _BodyLoc(text, fail)
+
+    def locator(self, _sel):
+        return self._loc
+
+
+class _FramePage:
+    def __init__(self, frames):
+        self.frames = frames
+
+
+def _kimi_prov(**selectors):
+    from ai_web2api.config import ProviderConfig
+    from ai_web2api.providers.webchat import WebChatProvider
+
+    class _StubBrowser:
+        default_locale = "zh-CN"
+
+    cfg = ProviderConfig.model_validate(
+        {
+            "name": "kimi",
+            "url": "https://www.kimi.com/",
+            "models": [{"name": "kimi-web"}],
+            "selectors": selectors,
+        }
+    )
+    return WebChatProvider(cfg, _StubBrowser())  # type: ignore[arg-type]
+
+
+def test_frame_results_adds_new_widget():
+    """本轮新出现的 iframe（Kimi 地图组件）→ 链接 + 可见文本。"""
+    import asyncio
+
+    prov = _kimi_prov(include_frames=True)
+    page = _FramePage(
+        [
+            _Frame("https://old.kimi-canvas.com/", "旧组件"),          # 发送前就有 → 跳过
+            _Frame("https://new.kimi-canvas.com/", "Day1 洛阳 Day2 登封"),
+            _Frame("about:blank"),
+        ]
+    )
+    out = asyncio.run(prov._frame_results(page, {"https://old.kimi-canvas.com/"}))
+    assert "new.kimi-canvas.com" in out and "Day1 洛阳" in out
+    assert "旧组件" not in out
+
+
+def test_frame_results_disabled_by_default():
+    import asyncio
+
+    prov = _kimi_prov()
+    page = _FramePage([_Frame("https://x.kimi-canvas.com/", "内容")])
+    assert asyncio.run(prov._frame_results(page, set())) == ""
+
+
+def test_frame_results_tolerates_text_failure():
+    import asyncio
+
+    prov = _kimi_prov(include_frames=True)
+    page = _FramePage([_Frame("https://y.kimi-canvas.com/", fail=True)])
+    out = asyncio.run(prov._frame_results(page, set()))
+    assert "y.kimi-canvas.com" in out, "读不到文本也要给出链接"

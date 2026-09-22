@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS messages (
     content    TEXT NOT NULL DEFAULT '',
     reasoning  TEXT,
     attachments TEXT,
+    widgets TEXT,
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, id);
@@ -71,6 +72,9 @@ class ThreadStore:
         if "attachments" not in cols:
             self._conn.execute("ALTER TABLE messages ADD COLUMN attachments TEXT")
             logger.info("thread store migrated: messages.attachments added")
+        if "widgets" not in cols:
+            self._conn.execute("ALTER TABLE messages ADD COLUMN widgets TEXT")
+            logger.info("thread store migrated: messages.widgets added")
 
     # ---------- 生命周期 ----------
 
@@ -160,6 +164,7 @@ class ThreadStore:
         for e in entries:
             role, content, reasoning = e[0], e[1], e[2]
             atts = e[3] if len(e) > 3 else None
+            wgs = e[4] if len(e) > 4 else None
             rows.append(
                 (
                     thread_id,
@@ -167,13 +172,14 @@ class ThreadStore:
                     content or "",
                     reasoning,
                     json.dumps(atts, ensure_ascii=False) if atts else None,
+                    json.dumps(wgs, ensure_ascii=False) if wgs else None,
                     now,
                 )
             )
         with self._lock:
             self._conn.executemany(
-                "INSERT INTO messages (thread_id, role, content, reasoning, attachments, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO messages (thread_id, role, content, reasoning, attachments, widgets, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
             self._conn.commit()
@@ -183,20 +189,21 @@ class ThreadStore:
         """按写入顺序（自增 id 升序）返回某会话的全部消息（含附件）。"""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT role, content, reasoning, attachments, created_at FROM messages "
+                "SELECT role, content, reasoning, attachments, widgets, created_at FROM messages "
                 "WHERE thread_id = ? ORDER BY id",
                 (thread_id,),
             ).fetchall()
         out: list[dict] = []
         for r in rows:
             d = dict(r)
-            if d.get("attachments"):
-                try:
-                    d["attachments"] = json.loads(d["attachments"])
-                except Exception:  # noqa: BLE001
-                    d["attachments"] = None
-            else:
-                d["attachments"] = None
+            for key in ("attachments", "widgets"):
+                if d.get(key):
+                    try:
+                        d[key] = json.loads(d[key])
+                    except Exception:  # noqa: BLE001
+                        d[key] = None
+                else:
+                    d[key] = None
             out.append(d)
         return out
 

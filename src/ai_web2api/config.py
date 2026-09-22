@@ -84,6 +84,12 @@ class SelectorsConfig(BaseModel):
     dismiss_button: list[str] = Field(default_factory=list)
     # 出现 = 站点在提示繁忙/排队/限制：用于给出明确错误，而不是干等超时
     busy_hint: list[str] = Field(default_factory=list)
+    # 把本轮**新出现的 iframe**（交互组件/小部件，如 Kimi 的 kimi-canvas 地图）
+    # 作为「链接 + 可见文本」附到正文末尾（跨域 frame 也能读；默认关）
+    include_frames: bool = False
+    # 交互组件（iframe）捕获：none(默认) | png | html | both ——
+    # html 仍进 Playground 的 sandbox iframe（可交互），png 作保真兜底
+    widget_capture: Literal["none", "png", "html", "both"] = "none"
     response_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = [".ds-markdown"]
     thinking_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
     stop_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 填了可加快"生成结束"判定

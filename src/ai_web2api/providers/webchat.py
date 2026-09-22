@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from typing import AsyncIterator, Literal
@@ -77,6 +78,7 @@ class WebChatProvider(BaseProvider):
 
     # 下拉菜单 option 出现的等待上限（秒）
     MENU_OPTION_TIMEOUT: float = 5.0
+
 
     # ---------- 主流程 ----------
 
@@ -161,8 +163,11 @@ class WebChatProvider(BaseProvider):
                     )
             logger.info("[%s] prompt sent, polling", self.name)
 
+            self._widgets = []                                    # 每轮重置组件捕获
+            frames_before = {f.url for f in page.frames if f.url}
             async for chunk in self._poll_response(
-                page, md_before, th_before, busy_timeout, input_sel=input_sel, prompt=prompt
+                page, md_before, th_before, busy_timeout,
+                input_sel=input_sel, prompt=prompt, frames_before=frames_before,
             ):
                 yield chunk
         finally:
@@ -785,11 +790,13 @@ XMLHttpRequest.prototype.send = function (body) {{
         *,
         input_sel: str | None = None,
         prompt: str | None = None,
+        frames_before: set[str] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """双轨读取：网络监听为主，通道失效自动降级 DOM 轮询。"""
         if not self.net_enabled:
             async for chunk in self._poll_response_dom(
-                page, md_before, th_before, busy_timeout, input_sel=input_sel, prompt=prompt
+                page, md_before, th_before, busy_timeout,
+                input_sel=input_sel, prompt=prompt, frames_before=frames_before,
             ):
                 yield chunk
             return
@@ -813,7 +820,8 @@ XMLHttpRequest.prototype.send = function (body) {{
                     self.name, e,
                 )
         async for chunk in self._poll_response_dom(
-            page, md_before, th_before, busy_timeout, input_sel=input_sel, prompt=prompt
+            page, md_before, th_before, busy_timeout,
+            input_sel=input_sel, prompt=prompt, frames_before=frames_before,
         ):
             yield chunk
 
@@ -869,10 +877,10 @@ XMLHttpRequest.prototype.send = function (body) {{
                 # 兜底：超时前再取一次 —— 页面上往往**已经生成完了**（实测：画面上答案在，
                 # 我们却报 180s 超时）。有内容就返回，别把它丢掉；真的空才报错。
                 try:
-                    final = await self._extract_content(page, md_sel, md_idx)
                     final_th = (
                         await self._extract_thinking(page, th_sel, th_idx) if th_sel else ""
                     )
+                    final = await self._extract_content(page, md_sel, md_idx, final_th)
                 except Exception:  # noqa: BLE001
                     final, final_th = "", ""
                 if final.strip() or final_th.strip():
@@ -949,6 +957,7 @@ XMLHttpRequest.prototype.send = function (body) {{
         *,
         input_sel: str | None = None,
         prompt: str | None = None,
+        frames_before: set[str] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """DOM 兜底路径：增量 diff 响应文本，产出 StreamChunk（thinking 与 content 分开）。
 
@@ -1051,8 +1060,8 @@ XMLHttpRequest.prototype.send = function (body) {{
                 if found:
                     th_sel, th_idx = found, th_before[found]
 
-            md_text = await self._extract_content(page, md_sel, md_idx)
             th_text = await self._extract_thinking(page, th_sel, th_idx) if th_sel else ""
+            md_text = await self._extract_content(page, md_sel, md_idx, th_text)
 
             # ⚠ content 与 thinking 分别算稳定：
             # 思考区常有"正在思考中 Ns"这类**持续跳动**的文本，若共用一个计数器，
@@ -1109,11 +1118,19 @@ XMLHttpRequest.prototype.send = function (body) {{
                     # 收尾兜底：结束判定可能比最后一帧渲染早一拍 → 再等一拍重取一次，取更长的
                     await page.wait_for_timeout(poll_ms + 200)
                     try:
-                        final = await self._extract_content(page, md_sel, md_idx)
+                        final = await self._extract_content(
+                            page, md_sel, md_idx, last["thinking"]
+                        )
                     except Exception:  # noqa: BLE001
                         final = ""
                     if final and len(final) > len(last["content"]):
                         last["content"] = final
+                    self._widgets.extend(
+                        await self._capture_widgets(page, frames_before or set())
+                    )
+                    extra = await self._frame_results(page, frames_before or set())
+                    if extra:
+                        last["content"] = (last["content"] + "\n\n" + extra).strip()
                     if last["content"]:
                         yield StreamChunk("content", last["content"])
                     elif not last["thinking"]:
@@ -1127,13 +1144,114 @@ XMLHttpRequest.prototype.send = function (body) {{
 
             await page.wait_for_timeout(poll_ms)
 
-    async def _extract_content(self, page: Page, sel: str | None, idx: int | None) -> str:
-        """正文提取：按配置决定"只取该下标"还是"从该下标起全部拼接"。"""
+    @staticmethod
+    def _looks_like_thinking(part: str, thinking: str) -> bool:
+        """该块是否"其实就是思考"（拼接时按内容兜底剔除）。"""
+        p, t = part.strip(), (thinking or "").strip()
+        if not t or not p:
+            return False
+        if p == t or p in t or t in p:
+            return True
+        # 长块取前 40 字比对（提取出来的思考可能被裁剪/重排）
+        head = p[:40]
+        return bool(head) and head in t
+
+    def _widget_store(self):
+        """懒创建组件存储（写 ``profiles/<provider>/widgets/``）。"""
+        if self._widget_store_obj is None:
+            from ..core.widgets import WidgetStore
+
+            self._widget_store_obj = WidgetStore(self.browser.profiles_dir)
+        return self._widget_store_obj
+
+    async def _capture_widgets(self, page: Page, before: set[str]) -> list[dict]:
+        """把本轮**新出现**的 iframe 组件抓下来（HTML / 截图，按配置）。
+
+        返回元数据列表（含 id），由调用方（路由）放进 ``widgets`` 字段与历史。
+        """
+        mode = getattr(self.cfg.selectors, "widget_capture", "none")
+        if mode == "none":
+            return []
+        try:
+            frames = [f for f in page.frames if (f.url or "") and f.url not in before
+                      and not (f.url or "").startswith("about:")]
+        except Exception:  # noqa: BLE001
+            return []
+        store = self._widget_store()
+        out: list[dict] = []
+        for frame in frames:
+            html_bytes = png_bytes = None
+            try:
+                if mode in ("html", "both"):
+                    html_bytes = (await frame.content()).encode("utf-8", "replace")
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                if mode in ("png", "both"):
+                    png_bytes = await frame.locator("body").screenshot(type="png")
+            except Exception:  # noqa: BLE001
+                pass
+            meta = store.save(self.name, html=html_bytes, png=png_bytes)
+            if meta:
+                out.append(meta)
+        return out
+
+    def take_widgets(self) -> list[dict]:
+        """取走本轮捕获的组件元数据（取后清空，路由用）。"""
+        out = list(self._widgets)
+        self._widgets = []
+        return out
+
+    async def _frame_results(self, page: Page, before: set[str]) -> str:
+        """本轮**新出现**的 iframe（交互组件/小部件）→ ``[🧩 交互组件](url)`` + 可见文本。
+
+        Kimi 的「地图规划」这类结果渲染在跨域 iframe（``*.kimi-canvas.com``）里，
+        主文档 DOM 提取看不到内容；用 Playwright 的 frame 能读到（默认关闭，配置开）。
+        """
+        if not getattr(self.cfg.selectors, "include_frames", False):
+            return ""
+        try:
+            frames = list(page.frames)
+        except Exception:  # noqa: BLE001
+            return ""
+        blocks: list[str] = []
+        for frame in frames:
+            url = (frame.url or "").strip()
+            if not url or url in before or url.startswith("about:"):
+                continue
+            text = ""
+            try:
+                text = (await frame.locator("body").inner_text(timeout=2000) or "").strip()
+            except Exception:  # noqa: BLE001
+                pass
+            text = re.sub(r"\n{3,}", "\n\n", text)[:1500]
+            block = f"[🧩 交互组件]({url})"
+            if text:
+                block += "\n\n" + text
+            blocks.append(block)
+        if blocks:
+            logger.info("[%s] 附上 %d 个交互组件（iframe）内容", self.name, len(blocks))
+        return "\n\n".join(blocks)
+
+    async def _extract_content(
+        self, page: Page, sel: str | None, idx: int | None, thinking: str = ""
+    ) -> str:
+        """正文提取：按配置决定"只取该下标"还是"从该下标起全部拼接"。
+
+        ``response_all_new`` 时按**内容**剔除思考块：Kimi 的思考容器类名/成员会变，
+        只靠 CSS ``:not()`` + 下标会错位，把 thinking 拼进正文（实测）。
+        """
         if not sel or idx is None:
             return ""
-        if getattr(self.cfg.selectors, "response_all_new", False):
-            return await extractor.extract_markdown_from(page, sel, idx)
-        return await extractor.extract_markdown(page, sel, idx)
+        if not getattr(self.cfg.selectors, "response_all_new", False):
+            return await extractor.extract_markdown(page, sel, idx)
+        parts = await extractor.extract_markdown_parts(page, sel, idx)
+        parts = [p for p in parts if not self._looks_like_thinking(p, thinking)]
+        out: list[str] = []
+        for part in parts:
+            if not out or out[-1] != part:
+                out.append(part)
+        return "\n\n".join(out)
 
     @staticmethod
     async def _find_new(page: Page, before: dict[str, int]) -> str | None:
