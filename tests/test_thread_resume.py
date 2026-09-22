@@ -44,6 +44,7 @@ class _Provider:
 
     name = "chatgpt"
     session_url_pattern = r"/c/([0-9a-zA-Z-]{8,})"
+    restore_timeout = 20.0   # 与 BaseProvider 默认一致（恢复时等输入框的超时上限）
     locale = "en-US"
 
     def __init__(self) -> None:
@@ -97,7 +98,8 @@ async def test_restore_waits_for_input(tmp_path: Path, monkeypatch):
 
     assert restored is True and provider.new_pages == 0
     assert page.goto_calls == ["https://chatgpt.com/c/68fe1234-aaaa-bbbb"]
-    assert calls and calls[0][2] >= 10, "必须给 SPA 足够的渲染时间（不能再是固定 2s）"
+    assert calls and calls[0][2] == 20.0, "应是超时上限（不是固定等待）：默认 20s"
+    assert calls[0][2] >= 10, "必须给 SPA 足够的渲染时间（不能再是固定 2s）"
 
 
 @pytest.mark.asyncio
@@ -107,8 +109,10 @@ async def test_restore_reloads_once_then_falls_back(tmp_path: Path, monkeypatch)
 
     provider = _Provider()
     results = [None, None]
+    calls: list[tuple] = []
 
     async def fake_wait(page, selectors, timeout=15.0, poll=0.3):
+        calls.append(("wait", selectors, timeout))
         return results.pop(0) if results else None
 
     monkeypatch.setattr(extractor, "wait_first_match", fake_wait)
@@ -116,6 +120,7 @@ async def test_restore_reloads_once_then_falls_back(tmp_path: Path, monkeypatch)
 
     assert restored is False and provider.new_pages == 1
     assert provider.opened[0].reloads == 1, "应重载一次再试"
+    assert [c[2] for c in calls] == [20.0, 10.0], "首次 20s、重载后减半 10s（都是超时上限）"
     assert provider.opened[0].closed is True, "失败页面要关掉，避免泄漏"
 
 

@@ -63,6 +63,10 @@ class BaseProvider(abc.ABC):
     # /a/chat/s/<uuid>）。None = 该 provider 不支持会话恢复（不落盘）。
     session_url_pattern: str | None = None
 
+    # thread 恢复时等"输入框就绪"的上限（秒）：SPA 渲染慢的站点（ChatGPT 实测 >2s）需要留足；
+    # 这只是**超时上限**（每 0.3s 轮询，命中即返回），不是固定等待。超时后 reload 再等一半时长。
+    restore_timeout: float = 20.0
+
     # 自动登录重试之间的等待（秒）；测试可置 0
     LOGIN_RETRY_DELAY: float = 1.5
 

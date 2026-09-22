@@ -303,6 +303,7 @@ class ThreadManager:
         返回 (page, restored)。恢复成功 = resume 语义（页面自带完整历史）。
         """
         if self._persist and provider.session_url_pattern:
+            started = time.monotonic()   # 恢复耗时（日志里给出，便于判断是否逼近超时）
             entry = self._entry(thread_id)
             if entry:
                 if entry["model"] is not None and entry["model"] != model:
@@ -323,7 +324,7 @@ class ThreadManager:
                     # SPA 渲染会话页需要时间（ChatGPT 实测 >2s）：**等输入框出现**而不是死等固定时长，
                     # 否则会把"还没渲染完"误判为"恢复失败"→ 退回新会话（用户表现为"没接着聊"）。
                     sel = await extractor.wait_first_match(
-                        page, provider.cfg.selectors.input, timeout=20.0
+                        page, provider.cfg.selectors.input, timeout=provider.restore_timeout
                     )
                     if sel is None:
                         # 有些站点首帧不完整（导航被 SPA 接管）→ reload 再等一次
@@ -333,17 +334,17 @@ class ThreadManager:
                         except Exception:  # noqa: BLE001
                             pass
                         sel = await extractor.wait_first_match(
-                            page, provider.cfg.selectors.input, timeout=10.0
+                            page, provider.cfg.selectors.input, timeout=provider.restore_timeout / 2
                         )
                     if sel is not None:
                         logger.info(
-                            "thread %s restored from url_id=%s (model=%s)",
-                            thread_id, entry["url_id"], model,
+                            "thread %s restored from url_id=%s (model=%s, %.1fs)",
+                            thread_id, entry["url_id"], model, time.monotonic() - started,
                         )
                         return page, True
                     logger.warning(
-                        "thread %s restore: page not chat-ready (url=%s), fallback to new page",
-                        thread_id, page.url,
+                        "thread %s restore: page not chat-ready after %.1fs (url=%s), fallback to new page",
+                        thread_id, time.monotonic() - started, page.url,
                     )
                 except Exception:
                     logger.warning(
