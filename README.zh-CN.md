@@ -30,6 +30,7 @@
 |---|---|---|---|---|
 | **DeepSeek** | ✅ **稳定，推荐默认** | `deepseek-web`、`deepseek-r1-web` | `mode: auto`（账号密码）或手动 | 支持 headless。深度思考 / 智能搜索开关、图片附件、Function Calling 均已端到端验证 |
 | **ChatGPT** | ✅ **可用，但必须 headful** | `gpt-5-web`、`gpt-4o-web`、`o3-web` | **仅手动登录**（无密码登录：Google OAuth） | Sentinel 会拦 headless，必须 headful（`WEB2API_HEADLESS=false`，Docker 里靠 Xvfb）。会话 token 约 90 天，登录一次可长期复用 |
+| **Gemini** | ✅ **可用 —— 游客态，无需登录** | `gemini-web` | 游客态（Google 登录可选） | 已端到端验证（15.8s）。输入框是 Quill 编辑器，正文用 `.model-response-text` 抓取（用户侧是 `<user-query>`，不会被误当回答）；免费额度用尽后站点会**降级为 Flash-Lite 且仍可免费聊** —— 抓取与模型无关，我们无需特殊处理（[`docs/PROVIDER_GEMINI.md`](docs/PROVIDER_GEMINI.md)） |
 | **豆包 Doubao** | ✅ **可用 —— 需手动登录** | `doubao-web` | **仅手动**（手机号验证码/扫码，无密码登录） | 已端到端验证（14.7s）并通过文本保真度回归（3/3 用例、覆盖率 1.00）。正文用**区分角色**的选择器（`.md-box-root` 也匹配用户提问）；被拆成多个容器的回答会**拼接**（`response_all_new`）+ **缓冲发送**（`stream_content: false`）。游客态也有输入框 → 登录态靠**反向标记**判定（[`docs/PROVIDER_DOUBAO.md`](docs/PROVIDER_DOUBAO.md)） |
 | **智谱清言 GLM** | ⚠️ **默认禁用 —— 阿里云 WAF 拦自动化** | `glm-web` | **仅手动**（手机号验证码/扫码） | chatglm.cn 前置**阿里云 WAF 滑块**，headless 与 headful 自动化都被拦；且票据实测**仅约 30 分钟**，之后必须**人工再过一次**滑块，无法无人值守（**账号并未被登出**，登录 cookie 有效期 30 天）。选择器已校准、在这个时间窗内可用；需要时临时启用，长期请改用**智谱开放平台官方 API**（[`docs/PROVIDER_GLM.md`](docs/PROVIDER_GLM.md)） |
 | **Kimi** | ✅ **可用 —— 需手动登录** | `kimi-web` | **仅手动**（微信扫码 / 手机号 + 验证码，带易盾验证码） | 已端到端验证：输入、发送、正文提取（思考单独分离）、附件、会话复用（thread 恢复）。正文为**缓冲发送**（思考与正文同处一段），站点无停止按钮 → 靠稳定性判定结束。登录态在 localStorage → 用 `login.auth_local_storage: ["refresh_token"]` 解 JWT 的 `exp`，面板显示约 90 天并在到期前提醒 |
