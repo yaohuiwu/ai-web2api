@@ -11,7 +11,7 @@ Turn **web-only AI chat products** (DeepSeek, Kimi, Qwen/Tongyi, ChatGPT, …) i
 
 How it works: Playwright drives a real browser — opens the page, keeps the session alive, types the message, incrementally extracts the streaming answer — and exposes it as OpenAI's `/v1/chat/completions`. No internal API reverse-engineering: pure DOM automation, so when a site changes you only update selectors in the config.
 
-> Design docs: [`docs/DESIGN.md`](docs/DESIGN.md) (§3 covers provider extension points); Qwen in [`docs/PROVIDER_QWEN.md`](docs/PROVIDER_QWEN.md); ChatGPT in [`docs/PROVIDER_CHATGPT.md`](docs/PROVIDER_CHATGPT.md); auth expiry in [`docs/AUTH_EXPIRY.md`](docs/AUTH_EXPIRY.md). **DeepSeek / ChatGPT are enabled by default** (Qwen is wired up but `enabled: false`; turn it on when needed).
+> Design docs: [`docs/DESIGN.md`](docs/DESIGN.md) (§3 covers provider extension points); Qwen in [`docs/PROVIDER_QWEN.md`](docs/PROVIDER_QWEN.md); ChatGPT in [`docs/PROVIDER_CHATGPT.md`](docs/PROVIDER_CHATGPT.md); Kimi in [`docs/PROVIDER_KIMI.md`](docs/PROVIDER_KIMI.md); auth expiry in [`docs/AUTH_EXPIRY.md`](docs/AUTH_EXPIRY.md). **DeepSeek / ChatGPT are enabled by default** (Qwen is wired up but `enabled: false`; turn it on when needed).
 
 **Web UI at `/ui/`**: status dashboard (login state + **auth expiry countdown**, per-provider models/aliases, one-click import of login state), **Playground** (chat with streaming, thinking panel, attachment upload, function-calling tester, raw request/response + copy-as-curl, waiting indicator with elapsed seconds), and a **Threads** page (search, provider filter, pagination). Light/dark theme, responsive layout.
 
@@ -34,6 +34,7 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 |---|---|---|---|---|
 | **DeepSeek** | ✅ **Stable — recommended default** | `deepseek-web`, `deepseek-r1-web` | `mode: auto` (username/password) or manual | Works headless. Thinking + smart-search toggles, image attachments and function calling are all verified end to end |
 | **ChatGPT** | ✅ **Works — headful only** | `gpt-5-web`, `gpt-4o-web`, `o3-web` | **manual only** (no password login: Google OAuth) | Sentinel blocks headless, so it must run headful (`WEB2API_HEADLESS=false`, under Xvfb in Docker). The session token lasts ~90 days — log in once and reuse it |
+| **Kimi** | 🧪 **Scaffold — disabled by default, selectors need calibration** | `kimi-web` | **manual only** (WeChat QR / phone + SMS code, with a captcha) | Composer, send button and attachment input are measured and verified; the assistant-message container still has to be calibrated after login (`docs/PROVIDER_KIMI.md`). Guest typing works without login, so `login_check` needs tuning too |
 | **Qwen / Tongyi** | ⚠️ **Experimental — unstable, slow, login easily blocked** | `qwen3.7-plus-web` | `mode: auto` or manual | **Disabled by default** (`enabled: false`; set `true` to try). The site's UI selectors change often, responses are noticeably slower, and login is frequently blocked by network/risk control — treat it as best-effort, not production |
 
 ## Quick start

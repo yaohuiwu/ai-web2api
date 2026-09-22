@@ -11,7 +11,7 @@
 
 核心机制：Playwright 驱动真实浏览器 —— 打开网页、保持登录态、输入消息、增量提取流式响应，再以 OpenAI 的 `/v1/chat/completions` 格式暴露出去。不逆向任何内部 API，纯 DOM 自动化，Web 改版只需改配置里的选择器。
 
-> 设计文档见 [`docs/DESIGN.md`](docs/DESIGN.md)（§3 是 Provider 扩展点）；Qwen 接入见 [`docs/PROVIDER_QWEN.md`](docs/PROVIDER_QWEN.md)、ChatGPT 见 [`docs/PROVIDER_CHATGPT.md`](docs/PROVIDER_CHATGPT.md)。当前默认启用 **DeepSeek / ChatGPT**（Qwen 已接入但默认 `enabled: false`，按需开启）。
+> 设计文档见 [`docs/DESIGN.md`](docs/DESIGN.md)（§3 是 Provider 扩展点）；Qwen 接入见 [`docs/PROVIDER_QWEN.md`](docs/PROVIDER_QWEN.md)、ChatGPT 见 [`docs/PROVIDER_CHATGPT.md`](docs/PROVIDER_CHATGPT.md)、Kimi 见 [`docs/PROVIDER_KIMI.md`](docs/PROVIDER_KIMI.md)。当前默认启用 **DeepSeek / ChatGPT**（Qwen 已接入但默认 `enabled: false`，按需开启）。
 
 **Web 界面 `/ui/`**：状态面板（登录态 + **认证有效期倒计时**、provider 模型/别名、一键导入登录态）、**Playground**（流式对话、思考面板、附件上传、Function Calling 测试、原始报文 + 复制为 curl、等待响应秒数提示）、**会话页**（搜索 / provider 过滤 / 分页加载更多）。支持亮暗主题与响应式布局。
 
@@ -34,6 +34,7 @@
 |---|---|---|---|---|
 | **DeepSeek** | ✅ **稳定，推荐默认** | `deepseek-web`、`deepseek-r1-web` | `mode: auto`（账号密码）或手动 | 支持 headless。深度思考 / 智能搜索开关、图片附件、Function Calling 均已端到端验证 |
 | **ChatGPT** | ✅ **可用，但必须 headful** | `gpt-5-web`、`gpt-4o-web`、`o3-web` | **仅手动登录**（无密码登录：Google OAuth） | Sentinel 会拦 headless，必须 headful（`WEB2API_HEADLESS=false`，Docker 里靠 Xvfb）。会话 token 约 90 天，登录一次可长期复用 |
+| **Kimi** | 🧪 **脚手架 —— 默认禁用，选择器待校准** | `kimi-web` | **仅手动**（微信扫码 / 手机号 + 验证码，带易盾验证码） | 输入框、发送按钮、附件入口已实测；**助手正文容器需登录后校准**（见 `docs/PROVIDER_KIMI.md`）。未登录也能输入，故 `login_check` 也需校准 |
 | **Qwen / 通义** | ⚠️ **实验性 —— 不稳定、响应慢、登录容易被墙** | `qwen3.7-plus-web` | `mode: auto` 或手动 | **默认禁用**（`enabled: false`，需要时改 `true`）。站点 UI 改版频繁、选择器易失效，响应明显更慢，登录常被网络/风控拦截（可能需要自备网络环境）——按"能用就用"对待，不建议生产使用 |
 
 ## 快速开始

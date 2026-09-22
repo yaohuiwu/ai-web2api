@@ -11,6 +11,7 @@ from ..config import AppConfig
 from ..core.errors import ModelNotFoundError
 from .base import BaseProvider, first_match, wait_first_match
 from .chatgpt import ChatGPTProvider
+from .kimi import KimiProvider
 from .deepseek import DeepSeekProvider
 from .qwen import QwenProvider
 
@@ -21,6 +22,7 @@ DRIVERS: dict[str, type[BaseProvider]] = {
     "deepseek": DeepSeekProvider,
     "qwen": QwenProvider,
     "chatgpt": ChatGPTProvider,
+    "kimi": KimiProvider,
 }
 
 # 常见 OpenAI 模型名（llama_index 等客户端默认使用）→ 自动映射到首选 provider 的默认模型。

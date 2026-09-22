@@ -242,3 +242,40 @@ providers:
     stable_polls: 30
     min_wait_before_stable: 15.0
     thread_busy_timeout: 0
+
+  # Kimi（kimi.com）：脚手架就绪但**默认禁用** —— response_container / login_check 待登录后实测校准
+  # 登录只有「微信扫码」/「手机号 + 验证码」（带易盾验证码）→ 只能手动登录
+  kimi:
+    enabled: false
+    driver: kimi
+    url: https://www.kimi.com/
+    locale: zh-CN               # Kimi 为中文 UI
+    models:
+      - {name: kimi-web, ui_label: "Kimi"}
+    selectors:
+      input:                    # 实测：contenteditable，逐字输入可被 React 受理
+        - ".chat-input-editor"
+        - "div[contenteditable='true']"
+      type_prompt: true
+      send_button:              # 实测（输入后才出现）
+        - ".send-button-container"
+      response_container:       # ⚠ 待实测（见 docs/PROVIDER_KIMI.md 的校准步骤）
+        - ".message-list .markdown"
+        - ".message-list-container .markdown"
+      thinking_container: []
+      stop_button: []           # ⚠ 待实测
+      login_check:              # ⚠ 待实测：未登录也能输入，必须校准否则误判为已登录
+        - ".user-area__main img"
+      upload_input:
+        - "input.hidden-input[type='file']"
+        - "input[type=file]"
+      new_chat_button:          # ⚠ 待实测
+        - "[class*='new-chat']"
+    login:
+      mode: manual
+      hint: "Kimi 仅支持微信扫码 / 手机号+验证码（易盾验证码）→ 用 python -m ai_web2api.cli login kimi 或 /ui 导入 state"
+    queue: {max_size: 10, timeout: 60}
+    response_timeout: 180
+    poll_interval: 0.2
+    stable_polls: 20
+    min_wait_before_stable: 8.0
