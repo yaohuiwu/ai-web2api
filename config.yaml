@@ -267,6 +267,8 @@ providers:
       type_prompt: true
       stream_content: false     # 思考与正文同处一段 → 缓冲后一次发，避免把"思考已完成…"当正文
       response_all_new: true    # 一次回答可能被拆成"工具前 + 工具后"多条消息 → 新容器全部拼接
+      include_frames: true      # 地图/小部件在跨域 iframe 里 → 附上链接与可见文本
+      widget_capture: both      # 组件捕获：html(可交互) + png(截图兜底)，见 docs/WIDGET_CAPTURE.md
       dismiss_button:           # 弹窗遮挡输入 → 出现即点掉（实测：繁忙排队的「我知道了」）
         - 'button[data-testid="confirm-dialog-cancel"]'
       busy_hint:                # 出现 = 站点在排队/限制 → 给明确错误（而不是干等）
