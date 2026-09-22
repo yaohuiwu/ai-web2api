@@ -250,3 +250,11 @@ def test_live_view_follows_active_session():
     assert "pinnedThread = null" in js, "切换 provider 时应解除固定"
     tj = (WEBUI / "assets/js/threads.js").read_text(encoding="utf-8")
     assert "browser.html?provider=" in tj and "thread_id=" in tj, "会话页缺「画面」入口"
+
+
+def test_live_view_dismiss_button():
+    """画面页可手工关闭弹窗（弹窗遮住输入时用）。"""
+    html = (WEBUI / "browser.html").read_text(encoding="utf-8")
+    js = (WEBUI / "assets/js/browser.js").read_text(encoding="utf-8")
+    assert 'id="dismiss"' in html
+    assert "/dismiss" in js and "关闭弹窗" in html

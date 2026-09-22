@@ -102,6 +102,16 @@ for (const id of ["#fps", "#quality"]) {
   });
 }
 $("#pause").onclick = () => (paused ? start() : stop("已暂停（服务端会在宽限期后停止采集）"));
+$("#dismiss").onclick = async () => {
+  if (!provider) return;
+  try {
+    const q = pinnedThread ? `?thread_id=${encodeURIComponent(pinnedThread)}` : "";
+    const r = await api(`/admin/${encodeURIComponent(provider)}/dismiss${q}`, { method: "POST" });
+    toast(r.dismissed && r.dismissed.length ? `已关闭 ${r.dismissed.length} 个弹窗` : "没有发现可关闭的弹窗");
+  } catch (e) {
+    toast(`失败: ${e.message}`);
+  }
+};
 $("#save").onclick = async () => {
   if (!provider) return;
   try {
