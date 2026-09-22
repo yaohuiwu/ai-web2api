@@ -417,7 +417,7 @@ providers:
         - 'img[alt*="个人资料"]'
       hint: "Gemini 游客态即可用；如需保存历史/更多能力，用 ./scripts/login.sh gemini 手动登录（Google 账号）"
     queue: {max_size: 10, timeout: 60}
-    response_timeout: 180
+    response_timeout: 300     # Google 免费档在密集请求后容易“思考中”很久 → 放宽
     poll_interval: 0.2
     stable_polls: 20
     min_wait_before_stable: 8.0
