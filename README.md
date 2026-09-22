@@ -1,107 +1,117 @@
 # ai-web2api
 
-把各种 **Web 端 AI 聊天产品**（DeepSeek、Kimi、通义千问、ChatGPT 等）封装成 **OpenAI 兼容 API** 的服务。
+**English** | [中文](README.zh-CN.md)
 
-核心机制：Playwright 驱动真实浏览器 —— 打开网页、保持登录态、输入消息、增量提取流式响应，再以 OpenAI 的 `/v1/chat/completions` 格式暴露出去。不逆向任何内部 API，纯 DOM 自动化，Web 改版只需改配置里的选择器。
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
-> 设计文档见 [`docs/DESIGN.md`](docs/DESIGN.md)（§3 是 Provider 扩展点）；Qwen 接入见 [`docs/PROVIDER_QWEN.md`](docs/PROVIDER_QWEN.md)、ChatGPT 见 [`docs/PROVIDER_CHATGPT.md`](docs/PROVIDER_CHATGPT.md)。当前默认启用 **DeepSeek / ChatGPT**（Qwen 已接入但默认 `enabled: false`，按需开启）。
+![UI preview](docs/assets/ui.png)
 
-## 快速开始
+Turn **web-only AI chat products** (DeepSeek, Kimi, Qwen/Tongyi, ChatGPT, …) into an **OpenAI-compatible API**.
 
-### 方式一：Docker Compose（推荐，镜像自带 Chromium）
+How it works: Playwright drives a real browser — opens the page, keeps the session alive, types the message, incrementally extracts the streaming answer — and exposes it as OpenAI's `/v1/chat/completions`. No internal API reverse-engineering: pure DOM automation, so when a site changes you only update selectors in the config.
+
+> Design docs: [`docs/DESIGN.md`](docs/DESIGN.md) (§3 covers provider extension points); Qwen in [`docs/PROVIDER_QWEN.md`](docs/PROVIDER_QWEN.md); ChatGPT in [`docs/PROVIDER_CHATGPT.md`](docs/PROVIDER_CHATGPT.md); auth expiry in [`docs/AUTH_EXPIRY.md`](docs/AUTH_EXPIRY.md). **DeepSeek / ChatGPT are enabled by default** (Qwen is wired up but `enabled: false`; turn it on when needed).
+
+**Web UI at `/ui/`**: status dashboard (login state + **auth expiry countdown**, per-provider models/aliases, one-click import of login state), **Playground** (chat with streaming, thinking panel, attachment upload, function-calling tester, raw request/response + copy-as-curl, waiting indicator with elapsed seconds), and a **Threads** page (search, provider filter, pagination). Light/dark theme, responsive layout.
+
+## Quick start
+
+### Option 1: Docker Compose (recommended; the image ships Chromium)
 
 ```bash
-cp .env.example .env          # 填 DEEPSEEK_USERNAME/PASSWORD、QWEN_USERNAME/PASSWORD（可选，也可手动登录）
-docker compose up -d --build  # 首次会拉基础镜像并装依赖，约几分钟
-docker compose logs -f        # 看启动日志，会打印可点击的 UI/API 地址
+cp .env.example .env          # fill DEEPSEEK_USERNAME/PASSWORD, QWEN_USERNAME/PASSWORD (optional; manual login works too)
+docker compose up -d --build  # first run pulls the base image and installs deps (a few minutes)
+docker compose logs -f        # watch the logs; clickable UI/API URLs are printed
 ```
 
-打开 `http://127.0.0.1:8000/ui/`。要点：
+Open `http://127.0.0.1:8000/ui/`. Notes:
 
-- 登录态 / 会话与历史消息持久化在命名卷 `web2api-profiles`（登录态 `state.json`、会话+消息 SQLite `threads.db`），**容器重建不丢登录、不丢历史**；`docker compose down -v` 才会清空
-- 容器内必须监听 `0.0.0.0`（`config.yaml` 默认已是），宿主用 `${WEB2API_PUBLISH_PORT:-8000}` 映射
-- 改选择器/配置：改 `config.yaml` 后 `docker compose up -d` 重建，或放开 compose 里 `./config.yaml:/app/config.yaml:ro` 挂载直接生效
-- 容器内无可见窗口，手动登录用 cookies 导入：
+- Login state / threads and message history persist in the named volume `web2api-profiles` (login state `state.json`, threads+messages in SQLite `threads.db`) — **rebuilding the container keeps you logged in and keeps history**; only `docker compose down -v` wipes it
+- Inside the container you must listen on `0.0.0.0` (already the default in `config.yaml`); the host maps `${WEB2API_PUBLISH_PORT:-8000}`
+- Changing selectors/config: edit `config.yaml` then `docker compose up -d`, or enable the `./config.yaml:/app/config.yaml:ro` mount in compose
+- There is no visible window inside the container, so manual login uses state import:
   `curl -X POST http://127.0.0.1:8000/admin/deepseek/login/cookies -H 'Content-Type: application/json' -d '{"cookies":[...]}'`
-- 对外暴露时建议设 `WEB2API_API_KEY`（保护 `/v1/*`）并自行用反代限制 `/admin`
-- **用 ChatGPT 时**：设 `WEB2API_HEADLESS=false`（写进 `.env` 或 `WEB2API_HEADLESS=false docker compose up -d`）→ 容器用 **Xvfb 跑 headful**（Sentinel 会拦 headless，headful 才过）；不影响其他 provider
+- For public exposure, set `WEB2API_API_KEY` (protects `/v1/*`) and restrict `/admin` behind your own reverse proxy
+- **When using ChatGPT**: set `WEB2API_HEADLESS=false` (in `.env`, or `WEB2API_HEADLESS=false docker compose up -d`) → the container runs **headful under Xvfb** (Sentinel blocks headless; headful passes). Other providers are unaffected
 
 ```bash
-docker compose down          # 停止（保留登录态）
-docker compose down -v       # 停止并清空登录态
+docker compose down          # stop (keeps login state)
+docker compose down -v       # stop and wipe login state
 ```
 
-### 方式二：本地开发
+### Option 2: Local development
 
 ```bash
-uv sync                      # 安装依赖（创建 .venv）
-.venv/bin/python -m playwright install chromium   # 安装浏览器
+uv sync                      # install dependencies (creates .venv)
+.venv/bin/python -m playwright install chromium   # install the browser
 ```
 
-#### 0. 启动
+#### 0. Start
 
 ```bash
 .venv/bin/python -m ai_web2api.main
 ```
 
-启动后会直接打印**能点开的地址**，一条一个（`0.0.0.0` 只是"监听所有网卡"，不是可访问的主机名）：
+On startup it prints **clickable URLs**, one per line (`0.0.0.0` just means "listen on all interfaces" — it is not a reachable hostname):
 
 ```
 INFO ai_web2api: 管理界面（本机）：http://127.0.0.1:8000/ui/
 INFO ai_web2api: Playground（本机）：http://127.0.0.1:8000/ui/playground.html
 INFO ai_web2api: OpenAI API（本机）：http://127.0.0.1:8000/v1
-INFO ai_web2api: 管理界面（局域网）：http://192.168.1.5:8000/ui/      # 手机/其他机器用
+INFO ai_web2api: 管理界面（局域网）：http://192.168.1.5:8000/ui/      # for phones / other machines
 INFO ai_web2api: Playground（局域网）：http://192.168.1.5:8000/ui/playground.html
 INFO ai_web2api: OpenAI API（局域网）：http://192.168.1.5:8000/v1
 ```
 
-端口被占用时只打印一行人话（`启动失败：0.0.0.0:8000 无法监听（Address already in use），端口可能已被占用`），不再甩 uvicorn 的 traceback。
+If the port is taken it prints one human-readable line (`启动失败：0.0.0.0:8000 无法监听（Address already in use），端口可能已被占用`) instead of a uvicorn traceback.
 
-### 1. 登录（首次必做）
+### 1. Sign in (required on first run)
 
-**方式 A（推荐）自动登录**：`config.yaml` 里配 `login.mode: auto` + `.env` 写 `DEEPSEEK_USERNAME/DEEPSEEK_PASSWORD`，
-服务启动时自动登录（无头，不弹窗口）。
+**Option A (recommended) — automatic login**: set `login.mode: auto` in `config.yaml` and put
+`DEEPSEEK_USERNAME`/`DEEPSEEK_PASSWORD` in `.env`; the service signs in on startup (headless, no window).
 
-**方式 B（推荐，需验证码/Google/滑块时）命令行手动登录**（在有显示器的本机运行；登录成功后**默认自动导入运行中的服务**，免重启）：
+**Option B (recommended when a captcha / Google / slider is involved) — manual login from the CLI**
+(run it on a machine that has a display; **after login it imports into the running service by default**, no restart):
 
 ```bash
-# 最省事：一条命令（自动挑解释器 + 自动推导导入地址）
-./scripts/login.sh chatgpt         # 也可不带参数 → 交互选择 provider
+# Easiest: one command (picks the interpreter, derives the import URL)
+./scripts/login.sh chatgpt         # no argument → interactive provider picker
 
-# 等价写法（`pip install -e .` 后有短命令）
+# Equivalent (short command after `pip install -e .`)
 ai-web2api login chatgpt
-ai-web2api providers               # 列出 provider：模式 / 登录态 / 认证还剩多少天
+ai-web2api providers               # list providers: mode / login state / days left on auth
 
-# 不装也能用
+# Works without installing
 python -m ai_web2api.cli login chatgpt --manual
 ```
 
-- **Docker 部署也请在宿主执行**（容器内没有可见窗口，无法完成人工登录）；脚本会把登录态 POST 给容器服务。
-- 导入地址优先级：`--import-url` > `AI_WEB2API_URL` 环境变量 > 由 `config.yaml` 的 host/port 推导。
-  跨机器/容器示例：`AI_WEB2API_URL=http://192.168.1.10:8000 ./scripts/login.sh chatgpt`
-- 省略 provider 时会**列出候选**（标注 `manual/auto`、认证剩余天数）让你选；`--no-import` 只写 state 不导入。
-- 生成并写入 `profiles/<provider>/state.json`（首次登录时间记在 `login.json`）。
-- 详见 [`docs/MANUAL_LOGIN.md`](docs/MANUAL_LOGIN.md)。
+- **With Docker, still run this on the host** (no visible window inside the container); the script POSTs the login state to the service.
+- Import URL precedence: `--import-url` > `AI_WEB2API_URL` env var > derived from `config.yaml` host/port.
+  Cross-machine/container example: `AI_WEB2API_URL=http://192.168.1.10:8000 ./scripts/login.sh chatgpt`
+- Omitting the provider **lists candidates** (with `manual/auto` and days left) so you can pick; `--no-import` only writes the state file.
+- Writes `profiles/<provider>/state.json` (first login time is recorded in `login.json`).
+- See [`docs/MANUAL_LOGIN.md`](docs/MANUAL_LOGIN.md).
 
-**方式 C：在 `/ui` 状态面板导入**：Provider 详情点「导入登录态」→ 粘贴 `state.json` 或选文件（可拖入）→ 导入。
-（接口：`POST /admin/{p}/login/state`，会写盘 + 重置 context + 复核登录态。）
+**Option C — import from the `/ui` dashboard**: provider detail → "导入登录态" (import login state) → paste `state.json` or pick/drag a file.
+(Endpoint: `POST /admin/{p}/login/state`, which writes to disk + resets the browser context + re-verifies login.)
 
-**方式 D（旧）：让窗口可见手动登录**（本地 non-docker）：
+**Option D (legacy) — make the window visible and log in manually** (local, non-Docker):
 
 ```bash
-DEEPSEEK_HEADLESS=false .venv/bin/python -m ai_web2api.main   # 或写进 .env 后重启
-curl -X POST http://127.0.0.1:8000/admin/deepseek/login/start    # 打开登录窗口
-# …… 在弹出的浏览器里完成登录（手机号验证码 / 密码）……
-curl http://127.0.0.1:8000/admin/deepseek/login/status           # 检测登录结果
+DEEPSEEK_HEADLESS=false .venv/bin/python -m ai_web2api.main   # or put it in .env and restart
+curl -X POST http://127.0.0.1:8000/admin/deepseek/login/start    # open the login window
+# … finish login in the browser that pops up (phone code / password) …
+curl http://127.0.0.1:8000/admin/deepseek/login/status           # check the result
 ```
 
-> `browser.headless` 默认 `true`（静默运行，聊天不再弹出浏览器窗口）。
-> 覆盖优先级：`WEB2API_HEADLESS` > `DEEPSEEK_HEADLESS`（即 `<PROVIDER>_HEADLESS`）> `config.yaml`。
-> headless 下 `login/start` 打开的窗口不可见，接口会直接返回提示而不是静默卡住。
+> `browser.headless` defaults to `true` (silent; chatting no longer pops a browser window).
+> Override precedence: `WEB2API_HEADLESS` > `DEEPSEEK_HEADLESS` (i.e. `<PROVIDER>_HEADLESS`) > `config.yaml`.
+> In headless mode the window opened by `login/start` is invisible, so the endpoint returns a hint instead of hanging silently.
 
-登录态自动保存到 `profiles/<provider>/state.json`，重启服务自动恢复（无需重复登录）。
+Login state is saved to `profiles/<provider>/state.json` and restored automatically on restart (no repeated logins).
 
-也可以直接导入 cookies（仅 cookies；需要 localStorage 时用 `login/state`）：
+You can also import cookies directly (cookies only; use `login/state` when localStorage is needed):
 
 ```bash
 curl -X POST http://127.0.0.1:8000/admin/deepseek/login/cookies \
@@ -109,17 +119,17 @@ curl -X POST http://127.0.0.1:8000/admin/deepseek/login/cookies \
   -d '{"cookies": [{"name": "...", "value": "...", "domain": ".deepseek.com"}]}'
 ```
 
-### 2. 调用（OpenAI 兼容）
+### 2. Call it (OpenAI-compatible)
 
-非流式：
+Non-streaming:
 
 ```bash
 curl http://127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model": "deepseek-web", "messages": [{"role": "user", "content": "讲个笑话"}]}'
+  -d '{"model": "deepseek-web", "messages": [{"role": "user", "content": "Tell me a joke"}]}'
 ```
 
-流式（SSE）：
+Streaming (SSE):
 
 ```bash
 curl -N http://127.0.0.1:8000/v1/chat/completions \
@@ -127,76 +137,77 @@ curl -N http://127.0.0.1:8000/v1/chat/completions \
   -d '{"model": "deepseek-r1-web", "messages": [{"role": "user", "content": "1+1=?"}], "stream": true}'
 ```
 
-OpenAI SDK 直接可用：
+The OpenAI SDK works as-is:
 
 ```python
 from openai import OpenAI
 client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="unused")
 resp = client.chat.completions.create(
     model="deepseek-web",
-    messages=[{"role": "user", "content": "你好"}],
+    messages=[{"role": "user", "content": "Hi"}],
 )
 print(resp.choices[0].message.content)
 ```
 
-### 2.5 会话绑定（thread_id，可选）
+### 2.5 Thread binding (`thread_id`, optional)
 
-默认**无状态**：每次请求开新会话，历史由客户端在 `messages` 里带全。需要"同一 Web 会话多轮"时传 `thread_id`：
+By default requests are **stateless**: every request opens a new conversation and the client sends the whole history in `messages`. Pass `thread_id` to reuse **the same web conversation** across requests:
 
 ```bash
-# 第一次：创建会话（注入 messages 全部历史）
+# First call: create the thread (inject the full history)
 curl http://127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model": "deepseek-web", "thread_id": "my-chat", "messages": [{"role": "user", "content": "我叫小明"}]}'
+  -d '{"model": "deepseek-web", "thread_id": "my-chat", "messages": [{"role": "user", "content": "My name is Ming"}]}'
 
-# 后续：同 thread_id 复用同一页面；只发最后一条 user 消息，历史以页面为准（无需重传）
+# Later: same thread_id reuses the same page; only the last user message is sent (the page holds the history)
 curl http://127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model": "deepseek-web", "thread_id": "my-chat", "messages": [{"role": "user", "content": "我叫什么名字"}]}'
+  -d '{"model": "deepseek-web", "thread_id": "my-chat", "messages": [{"role": "user", "content": "What is my name?"}]}'
 ```
 
-- `thread_id` 由客户端自定义（服务端不生成，只回显确认）：非流式响应的 `thread_id` 字段、SSE 每个 chunk 的 `thread_id` 字段，均回显本次绑定的 id；不带 thread_id 时为 `null`
-- 也支持 `X-Thread-Id` header；OpenAI SDK 传非标准字段用 `extra_body={"thread_id": "..."}`（或 `extra_headers={"X-Thread-Id": "..."}`）
-- 同一 `thread_id` 串行执行；不同 thread 并行（`server.thread_parallel: false` 可退回全局串行）
-- 页面空闲超过 `server.thread_ttl`（默认 900s）自动回收；活跃会话上限 `server.max_threads`（默认 8，超限 429）
-- 管理：`GET /admin/threads`（列表）、`GET /admin/threads/{id}/messages`（历史消息）、`DELETE /admin/threads/{id}`（强杀并删除历史，客户端下次同 id 请求自动重建）
-- Playground（`/ui/playground.html`）左侧会话列表来自该库：点会话即从 `GET /admin/threads/{id}/messages` 回填历史；列表为**手动刷新**（不再定时轮询）；输入框回车在输入法（IME）组词时不会误发送
-- 同一 thread 切换 model 会报 409（创建时绑定 provider+model）
-- 页面忙（上一请求未完成，新消息被 Web 端排队）→ 20s 内返回 409 `thread_busy` 并销毁会话（配置 `thread_busy_timeout`），客户端稍后重试即自动重建；上一请求未释放（客户端中断）→ 60s 内返回 504 `thread_timeout` 并销毁。请求均**有界**，不会无限挂起
-- **跨重启持久化**（`server.thread_persist: true`，默认开）：会话元数据与消息历史统一落盘到 SQLite（`profiles/threads.db`）——每次请求完成后写入本轮 user/assistant（含思考），并记录绑定页的 DeepSeek 会话 id（URL 末段 `/a/chat/s/<uuid>`）。服务重启后，同 `thread_id` 的请求会自动 `goto` 该会话 URL 恢复——**多轮记忆跨重启保持**（DeepSeek 不删用户会话）。TTL 空闲回收/服务关闭**保留**；`DELETE /admin/threads/{id}`、页面失效/超时/忙错误**删除**（含历史，下次同 id 开全新会话）。恢复时切换 model 同样 409。旧版 `profiles/<provider>/threads.json` 在启动时自动迁移进库并删除
+- `thread_id` is client-defined (the server never generates one, it only echoes it): the non-streaming `thread_id` field and the `thread_id` field on every SSE chunk echo the id bound to this request; `null` when no thread_id was given
+- `X-Thread-Id` header also works; with the OpenAI SDK use `extra_body={"thread_id": "..."}` (or `extra_headers={"X-Thread-Id": "..."}`)
+- The same `thread_id` runs serially; different threads run in parallel (`server.thread_parallel: false` falls back to global serial execution)
+- Idle pages are reclaimed after `server.thread_ttl` (default 900s); the active-thread cap is `server.max_threads` (default 8, 429 above it)
+- Management: `GET /admin/threads` (list), `GET /admin/threads/{id}/messages` (history), `DELETE /admin/threads/{id}` (force-kill and delete history; the next request with the same id recreates it)
+- **Threads page** at `/ui/threads.html`: card list with titles (newest first), **text search** (title / thread_id / provider / model), provider filter, page size (20/50/100), **load more**, plus "continue in Playground" / copy id / destroy. Backed by `GET /admin/threads?q=&provider=&limit=&offset=&order=` — the response carries `total` / `has_more`, and `limit=0` (default) still returns everything, so older callers are unaffected
+- Playground's left sidebar pulls from the same endpoint: clicking a thread backfills history from `GET /admin/threads/{id}/messages`; search is **server-side** (debounced), and when there are more than the loaded page it links to the Threads page
+- Switching the model inside a thread returns 409 (provider+model are bound at creation)
+- Busy page (previous request unfinished, the new message is queued by the site) → 409 `thread_busy` within 20s and the thread is destroyed (config `thread_busy_timeout`); the client retries later and it is recreated. Previous request never released (client aborted) → 504 `thread_timeout` within 60s and destroyed. Every request is **bounded**, nothing hangs forever
+- **Cross-restart persistence** (`server.thread_persist: true`, on by default): thread metadata and message history go to SQLite (`profiles/threads.db`) — each finished turn writes its user/assistant messages (including thinking) and records the bound page's DeepSeek conversation id (last segment of `/a/chat/s/<uuid>`). After a restart, a request with the same `thread_id` `goto`s that conversation URL and **multi-turn memory survives restarts** (DeepSeek does not delete user conversations). TTL reclamation / shutdown **keep** the rows; `DELETE /admin/threads/{id}` and page-failure/timeout/busy errors **delete** them (history included; the next request with the same id starts a fresh conversation). Switching the model on resume is also 409. Legacy `profiles/<provider>/threads.json` is migrated into the DB on startup and deleted
 
-### 2.6 Web 端选项：模式 + 开关（provider 通用）
+### 2.6 Web-side options: mode + toggles (provider-agnostic)
 
-> **2026-09 UI 变更**：DeepSeek 把「快速模式 / 专家模式 / 识图模式」三个模式合并为**单一模式**，
-> 新对话页只剩两个开关（深度思考 / 智能搜索），请求体只有 `thinking_enabled` / `search_enabled`
-> （`model_type` 恒为 `default`）。API 的 `mode` 参数保留兼容：不再点 radio，而是**翻译成开关组合**。
+> **UI change (2026-09)**: DeepSeek merged "Fast / Expert / Vision" into a **single mode**; the new-chat page
+> only has two toggles (DeepThink / Smart Search) and the request body only carries `thinking_enabled` /
+> `search_enabled` (`model_type` is always `default`). The API keeps `mode` for compatibility: it no longer
+> clicks a radio but **translates into a toggle combination**.
 
-API 用通用字段（OpenAI SDK 用 `extra_body` 传），provider 各自映射自己的 UI：
+The API uses generic fields (pass them via `extra_body` with the OpenAI SDK); each provider maps them to its own UI:
 
 ```python
 resp = client.chat.completions.create(
     model="deepseek-web",
-    messages=[{"role": "user", "content": "帮我看下这张图的代码"}],
+    messages=[{"role": "user", "content": "Explain the code in this screenshot"}],
     extra_body={
-        "mode": "expert",       # fast / expert / image 兼容值：翻译成开关组合（每次请求生效）
-        "deep_think": True,     # 深度思考开关（每次请求生效）
-        "search": False,        # 智能搜索开关（每次请求生效）
+        "mode": "expert",       # fast / expert / image compatibility values → toggle combination (per request)
+        "deep_think": True,     # DeepThink toggle (per request)
+        "search": False,        # Smart Search toggle (per request)
     })
 ```
 
-- `mode`（新版 UI 语义）：`fast` = 思考关 + 搜索关，`expert` = 都开，`image` = 都关（附件已不限模式）。
-  翻译只在该参数未显式给出时生效——`deep_think` / `search` 优先级更高；未知 mode 值忽略并记日志（不再 400）
-- `mode`（旧版 UI，`selectors.mode_button` 非空时）：仍按原语义点 radio，仅新会话生效，resume 时忽略；
-  未知值 400 `unsupported_mode`
-- `deep_think` / `search`：每次请求生效（已处于目标状态则不点击），thread 续用/恢复时同样可切换。
-  新版 UI 页面默认两个开关**都是开**；页面无对应开关时自动跳过
-- 开关是页面级 UI 状态：**并行 thread 同时使用不同开关参数可能互相影响**（同一浏览器 context 共享开关状态），固定设置时无影响；`thread_parallel: false` 可完全避免
-- 页面语言固定 `browser.locale: zh-CN`（选择器文案是中文；DeepSeek 按 `Accept-Language` 渲染 UI）——否则 Playwright 默认 en-US 会让「深度思考 / 开启新对话」等选择器全部失配
-- 选择器全部配置化：`selectors.mode_button`（API 值 → 候选，新版 UI 留空）、`mode_checked`、`toggle_button`（字段名 → 候选，中英文各一份）、`toggle_checked`（见 config.yaml）
+- `mode` (new UI semantics): `fast` = thinking off + search off, `expert` = both on, `image` = both off (attachments are no longer mode-restricted).
+  Translation only applies when the parameter is not given explicitly — `deep_think` / `search` win; unknown mode values are ignored and logged (no more 400)
+- `mode` (legacy UI, when `selectors.mode_button` is non-empty): still clicks radios with the original semantics, only effective on a new conversation, ignored on resume; unknown values → 400 `unsupported_mode`
+- `deep_think` / `search`: applied per request (no click when already in the target state), also switchable on thread resume/recovery.
+  The new UI defaults **both toggles on**; providers whose page lacks a toggle skip it
+- Toggles are page-level UI state: **parallel threads using different toggle values may affect each other** (they share the browser context's toggle state); with fixed settings there is no impact, and `thread_parallel: false` avoids it entirely
+- The page language is pinned to `browser.locale: zh-CN` (selectors use Chinese text; DeepSeek renders its UI from `Accept-Language`) — otherwise Playwright's default `en-US` breaks every selector such as "深度思考" / "开启新对话"
+- All selectors live in config: `selectors.mode_button` (API value → candidates; empty for the new UI), `mode_checked`, `toggle_button` (field name → candidates, one set per language), `toggle_checked` (see `config.yaml`)
 
-### 2.7 附件上传（图片识别，provider 通用）
+### 2.7 Attachments (image understanding, provider-agnostic)
 
-DeepSeek 输入框左下角附件按钮任何会话都可用（三模式合并后不再限模式；仅识别图片中的文字，最多 50 个、每个 100MB）。API 用 OpenAI 标准的多部分 `content` + `image_url` 表达（OpenAI SDK 原生支持）：
+DeepSeek's attachment button (bottom-left of the composer) works in any conversation (no mode restriction after the merge; it only reads text in images, up to 50 files, 100MB each). The API uses OpenAI's standard multi-part `content` + `image_url` (natively supported by the OpenAI SDK):
 
 ```python
 resp = client.chat.completions.create(
@@ -204,132 +215,134 @@ resp = client.chat.completions.create(
     messages=[{
         "role": "user",
         "content": [
-            {"type": "text", "text": "这张图里写了什么？"},
+            {"type": "text", "text": "What does this image say?"},
             {"type": "image_url", "image_url": {"url": "data:image/png;base64,<base64>"}},
         ],
     }],
 )
 ```
 
-- `image_url.url` 支持 **data URL**（`data:image/png;base64,...`）和 **http(s) 外链**（服务端下载后上传）
-- 纯图片消息（无 text 部分）也可以发送（Web 端上传后即使输入框为空也能发送）
-- 服务端把附件解码为临时文件 → 通过页面 `input[type=file]` 上传 → 随消息发送；`selectors.upload_input` 配置化（找不到上传入口 → 400 `attachments_error`）
-- 限制：**最多 50 个、每个最大 100MB**，超限 400 `attachments_error`（与 Web 端 tooltips 一致）
-- 附件仅作用于本次请求的 user 消息（thread 续用时注入的历史为纯文本，图片不会重放）；页面找不到上传入口（如后续 UI 再改版）→ 400
-- **Playground**：点输入框左侧 📎 选择**图片/视频**（可多选），已选文件会以缩略图预览、可逐个移除；发送时作为 `image_url`（data URL）随消息发出。
+- `image_url.url` accepts **data URLs** (`data:image/png;base64,...`) and **http(s) links** (the server downloads and uploads them)
+- Image-only messages (no text part) are allowed too (the site can send with an empty composer after upload)
+- The server decodes attachments to temp files → uploads them through the page's `input[type=file]` → sends with the message; `selectors.upload_input` is configurable (no upload entry point → 400 `attachments_error`)
+- Limits: **at most 50 files, 100MB each**, otherwise 400 `attachments_error` (matching the site's tooltips)
+- Attachments only apply to the user message of the current request (injected history on thread resume is plain text; images are not replayed); if the page has no upload entry point (e.g. another UI redesign) → 400
+- **Playground**: click 📎 next to the composer to pick **images/videos** (multi-select); selected files are previewed as thumbnails and can be removed one by one; on send they go out as `image_url` (data URL).
 
-### 2.8 Function Calling（工具调用）
+### 2.8 Function calling
 
-`/v1/chat/completions` 支持 OpenAI 原生 `tools` / `tool_choice`。网页端没有原生工具，服务端把工具定义**注入 prompt**，
-再把模型输出**解析回标准 `tool_calls`**（参考 token-free-gateway，见 `docs/FUNCTION_CALLING.md`）：
+`/v1/chat/completions` supports OpenAI's native `tools` / `tool_choice`. The web UI has no native tools, so the server **injects the tool definitions into the prompt** and **parses the model output back into standard `tool_calls`** (see `docs/FUNCTION_CALLING.md`):
 
 ```python
 resp = client.chat.completions.create(
     model="deepseek-web",
-    messages=[{"role": "user", "content": "东京天气？"}],
+    messages=[{"role": "user", "content": "Weather in Tokyo?"}],
     tools=[{"type": "function", "function": {
-        "name": "get_weather", "description": "查天气",
+        "name": "get_weather", "description": "Get weather",
         "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}},
     )],
 )
-# resp.choices[0].message.tool_calls → 标准 tool_calls（content=null, finish_reason="tool_calls"）
-# 客户端本地执行工具 → 以 role=tool 回传结果再请求 → 得到最终回答
+# resp.choices[0].message.tool_calls → standard tool_calls (content=null, finish_reason="tool_calls")
+# The client executes the tool locally → sends the result back with role=tool → gets the final answer
 ```
 
-- 需要工具时：`content=null` + `finish_reason="tool_calls"`；**流式同样支持**（SSE `delta.tool_calls`）。
-- 带 `tools` 的**流式**请求是“先缓冲后发”（工具场景无法边流边发，避免把工具 JSON 当正文发出去）。
-- `tool_choice` 支持 `auto` / `none` / `required` / `{"type":"function","function":{"name":...}}`。
-- 同一 `thread_id` 的工具会话：工具信息必须在**模型可见的上下文**里——**无状态 / thread 首次 create** 由当前请求的 `tools` 注入；**thread resume** 不重复注入、依赖页面历史。
-- 总开关 `server.function_calling`（默认 `true`）；设 `false` 会**完全忽略** `tools`（用于避免风控）。
-- **Playground 可直接测**：勾选「工具」→ 填 `tools` JSON → 提问；收到工具调用后会**本地执行 mock 工具**并自动续跑，展示最终回答。
+- When a tool is needed: `content=null` + `finish_reason="tool_calls"`; **streaming is supported too** (SSE `delta.tool_calls`).
+- **Streaming** requests with `tools` are "buffer first, send at the end" (you cannot interleave tool JSON with prose).
+- `tool_choice` supports `auto` / `none` / `required` / `{"type":"function","function":{"name":...}}`.
+- Tool conversations on the same `thread_id`: tool info must be in the **model-visible context** — **stateless / first thread create** injects the current request's `tools`; **thread resume** does not re-inject and relies on page history.
+- Global switch `server.function_calling` (default `true`); setting it to `false` **completely ignores** `tools` (useful to avoid risk control).
+- **Testable in the Playground**: tick "工具" (tools) → paste the `tools` JSON → ask; on a tool call the Playground **executes a mock tool locally** and continues automatically, showing the final answer.
 
-### 3. 自测（不需要登录）
+### 3. Self-tests (no login needed)
 
 #### 3.1 pytest
 
-默认 `pytest` 只跑**快速单测**（几秒内）；起 subprocess/Playwright 的端到端用例（`slow`）与依赖真实服务的用例（`live`）默认用标记排除，按需显式运行：
+Plain `pytest` runs only the **fast unit tests** (a few seconds); end-to-end cases that spawn subprocesses/Playwright (`slow`) and cases that need a live service (`live`) are excluded by marker and can be run explicitly:
 
 ```bash
-.venv/bin/python -m pytest                 # 快速（默认，约 1s）
-.venv/bin/python -m pytest -m slow         # 假页 subprocess 端到端（test_mode_presets / test_history_endpoint）
-.venv/bin/python -m pytest -m live         # 需已启动且已登录的服务（test_openai_compat）
-.venv/bin/python -m pytest -o addopts=""   # 全部（含 slow + live）
+.venv/bin/python -m pytest                 # fast (default, ~1s)
+.venv/bin/python -m pytest -m slow         # fake-page subprocess e2e (test_mode_presets / test_history_endpoint)
+.venv/bin/python -m pytest -m live         # needs a running, logged-in service (test_openai_compat)
+.venv/bin/python -m pytest -o addopts=""   # everything (slow + live included)
 ```
 
-#### 3.2 假聊天页
+#### 3.2 Fake chat page
 
-仓库带一个假聊天页 + 假配置，把 DeepSeek 驱动完整跑一遍（含思考区提取、流式、Markdown 转换、超时/错误路径）：
+The repo ships a fake chat page + fake config that exercises the DeepSeek driver end to end (thinking extraction, streaming, Markdown conversion, timeout/error paths):
 
 ```bash
-AI_WEB2API_CONFIG=config.fake.yaml .venv/bin/python -m ai_web2api.main   # 端口 8001
+AI_WEB2API_CONFIG=config.fake.yaml .venv/bin/python -m ai_web2api.main   # port 8001
 curl http://127.0.0.1:8001/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model": "fake-r1", "messages": [{"role": "user", "content": "你好"}]}'
+  -d '{"model": "fake-r1", "messages": [{"role": "user", "content": "Hi"}]}'
 ```
 
-#### 3.3 OpenAI SDK 真实 API 测试
+#### 3.3 OpenAI SDK tests against the real API
 
-`tests/test_openai_compat.py`（16 个用例，标 `live`，跑**已启动的服务**、真登录 DeepSeek）：
+`tests/test_openai_compat.py` (16 cases, marked `live`, runs against a **running service** with a real DeepSeek login):
 
 ```bash
-.venv/bin/python -m ai_web2api.main                                    # 先起服务（默认 127.0.0.1:8000）
-.venv/bin/python -m pytest -m live tests/test_openai_compat.py -v      # 另开终端
+.venv/bin/python -m ai_web2api.main                                    # start the service first (127.0.0.1:8000)
+.venv/bin/python -m pytest -m live tests/test_openai_compat.py -v      # in another terminal
 ```
 
-服务未启动或未登录时整模块 skip；`AI_WEB2API_BASE_URL` 可指向别的端口。用例结束会 DELETE 掉自己新建的会话（不动你原有的会话）。
-覆盖：非流式/流式对话、多轮历史、`/v1/models`、模型别名（`gpt-4`）、未知模型 404、`thread_id` 绑定（create/resume 回忆上下文 + `X-Thread-Id` header）、深度思考开关（开 → `reasoning_content`，关 → 无）、`mode=expert` 预设、未知 mode 不再 400、附件上传（`image_url` data URL，含多附件与 51 个超限 400）、流式 + 附件组合。
+The whole module skips when the service is down or not logged in; `AI_WEB2API_BASE_URL` can point elsewhere. Each case deletes the threads it created (your own conversations are untouched).
+Coverage: non-streaming/streaming chat, multi-turn history, `/v1/models`, model aliases (`gpt-4`), unknown model 404, `thread_id` binding (create/resume recalls context + `X-Thread-Id` header), DeepThink toggle (on → `reasoning_content`, off → none), `mode=expert` preset, unknown mode no longer 400, attachment upload (`image_url` data URL, including multi-attachment and the 51-file 400), streaming + attachments combined.
 
-## 配置
+## Configuration
 
-`config.yaml` 结构（完整字段见 `src/ai_web2api/config.py`）：
+`config.yaml` structure (full field list in `src/ai_web2api/config.py`):
 
 ```yaml
 server:
   host: 0.0.0.0
   port: 8000
-  default_provider: deepseek   # 常见 OpenAI 模型名(gpt-4 等)兜底别名挂给谁；空 = 首个启用 provider
-  function_calling: true       # 工具调用总开关；false = 完全忽略 tools（避免注入工具提示触发网页端风控）
+  default_provider: deepseek   # which provider gets fallback aliases for common OpenAI model names (gpt-4 etc.); empty = first enabled
+  function_calling: true       # master switch for tool calling; false = ignore tools entirely (avoids risk control from injected tool prompts)
 browser:
-  headless: true           # 静默运行（不弹窗口）；可用 .env 覆盖：WEB2API_HEADLESS > DEEPSEEK_HEADLESS
-  locale: zh-CN            # 页面语言（决定 DeepSeek UI 文案 / 中文选择器是否匹配）
-  login_check_interval: 300  # 定时检测登录态间隔（秒）
-  state_expiry_margin: 86400 # 登录态剩余有效期低于该值才落盘 state.json（秒）
-                             # 已登录且未过期就不写盘：只有「登录态刚变化 / 还没落盘 / cookie 快过期」才 save
-  status_check: true         # 定时状态检测总开关
-  status_check_headless: true  # 检测用独立 headless 浏览器，不弹出/占用主浏览器窗口（默认开）
-profiles_dir: profiles     # 登录态持久化目录
+  headless: true           # silent (no window); override via .env: WEB2API_HEADLESS > DEEPSEEK_HEADLESS
+  locale: zh-CN            # page language (decides DeepSeek UI text / whether Chinese selectors match)
+  login_check_interval: 300  # background login-state check interval (seconds)
+  state_expiry_margin: 86400 # write state.json only when the remaining validity drops below this (seconds)
+                             # already-logged-in and not expiring → no write; only "state just changed / never saved / cookies expiring"
+  auth_expiry_warn_days: 3   # default "auth expiring soon" threshold in days (per provider: login.expiry_warn_days)
+  status_check: true         # master switch for the background status check
+  status_check_headless: true  # run checks in a separate headless browser (does not occupy/hide the main window; default on)
+profiles_dir: profiles     # login-state persistence directory
 
-providers:                 # 也支持 list 写法
-  deepseek:                # ← provider 名（同时决定驱动类）
+providers:                 # a list form is also accepted
+  deepseek:                # ← provider name (also selects the driver class)
     url: https://chat.deepseek.com
     models:
       - {name: deepseek-web, ui_label: "DeepSeek 最新版"}
       - {name: deepseek-r1-web, ui_label: "DeepSeek-R1"}
-    selectors:             # Web 改版只改这里；每个字段是"候选列表"，取第一个匹配的
-      input:               # 2026-08 新 UI 实测：textarea[name=search]
+    selectors:             # a site redesign only touches this; each field is a "candidate list", first match wins
+      input:               # 2026-08 new UI: textarea[name=search]
         - "textarea[name=search]"
         - "textarea"
         - "#chat-input"
-      send_button: []              # 空 = 回车发送
+      send_button: []              # empty = send with Enter
       response_container:
-        # 只有正文容器（思考区内部也有裸 .ds-markdown，不能出现在候选里，
-        # 否则新容器探测会锁定思考区，正文永远提取不到）
+        # answer container only (the thinking area also contains a bare .ds-markdown; it must not be a candidate,
+        # otherwise new-container detection locks onto the thinking area and the answer is never extracted)
         - ".ds-markdown.ds-assistant-message-main-content"
         - ".ds-assistant-message-main-content"
       thinking_container:
         - ".ds-think-content"
         - ".ds-think"
         - "[class*=think]"
-      stop_button: []              # 填了可加快"生成结束"判定
-      login_check: []              # 空 = 用 input 判定登录
+      stop_button: []              # fills in to speed up "generation finished" detection
+      login_check: []              # empty = decide via the input selector
     login:
-      mode: auto                  # auto = 用 .env 凭据自动登录；manual = 手动弹窗
+      mode: auto                  # auto = sign in with .env credentials; manual = pop a window
+      auth_cookies: []            # cookies that represent login state (glob) → auth-expiry column/reminder
+      # expiry_warn_days: 7       # manual providers may remind earlier (see providers.chatgpt in config.yaml)
       username_env: DEEPSEEK_USERNAME
       password_env: DEEPSEEK_PASSWORD
       page:
-        password_tab:             # 默认是验证码 tab 时，切到"密码登录"
+        password_tab:             # when the code tab is default, switch to "password login"
           - "div[role=button]:has-text(\"密码登录\")"
-        username:                 # 2026-08 实测：无 id/name，placeholder 定位
+        username:                 # 2026-08: no id/name, located by placeholder
           - "input[placeholder=\"请输入手机号/邮箱地址\"]"
           - "input[placeholder*=手机号]"
           - "input[type=text]"
@@ -339,111 +352,111 @@ providers:                 # 也支持 list 写法
         submit:
           - "div.ds-button--primary"
           - "button[type=submit]"
-    queue: {max_size: 10, timeout: 60}   # 每 provider 串行队列
+    queue: {max_size: 10, timeout: 60}   # per-provider serial queue
     response_timeout: 180
-    network: {url_pattern: "/api/v0/chat/completion"}  # XHR 监听（不配 = 走 DOM 兜底）
-  qwen:                     # 已接入，但默认 enabled: false（不注册 / UI 不显示）；需要时改 true
+    network: {url_pattern: "/api/v0/chat/completion"}  # XHR listening (omit → DOM fallback)
+  qwen:                     # wired up but enabled: false by default (not registered / hidden in the UI); set true to use
     url: https://chat.qwen.ai/
-    session_url: "{base}/c/{id}"          # thread 恢复 URL 模板
+    session_url: "{base}/c/{id}"          # thread recovery URL template
     models:
       - {name: qwen3.7-plus-web, ui_label: "Qwen3.7-Plus"}
     selectors:
       input: ["textarea.message-input-textarea"]
-      send_button: ["button.send-button"]  # 输入后才出现的圆形发送按钮
+      send_button: ["button.send-button"]  # the round send button only appears once you type
       response_container: [".response-message-content.phase-answer"]
       model_menu: {trigger: ["span.ant-dropdown-trigger"], option: ['div[role=option]:has-text("{label}")']}
       mode_menu:
         trigger: [".qwen-thinking-selector .qwen-chat-v2-dropdown-menu-trigger"]
         option: ['div[role=option]:has-text("{label}")']
         labels: {auto: "自动", thinking: "思考", fast: "快速"}
-    login: {mode: auto, url: https://chat.qwen.ai/auth, username_env: QWEN_USERNAME, password_env: QWEN_PASSWORD}
+    login: {mode: auto, url: https://chat.qwen.ai/auth, auth_cookies: ["token", "refresh_token"], username_env: QWEN_USERNAME, password_env: QWEN_PASSWORD}
 ```
 
-> 选择器三种 UI 形态：`mode_button`（radio）/ `toggle_button`（开关）/ `model_menu`+`mode_menu`（下拉菜单）；
-> provider 级可选 `locale` / `session_url` / `login.url` / `network`；自定义选项走 `/v1` 请求的 `options` 字段。
+> Three selector shapes: `mode_button` (radio) / `toggle_button` (switch) / `model_menu`+`mode_menu` (dropdown).
+> Providers may also set `locale` / `session_url` / `login.url` / `network`; custom options go through the `options` field of a `/v1` request.
 
-## API 一览
+## API
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |---|---|---|
-| GET | `/v1/models` | 模型列表 |
-| POST | `/v1/chat/completions` | 聊天补全（`stream` 走 SSE） |
-| GET | `/healthz` | 健康检查 + 各 provider 登录态 |
-| POST | `/admin/{p}/login/auto` | 自动登录（读 .env 凭据，见下） |
-| POST | `/admin/{p}/login/start` | 打开登录窗口（手动登录） |
-| GET | `/admin/{p}/login/status` | 查询/确认登录并保存状态 |
-| POST | `/admin/{p}/login/cookies` | 导入 cookies |
-| POST | `/admin/{p}/login/logout` | 清除登录态 |
-| GET | `/admin/{p}/debug/dom?selector=…` | 调试：返回页面元素 HTML（排查选择器失效） |
-| POST | `/admin/{p}/debug/probe` | 调试：发测试消息并 dump 响应区 DOM（确定新 UI 容器选择器） |
-| GET | `/admin/threads` | 会话绑定：会话列表（活跃 + 已落库） |
-| GET | `/admin/threads/{id}/messages` | 会话绑定：历史消息（user/assistant + 思考） |
-| DELETE | `/admin/threads/{id}` | 会话绑定：强杀会话并删除历史（同 id 下次请求自动重建） |
+| GET | `/v1/models` | Model list |
+| POST | `/v1/chat/completions` | Chat completion (`stream` uses SSE) |
+| GET | `/healthz` | Health check + per-provider login state |
+| GET | `/admin/status` | Aggregated status (server info, providers incl. `auth_expiry`, threads summary) |
+| POST | `/admin/{p}/login/auto` | Automatic login (reads .env credentials, see below) |
+| POST | `/admin/{p}/login/start` | Open the login window (manual login) |
+| GET | `/admin/{p}/login/status` | Query/confirm login and save state |
+| POST | `/admin/{p}/login/state` | Import a full `storage_state` (cookies + localStorage); takes effect immediately |
+| POST | `/admin/{p}/login/cookies` | Import cookies |
+| POST | `/admin/{p}/login/logout` | Clear login state |
+| GET | `/admin/{p}/debug/dom?selector=…` | Debug: return page element HTML (diagnose dead selectors) |
+| POST | `/admin/{p}/debug/probe` | Debug: send a probe message and dump the response DOM (find new containers) |
+| GET | `/admin/threads` | Thread list (live + persisted); supports `q` / `provider` / `limit` / `offset` / `order` |
+| GET | `/admin/threads/{id}/messages` | Thread history (user/assistant + thinking) |
+| DELETE | `/admin/threads/{id}` | Force-kill a thread and delete its history (same id recreates it next request) |
 
-### 自动登录（login.mode=auto）
+### Automatic login (`login.mode=auto`)
 
-在项目根 `.env` 配置（键名见 `config.yaml` 的 `login.username_env/password_env`，默认
-`DEEPSEEK_USERNAME` / `DEEPSEEK_PASSWORD`，也兼容 `username` / `password`）：
-
-```bash
-DEEPSEEK_USERNAME=你的账号
-DEEPSEEK_PASSWORD=你的密码
-QWEN_USERNAME=你的邮箱
-QWEN_PASSWORD=你的密码
-```
-
-然后：
+Configure in `.env` at the project root (key names come from `config.yaml`'s `login.username_env`/`password_env`,
+defaults `DEEPSEEK_USERNAME` / `DEEPSEEK_PASSWORD`; `username` / `password` are also accepted):
 
 ```bash
-curl -X POST http://127.0.0.1:8000/admin/deepseek/login/auto   # 自动填表登录（约 15s）
-curl http://127.0.0.1:8000/admin/deepseek/login/status         # 确认 logged_in: true
+DEEPSEEK_USERNAME=your-account
+DEEPSEEK_PASSWORD=your-password
+QWEN_USERNAME=your-email
+QWEN_PASSWORD=your-password
 ```
 
-**启动时自动登录**：若某 provider 无 `profiles/<name>/state.json`（未登录），且 `login.mode=auto`、
-.env 已配置凭据，服务启动时会自动尝试登录（日志可见"未登录，尝试自动登录…"→"自动登录成功"）；
-失败不阻塞启动（验证码/风控时改用 `login/start` 手动登录一次）。已有 state.json 时直接恢复，
-不会重复登录。
+Then:
 
-注意：登录页按浏览器语言渲染，服务已固定 `browser.locale: zh-CN`（并显式发送
-`Accept-Language`），中文选择器（"密码登录"/"请输入手机号/邮箱地址"）才匹配；若触发验证码/风控卡在
-登录页，改用 `login/start` 手动登录一次即可（登录态落盘后重启自动恢复）。
+```bash
+curl -X POST http://127.0.0.1:8000/admin/deepseek/login/auto   # fill and submit the form (~15s)
+curl http://127.0.0.1:8000/admin/deepseek/login/status         # confirm logged_in: true
+```
 
-## 新增一个 Web AI
+**Login on startup**: if a provider has no `profiles/<name>/state.json` (not logged in), has `login.mode=auto`
+and `.env` credentials, the service tries to sign in on startup (logs show "未登录，尝试自动登录…" → "自动登录成功");
+failure does not block startup (use `login/start` for one manual login when a captcha/risk control appears). With an
+existing `state.json` it restores directly and does not log in again.
 
-1. `providers/` 里写一个驱动类继承 `BaseProvider`，实现 `generate()`（打开页面 → 注入上下文 → 发送 → 轮询 diff 产出 `StreamChunk`）；若 DOM 结构跟 DeepSeek 类似，直接复用 `DeepSeekProvider`，只写配置
-2. 在 `registry.DRIVERS` 登记驱动类
-3. `config.yaml` 加一段 provider 配置（URL + 模型 + 选择器）
+Note: login pages render according to the browser language, and the service pins `browser.locale: zh-CN`
+(and explicitly sends `Accept-Language`), which is what makes the Chinese selectors ("密码登录" /
+"请输入手机号/邮箱地址") match. If a captcha or risk control blocks the page, do one manual login via
+`login/start`; the state is persisted and restored on restart.
 
-## 已知限制
+## Adding a new web AI
 
-- 多轮对话默认**无状态模式**：每次请求把完整历史拼成一条 prompt 注入新会话（借用 Web 端长上下文能力）；需要跨请求会话时用 `thread_id`（见上文 2.5，复用同一 Web 页面，历史以页面为准）
-- `max_tokens`/`top_p`/`stop` 等参数在 Web 端不可控，收到后忽略
-- 数学公式（KaTeX）尽力还原，复杂排版可能失真
-- 鉴权可选：配 `server.api_keys`（或 `WEB2API_API_KEY`）后 `/v1/*` 需带 `Authorization: Bearer <key>`；`/ui`、`/admin` 不鉴权，对外部署请自行用反代限制 `/admin`
-- Web 端改版会导致选择器失效，用 `/admin/{p}/debug/dom` 排查并更新配置
-- 停止服务：Ctrl+C 会给**整个进程组**发信号，Playwright 的 node 驱动同时被打掉，浏览器已无法优雅关闭
-  → 服务打一条 WARNING（`browser.close 失败（驱动可能已退出，忽略）`）后正常退出，不会报
-  `Application shutdown failed`；登录态早已按需落盘，不影响下次启动
-- 账号风控风险：请自用，控制频率
-- llama_index.llms.openai 兼容：role 支持 `developer`/`tool`/`function`（`developer` 自动映射为
-  `system`），`content` 支持多部分列表（提取 text 部分），并支持工具消息（`tool_calls`/`tool_call_id`）；
-  注意 llama_index 客户端对非官方 OpenAI 模型名有校验与 tokenizer 限制（传 `max_tokens`
-  可跳过 tokenizer 计数，老版本则无此问题）
-- Function Calling 是 **prompt 注入** 实现（见 2.8）：依赖模型按约定格式输出，偶发不守格式时会**当普通文本**返回；
-  带 `tools` 的流式请求是“先缓冲后发”；可用 `server.function_calling: false` 整体关闭
+1. Add a driver class under `providers/` extending `BaseProvider` and implementing `generate()` (open the page → inject context → send → poll-diff into `StreamChunk`); if the DOM is similar to DeepSeek, reuse `DeepSeekProvider` and write config only
+2. Register the driver class in `registry.DRIVERS`
+3. Add a provider section to `config.yaml` (URL + models + selectors)
 
-## 项目结构
+## Known limitations
+
+- Multi-turn chat is **stateless by default**: every request flattens the whole history into a single prompt injected into a new conversation (leveraging the site's long context); use `thread_id` for cross-request conversations (see 2.5 — it reuses one web page, with the page as the source of truth)
+- `max_tokens`/`top_p`/`stop` etc. cannot be controlled on the web side and are ignored
+- Math (KaTeX) is reconstructed on a best-effort basis; complex layout may be distorted
+- Auth is optional: with `server.api_keys` (or `WEB2API_API_KEY`), `/v1/*` requires `Authorization: Bearer <key>`; `/ui` and `/admin` are unauthenticated, so restrict `/admin` behind a reverse proxy when exposed
+- A site redesign breaks selectors; use `/admin/{p}/debug/dom` to diagnose and update the config
+- Stopping the service: Ctrl+C signals the **whole process group**, so Playwright's node driver dies at the same time and the browser can no longer be closed gracefully → the service logs one WARNING (`browser.close 失败（驱动可能已退出，忽略）`) and exits normally instead of reporting `Application shutdown failed`; login state has already been persisted on demand, so the next start is unaffected
+- Account risk control: use it for yourself and keep the request rate low
+- llama_index.llms.openai compatibility: roles `developer`/`tool`/`function` are supported (`developer` maps to `system`), `content` accepts multi-part lists (text parts are extracted), and tool messages (`tool_calls`/`tool_call_id`) work. Note that the llama_index client validates non-official OpenAI model names and has tokenizer limits (passing `max_tokens` skips tokenizer counting; older versions had no such issue)
+- Function calling is implemented by **prompt injection** (see 2.8): it relies on the model following the agreed format, and occasionally returns plain text instead; streaming requests with `tools` buffer first and send at the end; switch it off globally with `server.function_calling: false`
+
+## Project layout
 
 ```
 src/ai_web2api/
-├── main.py            # FastAPI 入口 + 后台登录态刷新
-├── config.py          # YAML → Pydantic 校验（兼容 list/dict 两种 provider 写法）
-├── api/               # OpenAI 兼容路由、schema、SSE
-├── browser/           # 浏览器管理（单实例多 Context + storage_state 持久化）、DOM→Markdown 提取
-├── providers/         # 驱动基类（WebChatProvider 通用引擎）+ DeepSeek/Qwen 实现 + 注册表
-├── core/              # SerialGate、错误类型、ThreadManager、SQLite 历史（store.py）
-├── tool_calling/      # Function Calling：prompt 注入 / 输出解析 / 消息转录
-└── webui/             # 状态面板 + Playground，HTML/CSS/JS 已分离
-    ├── index.html / playground.html    # 只留结构，引用下方 assets
-    └── assets/{css,js}/                # base + 各页面 css/js；common.js 为公共工具
+├── main.py            # FastAPI entry point + background login-state refresh
+├── config.py          # YAML → Pydantic validation (accepts list/dict provider forms)
+├── cli.py             # `ai-web2api login|providers` (manual login + state import)
+├── api/               # OpenAI-compatible routes, schemas, SSE
+├── browser/           # browser manager (one instance, many contexts, storage_state persistence), DOM→Markdown extraction
+├── providers/         # driver base (generic WebChatProvider engine) + DeepSeek/Qwen/ChatGPT drivers + registry
+├── core/              # SerialGate, error types, ThreadManager, SQLite history (store.py), auth expiry
+├── tool_calling/      # function calling: prompt injection / output parsing / message transcription
+└── webui/             # status dashboard + Playground + Threads page; HTML/CSS/JS kept separate
+    ├── index.html / playground.html / threads.html   # structure only; assets live below
+    └── assets/{css,js}/                              # tokens + base + per-page css/js; common.js holds shared helpers
+scripts/
+└── login.sh           # one-command manual login (opens a browser, imports into the service)
 ```
