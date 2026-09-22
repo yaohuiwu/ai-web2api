@@ -244,6 +244,7 @@ providers:
       expiry_warn_days: 7   # 手动认证：提前 7 天提醒更新认证信息
     queue: {max_size: 10, timeout: 60}
     response_timeout: 180
+    send_confirm_timeout: 20  # 发出去但没开始生成 → 重发一次并快速失败（别死等 180s）
     poll_interval: 0.2
     stable_polls: 30
     min_wait_before_stable: 15.0

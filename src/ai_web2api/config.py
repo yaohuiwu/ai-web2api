@@ -177,6 +177,9 @@ class ProviderConfig(BaseModel):
     network: NetworkConfig = Field(default_factory=NetworkConfig)
     model_aliases: dict[str, str] = {}  # 别名 → 本 provider 的模型名（如 gpt-4 → deepseek-web）
     response_timeout: float = 180.0
+    # 发送确认窗口（秒）：这么久内既无新容器也无停止按钮 → 判定消息没真正发出，
+    # 重发一次并快速失败（0 = 关闭）。避免被静默丢弃时死等满 response_timeout。
+    send_confirm_timeout: float = 20.0
     poll_interval: float = 0.2
     stable_polls: int = 12          # 连续多少次轮询无变化判定"结束"（稳定兜底）
     min_wait_before_stable: float = 8.0  # 稳定判定生效前的最短等待（防思考→正文间隙误判）

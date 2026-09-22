@@ -139,9 +139,22 @@ class WebChatProvider(BaseProvider):
             if self.net_enabled:
                 await self._reset_net_capture(page)
             await self._send_prompt(page, input_sel, prompt)
+            # 确认网页端真的接受了这条消息：点发送成功 ≠ 消息发出（实测 ChatGPT 会静默丢掉），
+            # 否则消息在页面上"消失"、客户端只等到超时 → 用户表现为"丢了一个响应"。
+            if not await self._confirm_sent(page, input_sel, prompt):
+                logger.warning("[%s] 发送后输入框未清空 → 判定未发出，重试一次", self.name)
+                await self._send_prompt(page, input_sel, prompt)
+                if not await self._confirm_sent(page, input_sel, prompt):
+                    raise ResponseTimeoutError(
+                        f'provider "{self.name}" 消息未能发出：网页端没有接受这条输入'
+                        f"（输入框仍保留原文，常见于账号限流/风控或页面未就绪），请稍后重试",
+                        provider=self.name,
+                    )
             logger.info("[%s] prompt sent, polling", self.name)
 
-            async for chunk in self._poll_response(page, md_before, th_before, busy_timeout):
+            async for chunk in self._poll_response(
+                page, md_before, th_before, busy_timeout, input_sel=input_sel, prompt=prompt
+            ):
                 yield chunk
         finally:
             # 无状态请求：用完即关；thread 模式：页面留给 ThreadManager 管理
@@ -595,6 +608,56 @@ class WebChatProvider(BaseProvider):
         else:
             await page.keyboard.press("Enter")
 
+    async def _message_delivered(
+        self,
+        page: Page,
+        md_before: dict[str, int] | None = None,
+        th_before: dict[str, int] | None = None,
+    ) -> bool:
+        """页面是否真的开始生成：出现新的 assistant/thinking 容器，或停止按钮可见。
+
+        用于区分两种情况：消息被静默丢弃（要重发/快速失败） vs 只是生成慢（继续等）。
+        """
+        for before in (md_before, th_before):
+            for sel, count in (before or {}).items():
+                try:
+                    if await extractor.count_matches(page, sel) > count:
+                        return True
+                except Exception:  # noqa: BLE001
+                    continue
+        for stop in self.cfg.selectors.stop_button:
+            if await self._is_visible(page, stop):
+                return True
+        return False
+
+    async def _confirm_sent(
+        self, page: Page, input_sel: str, prompt: str, *, timeout: float = 8.0
+    ) -> bool:
+        """发送后确认输入框已被清空（= 网页端真的接受了这条消息）。
+
+        读法双保险：``input_value()``（textarea/input）+ ``inner_text()``（contenteditable）。
+        取不到值时**视为已发送**（不误伤），只有明确还留着原文才判定未发出。
+        """
+        probe = (prompt or "").strip()[:20]
+        deadline = time.monotonic() + timeout
+        while True:
+            left = ""
+            try:
+                loc = page.locator(input_sel).first
+                try:
+                    left = (await loc.input_value() or "").strip()
+                except Exception:  # noqa: BLE001  非 input/textarea 会抛
+                    pass
+                if not left:
+                    left = (await loc.inner_text() or "").strip()
+            except Exception:  # noqa: BLE001
+                return True
+            if not left or (probe and probe not in left):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await page.wait_for_timeout(400)
+
     async def _type_prompt_human(self, page: Page, input_el, prompt: str) -> None:
         """逐字输入提示词（触发 React 受控状态）。
 
@@ -671,10 +734,15 @@ XMLHttpRequest.prototype.send = function (body) {{
         md_before: dict[str, int],
         th_before: dict[str, int],
         busy_timeout: float | None = None,
+        *,
+        input_sel: str | None = None,
+        prompt: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """双轨读取：网络监听为主，通道失效自动降级 DOM 轮询。"""
         if not self.net_enabled:
-            async for chunk in self._poll_response_dom(page, md_before, th_before, busy_timeout):
+            async for chunk in self._poll_response_dom(
+                page, md_before, th_before, busy_timeout, input_sel=input_sel, prompt=prompt
+            ):
                 yield chunk
             return
         g, d = self.NET_GLOBAL, self.NET_GLOBAL_DONE
@@ -696,7 +764,9 @@ XMLHttpRequest.prototype.send = function (body) {{
                     "[%s] network capture unavailable (%s), fallback to DOM polling",
                     self.name, e,
                 )
-        async for chunk in self._poll_response_dom(page, md_before, th_before, busy_timeout):
+        async for chunk in self._poll_response_dom(
+            page, md_before, th_before, busy_timeout, input_sel=input_sel, prompt=prompt
+        ):
             yield chunk
 
     async def _poll_response_net(
@@ -805,6 +875,9 @@ XMLHttpRequest.prototype.send = function (body) {{
         md_before: dict[str, int],
         th_before: dict[str, int],
         busy_timeout: float | None = None,
+        *,
+        input_sel: str | None = None,
+        prompt: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """DOM 兜底路径：增量 diff 响应文本，产出 StreamChunk（thinking 与 content 分开）。
 
@@ -823,12 +896,45 @@ XMLHttpRequest.prototype.send = function (body) {{
         md_sel: str | None = None
         th_sel: str | None = None
         start = time.monotonic()
+        confirm_timeout = getattr(cfg, "send_confirm_timeout", 0) or 0
+        confirmed = False   # 是否已经确认"网页端开始生成"
         while True:
             elapsed = time.monotonic() - start
             if elapsed > timeout:
                 raise ResponseTimeoutError(
-                    f'provider "{self.name}" 发送后未检测到回复开始', provider=self.name
+                    f'provider "{self.name}" 发送后未检测到回复开始（{timeout:.0f}s）',
+                    provider=self.name,
                 )
+            # 早期确认：一段时间内既无新容器、也无停止按钮 → 消息很可能是被静默丢弃了。
+            # 重发一次；重发后仍无迹象就快速失败，而不是死等满 response_timeout。
+            if confirm_timeout and not confirmed and elapsed > confirm_timeout:
+                delivered = await self._message_delivered(page, md_before, th_before)
+                if not delivered and input_sel and prompt:
+                    logger.warning(
+                        "[%s] %.0fs 内无任何生成迹象 → 判定未发出，重发一次", self.name, elapsed
+                    )
+                    try:
+                        await self._send_prompt(page, input_sel, prompt)
+                    except Exception:  # noqa: BLE001
+                        logger.warning("[%s] 重发失败", self.name, exc_info=True)
+                    start = time.monotonic()          # 重发后重新计时
+                    confirmed = True                  # 只重发一次
+                    continue
+                confirmed = True                      # 有迹象（或无法重发）→ 继续正常等待
+                start = time.monotonic()
+            md_sel = await self._find_new(page, md_before)
+            th_sel = await self._find_new(page, th_before)
+            if md_sel or th_sel:
+                break
+            if confirm_timeout and confirmed and elapsed > confirm_timeout:
+                # 已重发过一次且仍无任何迹象 → 快速失败（明确原因，不误导为"超时"）
+                if not await self._message_delivered(page, md_before, th_before):
+                    raise ResponseTimeoutError(
+                        f'provider "{self.name}" 消息未能发出：重发后网页端仍未开始生成'
+                        f"（{elapsed:.0f}s，常见于账号限流/风控或页面未就绪），请稍后重试",
+                        provider=self.name,
+                    )
+                start = time.monotonic()
             if busy_timeout and elapsed > busy_timeout:  # 0/None = 关闭忙检测
                 raise ThreadBusyError(
                     f'provider "{self.name}" thread 页面正忙（上一请求未完成，发送被排队），'
@@ -907,6 +1013,10 @@ XMLHttpRequest.prototype.send = function (body) {{
                         done = True
                 # 否则（正文容器尚未出现）→ 继续等，避免空正文提前结束（Qwen 实测）
             if done:
+                logger.info(
+                    "[%s] done content=%d chars thinking=%d chars elapsed=%.1fs",
+                    self.name, len(last["content"]), len(last["thinking"]), elapsed,
+                )
                 if buffer_content:
                     # 收尾兜底：结束判定可能比最后一帧渲染早一拍 → 再等一拍重取一次，取更长的
                     await page.wait_for_timeout(poll_ms + 200)
@@ -918,6 +1028,13 @@ XMLHttpRequest.prototype.send = function (body) {{
                         last["content"] = final
                     if last["content"]:
                         yield StreamChunk("content", last["content"])
+                    elif not last["thinking"]:
+                        # 零内容：与其返回 200 + 空正文（客户端看起来像"响应丢了"），不如明确报错
+                        raise ResponseTimeoutError(
+                            f'provider "{self.name}" 本轮没有产生任何回复内容'
+                            f"（发送后页面未渲染内容，可能被限流/风控或未真正发出），请重试",
+                            provider=self.name,
+                        )
                 return
 
             await page.wait_for_timeout(poll_ms)

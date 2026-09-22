@@ -71,3 +71,120 @@ async def test_single_line_has_no_newline_key():
     prov, page = _prov(), _Page()
     await prov._type_prompt_human(page, _Input(page.rec), "可用工具:[{...}]")
     assert [k for kind, k in page.rec if kind == "key"] == []
+
+
+# ---------- 发送确认：点发送 ≠ 消息发出（实测 ChatGPT 会静默丢掉） ----------
+
+
+class _Loc:
+    def __init__(self, values=None, text="", broken=False):
+        self._values = list(values or [])
+        self._text = text
+        self._broken = broken
+
+    @property
+    def first(self):
+        return self
+
+    async def input_value(self):
+        if self._broken or not self._values:
+            raise RuntimeError("not an input element")
+        return self._values.pop(0) if len(self._values) > 1 else self._values[0]
+
+    async def inner_text(self):
+        if self._broken:
+            raise RuntimeError("element gone")
+        return self._text
+
+
+class _ConfirmPage:
+    def __init__(self, loc):
+        self._loc = loc
+
+    def locator(self, _sel):
+        return self._loc
+
+    async def wait_for_timeout(self, _ms):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_confirm_sent_textarea_cleared():
+    """textarea：输入框被清空 = 已发出。"""
+    prov = _prov()
+    page = _ConfirmPage(_Loc(values=["娱乐新闻", ""]))
+    assert await prov._confirm_sent(page, "#ta", "娱乐新闻") is True
+
+
+@pytest.mark.asyncio
+async def test_confirm_sent_still_holds_prompt_is_false():
+    """contenteditable 仍留着原文 → 判定未发出（触发重试）。"""
+    prov = _prov()
+    page = _ConfirmPage(_Loc(values=[], text="娱乐新闻"))
+    assert await prov._confirm_sent(page, ".editor", "娱乐新闻", timeout=0.2) is False
+
+
+@pytest.mark.asyncio
+async def test_confirm_sent_missing_element_is_ok():
+    """元素读不到 → 视为已发送（不误伤正常流程）。"""
+    prov = _prov()
+    assert await prov._confirm_sent(_ConfirmPage(_Loc(broken=True)), ".editor", "x") is True
+
+
+@pytest.mark.asyncio
+async def test_confirm_sent_text_changed_counts_as_sent():
+    """输入框内容变了（例如被清成别的）也算已发出。"""
+    prov = _prov()
+    page = _ConfirmPage(_Loc(values=["", "别的文本"]))
+    assert await prov._confirm_sent(page, "#ta", "娱乐新闻") is True
+
+
+# ---------- 送达判定：区分"被静默丢弃"与"只是生成慢" ----------
+
+
+class _DeliverPage:
+    def __init__(self, counts):
+        self._counts = counts
+
+
+@pytest.mark.asyncio
+async def test_message_delivered_via_new_container(monkeypatch):
+    from ai_web2api.browser import extractor
+
+    prov = _prov()
+
+    async def fake_count(_page, _sel):
+        return 4          # 发送前是 3 → 增加了
+
+    monkeypatch.setattr(extractor, "count_matches", fake_count)
+    assert await prov._message_delivered(_DeliverPage({}), {".md": 3}, {}) is True
+
+
+@pytest.mark.asyncio
+async def test_message_delivered_via_stop_button(monkeypatch):
+    """容器还没出，但停止按钮可见 = 正在生成（只是慢）。"""
+    from ai_web2api.browser import extractor
+    from ai_web2api.providers.webchat import WebChatProvider
+
+    prov = _prov(stop_button=["button.stop"])
+
+    async def fake_count(_page, _sel):
+        return 3          # 没增加
+
+    monkeypatch.setattr(extractor, "count_matches", fake_count)
+    monkeypatch.setattr(WebChatProvider, "_is_visible", staticmethod(lambda page, sel: True))
+    assert await prov._message_delivered(_DeliverPage({}), {".md": 3}, {}) is True
+
+
+@pytest.mark.asyncio
+async def test_message_not_delivered(monkeypatch):
+    """既无新容器也无停止按钮 → 判定消息没真正发出（触发重发/快速失败）。"""
+    from ai_web2api.browser import extractor
+
+    prov = _prov(stop_button=["button.stop"])
+
+    async def fake_count(_page, _sel):
+        return 3
+
+    monkeypatch.setattr(extractor, "count_matches", fake_count)
+    assert await prov._message_delivered(_DeliverPage({}), {".md": 3}, {}) is False
