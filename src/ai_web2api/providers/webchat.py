@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -1179,6 +1180,7 @@ XMLHttpRequest.prototype.send = function (body) {{
             return []
         store = self._widget_store()
         out: list[dict] = []
+        seen: set[str] = set()          # 同一组件常被镜像渲染多次 → 按内容去重
         for frame in frames:
             html_bytes = png_bytes = None
             try:
@@ -1191,8 +1193,13 @@ XMLHttpRequest.prototype.send = function (body) {{
                     png_bytes = await frame.locator("body").screenshot(type="png")
             except Exception:  # noqa: BLE001
                 pass
+            fingerprint = hashlib.sha1((html_bytes or b"") + (png_bytes or b"")).hexdigest()
+            if not (html_bytes or png_bytes) or fingerprint in seen:
+                continue
+            seen.add(fingerprint)
             meta = store.save(self.name, html=html_bytes, png=png_bytes)
             if meta:
+                meta["provider"] = self.name      # UI 拼组件 URL 需要
                 out.append(meta)
         return out
 

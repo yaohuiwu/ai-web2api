@@ -57,6 +57,65 @@ function wireMsgActions(div) {
   });
 }
 
+// 交互组件（iframe widget）面板：默认沙箱 iframe 可交互，可切截图（见 docs/WIDGET_CAPTURE.md）
+function widgetsHtml(widgets) {
+  return (widgets || [])
+    .map((w, i) => {
+      const prov = encodeURIComponent(w.provider || "");
+      const base = `/admin/${prov}/widgets/${encodeURIComponent(w.id)}`;
+      const interactive = w.html
+        ? `<iframe class="widget-frame" src="${base}.html" sandbox="allow-scripts" loading="lazy"
+                   title="交互组件 ${esc(w.id)}"></iframe>`
+        : "";
+      const shot = w.png
+        ? `<img class="widget-shot" src="${base}.png" alt="组件截图 ${esc(w.id)}" hidden>`
+        : "";
+      const toggle = w.html && w.png
+        ? `<button class="btn sm" data-widget-toggle="${i}">看截图</button>`
+        : "";
+      return `<div class="widget-box" data-widget="${i}">
+        <div class="widget-bar">
+          <span class="muted">🧩 交互组件</span>
+          ${toggle}
+          <a class="btn sm" href="${base}.html" target="_blank" rel="noopener">新窗口打开</a>
+          <button class="btn sm" data-widget-html="${i}">复制 HTML</button>
+        </div>
+        ${interactive}${shot}
+      </div>`;
+    })
+    .join("");
+}
+
+function wireWidgets(root, widgets) {
+  (widgets || []).forEach((w, i) => {
+    const box = root.querySelector(`.widget-box[data-widget="${i}"]`);
+    if (!box) return;
+    const frame = box.querySelector(".widget-frame");
+    const shot = box.querySelector(".widget-shot");
+    const toggle = box.querySelector(`[data-widget-toggle="${i}"]`);
+    if (toggle && frame && shot) {
+      toggle.onclick = () => {
+        const showingShot = !shot.hidden;
+        shot.hidden = showingShot;
+        frame.hidden = !showingShot;
+        toggle.textContent = showingShot ? "看截图" : "看交互";
+      };
+    }
+    const copyBtn = box.querySelector(`[data-widget-html="${i}"]`);
+    if (copyBtn) {
+      copyBtn.onclick = async () => {
+        try {
+          const prov = encodeURIComponent(w.provider || "");
+          const r = await fetch(`/admin/${prov}/widgets/${encodeURIComponent(w.id)}.html`);
+          copyText(await r.text());
+        } catch (e) {
+          toast(`复制失败: ${e.message}`);
+        }
+      };
+    }
+  });
+}
+
 function addMsg(role, content, opts = {}) {
   const chat = $("#chat");
   const div = document.createElement("div");
@@ -73,6 +132,9 @@ function addMsg(role, content, opts = {}) {
         .map((a) => `<a class="att-thumb" href="${a.dataUrl}" target="_blank" rel="noopener">${attMedia(a)}</a>`)
         .join("") +
       `</div>`;
+  }
+  if (opts.widgets && opts.widgets.length) {
+    inner += `<div class="widgets">${widgetsHtml(opts.widgets)}</div>`;
   }
   // 底部信息行：角色 / 时间 / 耗时 / 动作
   if (role !== "meta") {
@@ -91,6 +153,7 @@ function addMsg(role, content, opts = {}) {
   div._text = content;
   div._payload = opts.payload || null;
   wireMsgActions(div);
+  wireWidgets(div, opts.widgets);
   chat.appendChild(div);
   chat.scrollTop = chat.scrollHeight;
   return div;
@@ -320,7 +383,9 @@ async function sendNonStream(body) {
     if (th && !content) {
       div = addMsg("assistant", "（思考过程已完整输出，但正文未生成——可能因思考过长被结束判定截断，请重试）", { thinking: th, payload: msg });
     } else {
-      div = addMsg("assistant", content || "（空回复）", { thinking: th, payload: msg });
+      div = addMsg("assistant", content || "（空回复）", {
+        thinking: th, payload: msg, widgets: msg.widgets || null,
+      });
     }
     footTiming(div, null, Date.now() - t0);
   }
@@ -347,6 +412,7 @@ async function sendStream(body) {
   let fullThinking = "";
   let thinkBox = null;
   let toolCalls = [];
+  let gotWidgets = null;
   const bubbleDiv = addMsg("assistant", "");
   const bubble = bubbleDiv.querySelector(".bubble");
   const contentBox = document.createElement("div");
@@ -413,6 +479,7 @@ async function sendStream(body) {
       let obj;
       try { obj = JSON.parse(payload); } catch { continue; }
       if (obj.error) throw new Error(obj.error.message || "流错误");
+      if (obj.widgets && obj.widgets.length) gotWidgets = obj.widgets;
       const delta = obj.choices && obj.choices[0] && obj.choices[0].delta;
       if (delta) flushChunk(delta);
       if (obj.thread_id && !gotThreadId) {
@@ -452,6 +519,13 @@ async function sendStream(body) {
   }
   bubbleDiv._text = fullContent;
   bubbleDiv._payload = { content: fullContent, reasoning_content: fullThinking, tool_calls: toolCalls };
+  if (gotWidgets) {
+    const box = document.createElement("div");
+    box.className = "widgets";
+    box.innerHTML = widgetsHtml(gotWidgets);
+    bubble.appendChild(box);
+    wireWidgets(bubbleDiv, gotWidgets);
+  }
   footTiming(bubbleDiv, ttfb, Date.now() - t0);
   return { content: fullContent, thinking: fullThinking, toolCalls, elapsed_ms: Date.now() - t0 };
 }
@@ -633,7 +707,9 @@ function renderHistory(msgs) {
     if (m.role === "user") {
       addMsg("user", m.content || "", { attachments: historyAtts(m) });
     } else {
-      addMsg("assistant", m.content || "（空回复）", { thinking: m.reasoning || "" });
+      addMsg("assistant", m.content || "（空回复）", {
+        thinking: m.reasoning || "", widgets: m.widgets || null,
+      });
     }
   }
 }
@@ -759,8 +835,15 @@ const qsThread = new URLSearchParams(location.search).get("thread_id");
 if (qsThread) {
   $("#threadId").value = qsThread;
   $("#threadId").dispatchEvent(new Event("input"));
-  refreshThreads().then((items) => {
-    const t = (items || []).find((x) => x.thread_id === qsThread);
+  // 容错：refreshThreads() 返回异常也不能连累整页（否则历史/正文都渲染不出来）
+  (async () => {
+    let items = [];
+    try {
+      items = (await refreshThreads()) || [];
+    } catch (e) {
+      console.warn("refreshThreads failed:", e);
+    }
+    const t = (Array.isArray(items) ? items : []).find((x) => x.thread_id === qsThread);
     switchThread(qsThread, t ? t.loaded !== false : true, t ? t.model : null);
-  });
+  })();
 }
