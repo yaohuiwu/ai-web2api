@@ -1,9 +1,12 @@
 """ai-web2api 命令行（运维子命令）。
 
-用法：
-    python -m ai_web2api.cli login qwen            # 有头浏览器手动登录 → 自动导入本地服务
-    python -m ai_web2api.cli login deepseek --manual
-    python -m ai_web2api.cli login qwen --no-import
+用法（安装后可用短命令；``python -m ai_web2api.cli`` 等价）：
+    ai-web2api login                 # 交互选择 provider → 有头浏览器登录 → 自动导入
+    ai-web2api login chatgpt         # 指定 provider
+    ai-web2api login deepseek --manual
+    ai-web2api providers             # 列出 provider（模式/登录态/认证有效期）
+
+导入地址优先级：``--import-url`` > ``AI_WEB2API_URL`` > 由 config 推导（0.0.0.0 → 127.0.0.1）。
 
 设计见 docs/MANUAL_LOGIN.md。
 """
@@ -22,12 +25,18 @@ from pathlib import Path
 from .browser import extractor
 from .browser.manager import BrowserManager
 from .config import AppConfig, load_config
+from .core.auth_expiry import compute_for_state_file
 from .providers.registry import ProviderRegistry
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m ai_web2api.cli", description="ai-web2api 运维命令")
+    parser = argparse.ArgumentParser(
+        prog="ai-web2api", description="ai-web2api 运维命令（也可用 python -m ai_web2api.cli）"
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
+
+    pp = sub.add_parser("providers", help="列出 provider（模式 / 登录态 / 认证有效期）")
+    pp.add_argument("--config", default=os.environ.get("AI_WEB2API_CONFIG", "config.yaml"))
 
     p = sub.add_parser("login", help="手动登录（有头浏览器）并导出/导入登录态")
     p.add_argument("provider", nargs="?", help="provider 名（省略 = server.default_provider / 首个启用）")
@@ -35,7 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--manual", action="store_true", help="不自动填表，纯手动")
     p.add_argument("--timeout", type=float, default=600.0, help="等待登录成功的最长秒数")
     p.add_argument("--out", default=None, help="state 输出路径（默认 profiles/<p>/state.json）")
-    p.add_argument("--import-url", dest="import_url", default=None, help="导入地址（默认本地服务）")
+    p.add_argument(
+        "--import-url",
+        dest="import_url",
+        default=os.environ.get("AI_WEB2API_URL"),
+        help="导入地址（默认 AI_WEB2API_URL 环境变量，或由 config 推导的本地服务）",
+    )
     p.add_argument("--import-key", dest="import_key", default=os.environ.get("WEB2API_API_KEY"))
     p.add_argument("--import", dest="import_state", action="store_true", help="登录后导入服务（默认）")
     p.add_argument("--no-import", dest="import_state", action="store_false", help="不导入，只写 state")
@@ -49,6 +63,91 @@ def _local_import_url(cfg: AppConfig) -> str:
     if host in {"0.0.0.0", "::", "*", ""}:
         host = "127.0.0.1"
     return f"http://{host}:{cfg.server.port}"
+
+
+def _auth_summary(cfg: AppConfig, provider, browser: BrowserManager) -> str:
+    """一行摘要：登录态 / 认证有效期（供交互选择与 `providers` 子命令复用）。"""
+    info = compute_for_state_file(
+        browser.state_path(provider.name),
+        auth_cookies=provider.cfg.login.auth_cookies,
+        session_ttl_days=provider.cfg.login.session_ttl_days,
+        warn_days=provider.cfg.login.expiry_warn_days or cfg.browser.auth_expiry_warn_days,
+        login_at=browser.read_login_at(provider.name),
+    )
+    st = info.state
+    if st == "ok":
+        tail = f"认证还剩 {info.days_left:.0f} 天"
+    elif st == "soon":
+        tail = f"⚠ 认证 {info.days_left:.0f} 天后过期"
+    elif st == "expired":
+        tail = "⚠ 认证已过期"
+    else:
+        tail = "认证有效期未知"
+    return tail
+
+
+def _pick_provider(cfg: AppConfig, registry: ProviderRegistry, names: list[str], given: str | None) -> str | None:
+    """省略 provider 时：TTY 下交互选择，否则回退默认值。"""
+    if given:
+        if given in names:
+            return given
+        print(f"未知 provider：{given!r}\n可用：{', '.join(names)}")
+        return None
+    default = cfg.server.default_provider or (names[0] if names else None)
+    if not names:
+        print("没有启用的 provider（检查 config.yaml 的 providers.*.enabled）")
+        return None
+    if not sys.stdin.isatty():
+        print(f"未指定 provider，使用默认值 {default!r}（可用：{', '.join(names)}）")
+        return default
+    print("请选择要登录的 provider：")
+    for i, n in enumerate(names, 1):
+        p = registry.get_provider(n)
+        mark = "  ← 默认" if n == default else ""
+        print(f"  {i}. {n:10s} [{p.cfg.login.mode:6s}] {_auth_summary(cfg, p, p.browser)}{mark}")
+    raw = input(f"输入序号或名字（回车 = {default}）：").strip()
+    if not raw:
+        return default
+    if raw.isdigit() and 1 <= int(raw) <= len(names):
+        return names[int(raw) - 1]
+    if raw in names:
+        return raw
+    print(f"输入无效：{raw!r}")
+    return None
+
+
+def _cmd_providers(cfg: AppConfig) -> int:
+    """列出 provider（不需要浏览器：只读 state.json / login.json）。"""
+    rows = [p for p in cfg.providers if p.enabled]
+    if not rows:
+        print("没有启用的 provider")
+        return 1
+    print(f"{'provider':12s} {'mode':7s} {'state.json':11s} 认证有效期")
+    for p in rows:
+        state = Path(cfg.profiles_dir) / p.name / "state.json"
+        meta = Path(cfg.profiles_dir) / p.name / "login.json"
+        login_at = None
+        try:
+            login_at = float(json.loads(meta.read_text(encoding="utf-8"))["login_at"])
+        except Exception:  # noqa: BLE001
+            pass
+        info = compute_for_state_file(
+            state,
+            auth_cookies=p.login.auth_cookies,
+            session_ttl_days=p.login.session_ttl_days,
+            warn_days=p.login.expiry_warn_days or cfg.browser.auth_expiry_warn_days,
+            login_at=login_at,
+        )
+        if info.state == "ok" and info.days_left is not None:
+            detail = f"还剩 {info.days_left:.0f} 天"
+        elif info.state == "soon" and info.days_left is not None:
+            detail = f"⚠ {info.days_left:.0f} 天后过期"
+        elif info.state == "expired":
+            detail = "⚠ 已过期"
+        else:
+            detail = "未知（会话型/未配置）"
+        print(f"{p.name:12s} {p.login.mode:7s} {('有' if state.exists() else '无'):11s} {detail}")
+    return 0
 
 
 def _post_state(url: str, provider: str, state: dict, api_key: str | None) -> tuple[bool, str]:
@@ -80,14 +179,13 @@ async def _login_flow(args: argparse.Namespace) -> int:
     browser = BrowserManager(
         cfg.browser.model_copy(update={"headless": False}), cfg.profiles_dir
     )
+    # 先选 provider（只读配置，不启动浏览器 → 选错也不会弹窗）
+    registry = ProviderRegistry(cfg, browser)
+    name = _pick_provider(cfg, registry, list(registry.providers()), args.provider)
+    if not name:
+        return 2
     await browser.start()
     try:
-        registry = ProviderRegistry(cfg, browser)
-        names = list(registry.providers())
-        name = args.provider or cfg.server.default_provider or (names[0] if names else None)
-        if not name or name not in registry.providers():
-            print(f"未知 provider：{name!r}；可用：{names}")
-            return 2
         provider = registry.get_provider(name)
         lp = provider.cfg.login.page
         ctx = await browser.get_context(name, locale=provider.locale)
@@ -167,11 +265,24 @@ async def _login_flow(args: argparse.Namespace) -> int:
                 state = json.loads(out.read_text(encoding="utf-8"))
                 okk, msg = _post_state(url, name, state, args.import_key)
                 if okk:
-                    print(f"[{name}] 已导入 {url}：{msg}")
+                    info = compute_for_state_file(
+                        out,
+                        auth_cookies=provider.cfg.login.auth_cookies,
+                        session_ttl_days=provider.cfg.login.session_ttl_days,
+                        warn_days=(
+                            provider.cfg.login.expiry_warn_days
+                            or cfg.browser.auth_expiry_warn_days
+                        ),
+                        login_at=time.time(),
+                    )
+                    extra = f"，认证还剩 {info.days_left:.0f} 天" if info.days_left else ""
+                    print(f"✅ [{name}] 已保存并导入 {url}（服务立即生效，无需重启{extra}）")
+                    print(f"   文件：{out}")
                 else:
                     print(
-                        f"[{name}] 导入 {url} 失败（{msg}）。\n"
-                        f"        可稍后手动导入：POST {url}/admin/{name}/login/state（body = {out}）"
+                        f"⚠️ [{name}] 已保存 {out}，但导入 {url} 失败：{msg}\n"
+                        f"   稍后可手动导入：POST {url}/admin/{name}/login/state"
+                        f"（body = state.json 内容）"
                     )
             return 0
         finally:
@@ -182,6 +293,8 @@ async def _login_flow(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.cmd == "providers":
+        return _cmd_providers(load_config(args.config))
     try:
         return asyncio.run(_login_flow(args))
     except KeyboardInterrupt:
