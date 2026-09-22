@@ -51,6 +51,29 @@ function addMsg(role, content, opts = {}) {
   return div;
 }
 
+// 等待响应中的占位提示（动点 + 已等秒数），避免看起来像卡死。
+// 返回 stop()：幂等，首个 chunk 到达 / 请求结束 / 报错时调用。
+function showPending(div) {
+  const bubble = div && div.querySelector(".bubble");
+  if (!bubble) return () => {};
+  const p = document.createElement("div");
+  p.className = "pending";
+  p.innerHTML = '<span class="dots"><i></i><i></i><i></i></span><span class="ptext">等待响应…</span>';
+  bubble.appendChild(p);
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    const el = p.querySelector(".ptext");
+    if (el) el.textContent = `等待响应… ${Math.round((Date.now() - t0) / 1000)}s`;
+  }, 1000);
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    p.remove();
+  };
+}
+
 function addToolCallMsg(calls) {
   const chat = $("#chat");
   for (const tc of calls) {
@@ -224,11 +247,20 @@ function rememberThreadId(tid) {
 // ---------- 发送：非流式 / 流式 ----------
 
 async function sendNonStream(body) {
-  const res = await fetch("/v1/chat/completions", {
-    method: "POST", headers: headers(), body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(errMsg(data));
+  // 先把"等待中"气泡摆上（非流式要等整包，不显示就会以为卡死）
+  const pendingDiv = addMsg("assistant", "");
+  const stopPending = showPending(pendingDiv);
+  let data;
+  try {
+    const res = await fetch("/v1/chat/completions", {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    data = await res.json();
+    if (!res.ok) throw new Error(errMsg(data));
+  } finally {
+    stopPending();
+    pendingDiv.remove();   // 真实回复紧接着 addMsg 追加
+  }
   rawLog.push({ req: body, res: data });
   const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
   if (msg.tool_calls && msg.tool_calls.length) {
@@ -270,6 +302,7 @@ async function sendStream(body) {
   const contentBox = document.createElement("div");
   contentBox.className = "content";
   bubble.appendChild(contentBox);
+  const stopPending = showPending(bubbleDiv);
   let gotThreadId = false;
 
   const ensureThinkBox = () => {
@@ -286,6 +319,8 @@ async function sendStream(body) {
 
   const flushChunk = (delta) => {
     if (!delta) return;
+    // 有任何实际内容（思考/正文/工具）→ 立即撤掉"等待中"指示
+    if (delta.reasoning_content || delta.content || delta.tool_calls) stopPending();
     if (delta.reasoning_content) {
       fullThinking += delta.reasoning_content;
       ensureThinkBox().appendChild(document.createTextNode(delta.reasoning_content));
@@ -308,6 +343,7 @@ async function sendStream(body) {
     }
   };
 
+  try {
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -330,6 +366,9 @@ async function sendStream(body) {
         rememberThreadId(obj.thread_id);
       }
     }
+  }
+  } finally {
+    stopPending();   // 正常结束 / 报错都要撤掉"等待中"指示
   }
   toolCalls = toolCalls.filter(Boolean);
 
@@ -363,6 +402,7 @@ async function sendStream(body) {
 async function dispatchLoop(firstAttachments = null) {
   $("#send").disabled = true;
   streaming = true;
+  $("#hint").textContent = "⏳ 生成中…（网页端较慢，ChatGPT 可能数十秒无输出，请稍候）";
   try {
     for (let round = 0; round < 6; round++) {
       const body = buildBody(round === 0 ? firstAttachments : null);

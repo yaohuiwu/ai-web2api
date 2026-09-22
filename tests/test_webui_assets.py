@@ -74,3 +74,15 @@ def test_markdown_does_not_corrupt_urls(tmp_path):
         capture_output=True,
         text=True,
     )
+
+
+def test_playground_shows_waiting_indicator():
+    """等待响应时要有 UI 提示（动点 + 秒数），避免看起来卡死。"""
+    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+    css = (WEBUI / "assets/css/playground.css").read_text(encoding="utf-8")
+    assert "function showPending" in js
+    assert "等待响应…" in js
+    assert "stopPending" in js
+    # 非流式也要显示（整包等待最容易以为卡死）
+    assert "sendNonStream" in js and "showPending(pendingDiv)" in js
+    assert ".pending" in css and "pending-bounce" in css
