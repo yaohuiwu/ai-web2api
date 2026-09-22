@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 WEBUI = Path(__file__).resolve().parent.parent / "src" / "ai_web2api" / "webui"
-HTML_FILES = ("index.html", "playground.html")
+HTML_FILES = ("index.html", "playground.html", "threads.html")
 
 
 def test_no_inline_style_or_script():
@@ -173,3 +173,22 @@ def test_login_guidance_uses_one_command_with_import_url():
     assert "--import-url ${location.origin}" in js, "命令未自动带上当前服务地址"
     assert "function copyText" not in js, "copyText 应只在 common.js 定义"
     assert "loginStamp" in js, "导入面板未显示最近登录时间"
+
+
+def test_threads_page_features():
+    """会话独立页：搜索 / provider 过滤 / 每页条数 / 加载更多 / 续用。"""
+    html = (WEBUI / "threads.html").read_text(encoding="utf-8")
+    js = (WEBUI / "assets/js/threads.js").read_text(encoding="utf-8")
+    css = (WEBUI / "assets/css/threads.css").read_text(encoding="utf-8")
+    for el in ("q", "provider", "limit", "moreBtn", "list", "autoRefresh"):
+        assert f'id="{el}"' in html, f"threads.html 缺少 #{el}"
+    assert "admin/threads?" in js, "未按查询参数请求 /admin/threads"
+    assert "loadMore" in js and "has_more" in js, "缺少分页/加载更多"
+    assert "setTimeout(() => loadMore(true), 300)" in js, "搜索未做防抖"
+    assert "playground.html?thread_id=" in js, "缺少续用入口"
+    assert "data-kill" in js, "缺少销毁"
+    assert "没有匹配的会话" in js, "缺少无结果空状态"
+    assert ".tcard" in css and "text-overflow: ellipsis" in css, "标题未截断"
+    # 三个页面导航互链
+    for name in ("index.html", "playground.html", "threads.html"):
+        assert "/ui/threads.html" in (WEBUI / name).read_text(encoding="utf-8")
