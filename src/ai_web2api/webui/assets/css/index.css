@@ -103,6 +103,15 @@ main { max-width: 1080px; margin: 0 auto; padding: 22px 24px 72px; }
 }
 .login-cta code { background: #fff7e6; padding: 1px 6px; border-radius: 4px; }
 .login-cta .btn.sm { margin-left: auto; }
+.login-cta.warn { border-color: #fcd34d; background: #fffbeb; color: #92400e; }
+.login-cta.danger { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+.login-cta.danger code { background: #fee2e2; }
+.login-cta.warn .btn.sm ~ .btn.sm { margin-left: 0; }
+/* 认证有效期状态色 */
+.kv dd.auth-ok { color: #047857; }
+.kv dd.auth-soon { color: #b45309; font-weight: 600; }
+.kv dd.auth-expired { color: #b91c1c; font-weight: 600; }
+.kv dd.auth-unknown, .kv dd.auth-logged_out { color: #6b7280; }
 .manual-panel .mp-line { font-size: 13px; margin-bottom: 6px; }
 .manual-panel code { background: #eef2f7; padding: 1px 6px; border-radius: 4px; font-size: 12px; }
 .manual-panel textarea {

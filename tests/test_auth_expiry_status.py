@@ -61,3 +61,13 @@ def test_status_unknown_without_auth_cookies(tmp_path: Path):
     _write_state(tmp_path, [{"name": "aws-waf-token", "value": "x", "expires": time.time() + 3 * 86400}])
     ae = _prov(c)["auth_expiry"]
     assert ae["state"] == "unknown" and ae["expires_at"] is None and ae["source"] == "unknown"
+
+
+def test_webui_renders_auth_expiry():
+    js = (ROOT / "src" / "ai_web2api" / "webui" / "assets" / "js" / "index.js").read_text(
+        encoding="utf-8"
+    )
+    assert "认证有效期" in js
+    assert "p.auth_expiry" in js
+    assert 'p.login_mode === "manual"' in js  # 仅手动认证提醒
+    assert "expired" in js and "soon" in js

@@ -91,6 +91,28 @@ function renderProviderDetail(p) {
     ? `<div class="login-cta">⚠ 未登录。在本机运行 <code>${esc(cmd)}</code>（登录完会自动导入），或在下方粘贴/选择 <code>state.json</code>。
          <button class="btn sm" onclick="copyText('${cmd}')">复制命令</button></div>`
     : "";
+  // 认证有效期（后端 /admin/status 的 auth_expiry；可能缺失 → 降级显示）
+  const ae = p.auth_expiry || {};
+  const aeState = ae.state;
+  const days = ae.days_left != null ? Math.max(0, Math.round(ae.days_left)) : null;
+  const aeDate = ae.expires_at_iso ? ae.expires_at_iso.slice(0, 10) : "";
+  let aeText = "—";
+  if (aeState === "ok") aeText = `还剩 ${days} 天（${aeDate}）`;
+  else if (aeState === "soon") aeText = `⚠ ${days} 天后过期（${aeDate}）`;
+  else if (aeState === "expired") aeText = `已过期（${aeDate}）`;
+  else if (aeState === "logged_out") aeText = "未登录";
+  else if (aeState === "unknown") aeText = "无法判断（会话型 / 未配置关键 cookie）";
+  // 仅手动认证 provider 快过期/已过期时提醒（自动认证无需人工干预）
+  const manualWarn = p.login_mode === "manual" && (aeState === "soon" || aeState === "expired");
+  const expiryCard = manualWarn
+    ? `<div class="login-cta ${aeState === "expired" ? "danger" : "warn"}">⚠ <b>${esc(p.name)} 认证${
+        aeState === "expired" ? "已过期" : `约 ${days} 天后过期`
+      }</b>。该 provider 为手动认证，请尽快更新：
+         <code>${esc(cmd)}</code>
+         <button class="btn sm" onclick="copyText('${cmd}')">复制命令</button>
+         <button class="btn sm" onclick="actManualLogin('${p.name}')">导入登录态</button>
+       </div>`
+    : "";
   detail.innerHTML = `
     <div class="pv-head">
       <span class="pv-name">${esc(p.name)}</span>
@@ -98,9 +120,11 @@ function renderProviderDetail(p) {
       <span class="pv-driver">driver: ${esc(p.driver)}</span>
     </div>
     ${notice}
+    ${expiryCard}
     <dl class="kv">
       <dt>地址</dt><dd class="mono">${esc(p.url)}</dd>
       <dt>登录模式</dt><dd>${esc(p.login_mode)} · ${p.has_state_file ? "state.json ✓" : "state.json ✗（无持久化登录态）"}</dd>
+      <dt>认证有效期</dt><dd class="auth-${esc(aeState || "unknown")}">${aeText}</dd>
       <dt>默认模型</dt><dd class="mono">${esc(p.default_model || "—")}</dd>
       <dt>响应超时</dt><dd>${p.response_timeout}s</dd>
     </dl>
