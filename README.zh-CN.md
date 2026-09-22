@@ -11,7 +11,7 @@
 
 核心机制：Playwright 驱动真实浏览器 —— 打开网页、保持登录态、输入消息、增量提取流式响应，再以 OpenAI 的 `/v1/chat/completions` 格式暴露出去。不逆向任何内部 API，纯 DOM 自动化，Web 改版只需改配置里的选择器。
 
-> 设计文档见 [`docs/DESIGN.md`](docs/DESIGN.md)（§3 是 Provider 扩展点）；Qwen 接入见 [`docs/PROVIDER_QWEN.md`](docs/PROVIDER_QWEN.md)、ChatGPT 见 [`docs/PROVIDER_CHATGPT.md`](docs/PROVIDER_CHATGPT.md)、Kimi 见 [`docs/PROVIDER_KIMI.md`](docs/PROVIDER_KIMI.md)。当前默认启用 **DeepSeek / ChatGPT**（Qwen 已接入但默认 `enabled: false`，按需开启）。
+> 设计文档见 [`docs/DESIGN.md`](docs/DESIGN.md)（§3 是 Provider 扩展点）；Qwen 接入见 [`docs/PROVIDER_QWEN.md`](docs/PROVIDER_QWEN.md)、ChatGPT 见 [`docs/PROVIDER_CHATGPT.md`](docs/PROVIDER_CHATGPT.md)、Kimi 见 [`docs/PROVIDER_KIMI.md`](docs/PROVIDER_KIMI.md)。暂缓事项与结论见 [`docs/TODO.md`](docs/TODO.md)。当前默认启用 **DeepSeek / ChatGPT**（Qwen 已接入但默认 `enabled: false`，按需开启）。
 
 **Web 界面 `/ui/`**：状态面板（登录态 + **认证有效期倒计时**、provider 模型/别名、一键导入登录态）、**Playground**（流式对话、思考面板、附件上传、Function Calling 测试、原始报文 + 复制为 curl、等待响应秒数提示）、**会话页**（搜索 / provider 过滤 / 分页加载更多）。支持亮暗主题与响应式布局。
 
