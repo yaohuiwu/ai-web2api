@@ -127,6 +127,9 @@ class LoginConfig(BaseModel):
     # 不配 = 无法判断（UI 显示「未知」）；切勿用「最早到期的 cookie」（会命中 WAF/偏好 cookie 误报）
     auth_cookies: list[str] = Field(default_factory=list)
     session_ttl_days: float | None = None  # 命中 cookie 全为会话型时，按 state.json mtime + 此 TTL 估算（可选）
+    # localStorage 里的 token（glob）：Kimi/DeepSeek 的 access/refresh token 存在这里且是 JWT，
+    # 配了就会读其 exp 参与「认证有效期」展示与提醒（如 refresh_token）
+    auth_local_storage: list[str] = Field(default_factory=list)
     expiry_warn_days: float | None = None  # 覆盖 browser.auth_expiry_warn_days（手动认证可设更早）
     # auto 模式：.env 中凭据的键名
     username_env: str = "DEEPSEEK_USERNAME"

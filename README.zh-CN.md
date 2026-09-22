@@ -20,7 +20,7 @@
 - **OpenAI 兼容 API** —— `/v1/chat/completions`（流式 SSE + 非流式）与 `/v1/models`；OpenAI SDK、LangChain / llama_index 及任何 OpenAI 客户端可直接接入，可选 API Key 鉴权
 - **多 provider** —— 开箱即用 DeepSeek 与 ChatGPT，可选 Qwen/通义（见下表）
 - **真实浏览器自动化，不逆向接口** —— Playwright 驱动真实页面（纯 DOM 自动化），Web 改版只需改 `config.yaml` 里的选择器
-- **登录态跨重启保持** —— `storage_state` 持久化、自动登录、一条命令手动登录、UI 导入登录态，以及手动认证 provider 的**认证有效期倒计时 + 到期提醒**
+- **登录态跨重启保持** —— `storage_state` 持久化（cookies **与 localStorage token** 都参与指纹，轮换即重新落盘）、自动登录、一条命令手动登录、UI 导入登录态，以及手动认证 provider 的**认证有效期倒计时 + 到期提醒**
 - **流式输出，思考分离** —— 增量 DOM 提取转成 SSE 增量；模型的思考过程单独放在 `reasoning_content`
 - **会话绑定（`thread_id`）** —— 同一 Web 会话跨请求复用、不同 thread 并行，会话与消息落 SQLite，**多轮记忆跨服务重启保持**
 - **附件 / 图片识别** —— OpenAI 风格的多部分 `content` + `image_url`（data URL 或 http 外链），经页面真实上传
@@ -34,7 +34,7 @@
 |---|---|---|---|---|
 | **DeepSeek** | ✅ **稳定，推荐默认** | `deepseek-web`、`deepseek-r1-web` | `mode: auto`（账号密码）或手动 | 支持 headless。深度思考 / 智能搜索开关、图片附件、Function Calling 均已端到端验证 |
 | **ChatGPT** | ✅ **可用，但必须 headful** | `gpt-5-web`、`gpt-4o-web`、`o3-web` | **仅手动登录**（无密码登录：Google OAuth） | Sentinel 会拦 headless，必须 headful（`WEB2API_HEADLESS=false`，Docker 里靠 Xvfb）。会话 token 约 90 天，登录一次可长期复用 |
-| **Kimi** | ✅ **可用 —— 需手动登录** | `kimi-web` | **仅手动**（微信扫码 / 手机号 + 验证码，带易盾验证码） | 已端到端验证：输入、发送、正文提取（思考单独分离）、附件、会话复用（thread 恢复）。正文为**缓冲发送**（思考与正文同处一段），站点无停止按钮 → 靠稳定性判定结束。登录态在 localStorage（refresh_token 约 90 天），故「认证有效期」显示未知 |
+| **Kimi** | ✅ **可用 —— 需手动登录** | `kimi-web` | **仅手动**（微信扫码 / 手机号 + 验证码，带易盾验证码） | 已端到端验证：输入、发送、正文提取（思考单独分离）、附件、会话复用（thread 恢复）。正文为**缓冲发送**（思考与正文同处一段），站点无停止按钮 → 靠稳定性判定结束。登录态在 localStorage → 用 `login.auth_local_storage: ["refresh_token"]` 解 JWT 的 `exp`，面板显示约 90 天并在到期前提醒 |
 | **Qwen / 通义** | ⚠️ **实验性 —— 不稳定、响应慢、登录容易被墙** | `qwen3.7-plus-web` | `mode: auto` 或手动 | **默认禁用**（`enabled: false`，需要时改 `true`）。站点 UI 改版频繁、选择器易失效，响应明显更慢，登录常被网络/风控拦截（可能需要自备网络环境）——按"能用就用"对待，不建议生产使用 |
 
 ## 快速开始

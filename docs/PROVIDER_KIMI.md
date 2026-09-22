@@ -25,14 +25,25 @@ POST /v1/chat/completions {"model":"kimi-web",...}  → content='收到'（思�
 thread_id 复用：第 1 轮"记住 7" → 第 2 轮只发最后一条 → 正确答 '7'（且会话 URL 已落库）
 ```
 
-## 2. 已知取舍
+## 2. 落盘（token 轮换后不丢）
+
+`BrowserManager` 的「登录态变化即落盘」指纹**同时包含 cookies 与 localStorage**
+（`_state_fingerprint`）——Kimi/DeepSeek 的 token 就在 localStorage，只比较 cookies 会漏，
+导致重启/导入时用的是**过期快照**。指纹变化即写 `state.json`（后台每 `login_check_interval` 检查一次）。
+
+## 3. 已知取舍
 
 - **正文为缓冲发送**（`stream_content: false`）：Kimi 把思考与正文放在同一个 segment，逐字 diff 会把「思考已完成…」当正文发出去；缓冲后一次发更稳（代价：没有逐字流式观感）。
 - **无停止按钮**：结束判定靠 `stable_polls`（当前 20）× 3 + `min_wait_before_stable`，短回答约 20s；想更快可调小 `stable_polls`（有截断风险）。
-- **认证有效期显示「未知」**：Kimi 的登录态在 **localStorage**（`access_token` 几分钟、`refresh_token` JWT **实测约 90 天**），cookie 里没有可判定的过期时间；UI 的 `auth_cookies` 只读 cookie，故显示未知。
+- **认证有效期已可显示**：Kimi 登录态在 **localStorage**（cookie 里没有），故配了
+  `login.auth_local_storage: ["refresh_token"]` —— 直接解该 JWT 的 `exp`（实测 **约 90 天**），
+  UI 显示「还剩 N 天」，并且因为是 `mode: manual`，**快过期会提醒**更新登录态。
+- **`access_token` 只有几分钟不用管**：Kimi 前端在调用接口时自动用 `refresh_token` 换新的
+  （我们驱动的是真实页面；实测发消息前它自己就刷新了）。我们要做的只是**把轮换后的登录态落盘** ——
+  见下方「落盘」一条。
 - 不逆向内部 API：与其它 provider 一样只走 DOM 选择器，改版只需改配置。
 
-## 3. 改版后如何重新校准（约 5 分钟）
+## 4. 改版后如何重新校准（约 5 分钟）
 
 ```bash
 # 1) 发一条测试消息，dump 响应区 DOM（现有调试接口）

@@ -103,6 +103,18 @@ else:
 | `soon` | `days_left <= warn_days`（`warn_days` = provider 覆盖 or 全局默认） |
 | `ok` | 其余 |
 
+### 4.1 补充（已实现）：localStorage 里的 token
+
+部分站点（Kimi / DeepSeek）把 token 存在 **localStorage** 而非 cookie。配置
+``login.auth_local_storage: ["refresh_token"]``（glob）后：
+
+- 直接解 **JWT 的 ``exp``**（不校验签名）作为候选过期时间，与 cookie 的 ``expires`` **取最早者**；
+- ``source`` 变成 ``local_storage``，``cookie`` 字段回填该 key 名（如 ``refresh_token``）；
+- Kimi 实测：``access_token`` 仅几分钟（**前端按需刷新，不用管**），``refresh_token`` 约 90 天 → 显示「还剩 90 天」并参与手动认证的到期提醒。
+
+> 另：``BrowserManager`` 的「变化即落盘」指纹已从「仅 cookies」扩展为「cookies + localStorage」，
+> 避免 token 轮换后仍用过期快照（重启/导入会失效）。
+
 ## 5. 接口输出（`GET /admin/status` → `providers[i].auth_expiry`）
 
 ```json

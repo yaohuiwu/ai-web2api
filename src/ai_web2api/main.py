@@ -310,6 +310,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
                 state_file,
                 auth_cookies=p.cfg.login.auth_cookies,
                 session_ttl_days=p.cfg.login.session_ttl_days,
+                auth_local_storage=p.cfg.login.auth_local_storage,
                 warn_days=p.cfg.login.expiry_warn_days or cfg.browser.auth_expiry_warn_days,
                 login_at=browser.read_login_at(name),
             )

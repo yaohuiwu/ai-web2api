@@ -43,7 +43,7 @@ class BrowserManager:
         # 登录态"变了"的标记（登录成功/注入 cookie）→ 下次 save_state 必须落盘
         self._state_dirty: set[str] = set()
         # 上次落盘时的 cookie 指纹（name+value 哈希）→ 轮换后即使未过期也能落盘
-        self._cookie_fp: dict[str, str] = {}
+        self._state_fp: dict[str, str] = {}
 
     # ---------- 生命周期 ----------
 
@@ -180,7 +180,7 @@ class BrowserManager:
         ctx = await self._browser.new_context(**kwargs)
         ctx.set_default_timeout(self._cfg.default_timeout * 1000)
         self._contexts[provider] = ctx
-        self._cookie_fp[provider] = await self._cookie_fingerprint(provider)  # 基线
+        self._state_fp[provider] = await self._state_fingerprint(provider)  # 基线
         logger.info("context created for provider %s (state restored=%s)", provider, state.exists())
         return ctx
 
@@ -196,7 +196,7 @@ class BrowserManager:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("context close skipped for %s: %s", provider, exc)
         self._state_dirty.discard(provider)
-        self._cookie_fp.pop(provider, None)
+        self._state_fp.pop(provider, None)
         logger.info("context reset for provider %s", provider)
 
     def mark_state_dirty(self, provider: str) -> None:
@@ -242,17 +242,30 @@ class BrowserManager:
         now = time.time() if now is None else now
         return (expiry - now) < self._cfg.state_expiry_margin
 
-    async def _cookie_fingerprint(self, provider: str) -> str | None:
-        """当前 context 的 cookie 指纹（name+value 排序后哈希）；无 context 返回 None。"""
+    async def _state_fingerprint(self, provider: str) -> str | None:
+        """当前 context 的登录态指纹（**cookies + localStorage**）；无 context 返回 None。
+
+        localStorage 必须参与：Kimi/DeepSeek 的 token 就存在 localStorage，
+        access_token 每隔几分钟轮换、refresh_token 也可能轮换 —— 只比较 cookies 会导致
+        轮换后不落盘，重启/导入时用的是过期快照（登录态失效）。
+        """
         ctx = self._contexts.get(provider)
         if ctx is None:
             return None
         try:
-            cookies = await ctx.cookies()
+            state = await ctx.storage_state()
         except Exception:  # noqa: BLE001
             return None
-        core = sorted((c.get("name", ""), c.get("value", "")) for c in cookies)
-        return hashlib.sha1(json.dumps(core, ensure_ascii=False).encode()).hexdigest()
+        cookies = sorted(
+            (c.get("name", ""), c.get("value", "")) for c in (state.get("cookies") or [])
+        )
+        storage = sorted(
+            (o.get("origin", ""), it.get("name", ""), it.get("value", ""))
+            for o in (state.get("origins") or [])
+            for it in (o.get("localStorage") or [])
+        )
+        blob = json.dumps([cookies, storage], ensure_ascii=False)
+        return hashlib.sha1(blob.encode()).hexdigest()
 
     async def save_state(self, provider: str, *, force: bool = False) -> bool:
         """写 storage_state（默认只在该写的时候写，返回是否真的写了）。
@@ -263,15 +276,15 @@ class BrowserManager:
         ctx = self._contexts.get(provider)
         if not ctx:
             return False
-        fp = await self._cookie_fingerprint(provider)
-        changed = fp is not None and fp != self._cookie_fp.get(provider)
+        fp = await self._state_fingerprint(provider)
+        changed = fp is not None and fp != self._state_fp.get(provider)
         if not force and not changed and not self.state_needs_save(provider):
             logger.debug("state save skipped for provider %s（无变化）", provider)
             return False
         path = self.state_path(provider)
         path.parent.mkdir(parents=True, exist_ok=True)
         await ctx.storage_state(path=str(path))
-        self._cookie_fp[provider] = fp
+        self._state_fp[provider] = fp
         self._state_dirty.discard(provider)
         logger.info("state saved for provider %s", provider)
         return True
@@ -305,7 +318,7 @@ class BrowserManager:
                 await ctx.clear_cookies()
             except Exception:
                 pass
-        self._cookie_fp.pop(provider, None)
+        self._state_fp.pop(provider, None)
         path = self.state_path(provider)
         if path.exists():
             path.unlink()

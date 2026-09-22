@@ -486,6 +486,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 state_file,
                 auth_cookies=pcfg.login.auth_cookies,
                 session_ttl_days=pcfg.login.session_ttl_days,
+                auth_local_storage=pcfg.login.auth_local_storage,
                 warn_days=pcfg.login.expiry_warn_days or cfg.browser.auth_expiry_warn_days,
                 login_at=p.browser.read_login_at(name),
             ).to_dict()

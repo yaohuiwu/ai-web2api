@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import base64
 import datetime as _dt
 import fnmatch
 import json
@@ -66,6 +67,24 @@ class AuthExpiry:
         }
 
 
+def jwt_exp(token: str | None) -> float | None:
+    """从 JWT 解出 ``exp``（不校验签名：我们只读自己的登录态做展示）。
+
+    Kimi / DeepSeek 的 token 存在 localStorage 且是 JWT，``access_token`` 只有几分钟、
+    ``refresh_token`` 才是真正有效期（Kimi 实测约 90 天）。
+    """
+    if not token or token.count(".") != 2:
+        return None
+    payload = token.split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    try:
+        data = json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:  # noqa: BLE001
+        return None
+    exp = data.get("exp")
+    return float(exp) if isinstance(exp, (int, float)) and exp > 0 else None
+
+
 def _cookie_expiry(cookie: dict) -> float | None:
     """cookie 的正数 ``expires``（会话型 -1 / 缺失 → None）。"""
     raw = cookie.get("expires")
@@ -80,6 +99,8 @@ def compute_auth_expiry(
     cookies: list[dict],
     *,
     auth_cookies: list[str] | None = None,
+    auth_local_storage: list[str] | None = None,
+    local_storage: list[tuple[str, str, str]] | None = None,
     session_ttl_days: float | None = None,
     state_mtime: float | None = None,
     warn_days: float = 3.0,
@@ -101,11 +122,21 @@ def compute_auth_expiry(
             if name and any(fnmatch.fnmatch(name.lower(), pat) for pat in patterns):
                 matched.append(cookie)
 
-    dated = [(c, exp) for c in matched if (exp := _cookie_expiry(c)) is not None]
-    if dated:
-        cookie, expires_at = min(dated, key=lambda pair: pair[1])
-        source = "cookie"
-        cookie_name = str(cookie.get("name") or "")
+    # 候选过期时间：cookie 的 expires + localStorage 里 JWT 的 exp（取最早者）
+    candidates: list[tuple[float, str, str]] = [
+        (exp, "cookie", str(c.get("name") or ""))
+        for c in matched
+        if (exp := _cookie_expiry(c)) is not None
+    ]
+    ls_patterns = [p.lower() for p in (auth_local_storage or []) if p]
+    if ls_patterns:
+        for origin, name, value in local_storage or []:
+            if any(fnmatch.fnmatch(str(name).lower(), pat) for pat in ls_patterns):
+                if (exp := jwt_exp(value)) is not None:
+                    candidates.append((exp, "local_storage", str(name)))
+
+    if candidates:
+        expires_at, source, cookie_name = min(candidates, key=lambda item: item[0])
     elif matched and session_ttl_days and state_mtime:
         expires_at = float(state_mtime) + float(session_ttl_days) * 86400.0
         source = "session_estimate"
@@ -137,6 +168,7 @@ def compute_for_state_file(
     path: Path,
     *,
     auth_cookies: list[str] | None = None,
+    auth_local_storage: list[str] | None = None,
     session_ttl_days: float | None = None,
     warn_days: float = 3.0,
     login_at: float | None = None,
@@ -150,6 +182,8 @@ def compute_for_state_file(
     return compute_auth_expiry(
         read_state_cookies(path),
         auth_cookies=auth_cookies,
+        auth_local_storage=auth_local_storage,
+        local_storage=read_state_local_storage(path),
         session_ttl_days=session_ttl_days,
         state_mtime=mtime,
         warn_days=warn_days,
@@ -160,26 +194,43 @@ def compute_for_state_file(
 
 # ---------- state.json 读取（按 mtime 缓存，避免状态轮询反复读盘） ----------
 
-_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_CACHE: dict[str, tuple[float, dict]] = {}
 
 
-def read_state_cookies(path: Path) -> list[dict]:
-    """读 state.json 的 cookies；文件不存在/损坏返回空表。按 mtime 缓存。"""
+def _read_state(path: Path) -> dict:
+    """读 state.json（按 mtime 缓存）：``{"cookies": [...], "local_storage": [(origin,name,value)]}``。"""
     key = str(path)
     try:
         mtime = path.stat().st_mtime
     except OSError:
         _CACHE.pop(key, None)
-        return []
+        return {"cookies": [], "local_storage": []}
     cached = _CACHE.get(key)
     if cached and cached[0] == mtime:
         return cached[1]
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        cookies = list(data.get("cookies") or [])
+        parsed = {
+            "cookies": list(data.get("cookies") or []),
+            "local_storage": [
+                (str(o.get("origin") or ""), str(it.get("name") or ""), str(it.get("value") or ""))
+                for o in (data.get("origins") or [])
+                for it in (o.get("localStorage") or [])
+            ],
+        }
     except Exception:  # noqa: BLE001
-        cookies = []
+        parsed = {"cookies": [], "local_storage": []}
     if len(_CACHE) > 64:
         _CACHE.clear()
-    _CACHE[key] = (mtime, cookies)
-    return cookies
+    _CACHE[key] = (mtime, parsed)
+    return parsed
+
+
+def read_state_cookies(path: Path) -> list[dict]:
+    """读 state.json 的 cookies；文件不存在/损坏返回空表。按 mtime 缓存。"""
+    return _read_state(path)["cookies"]
+
+
+def read_state_local_storage(path: Path) -> list[tuple[str, str, str]]:
+    """读 state.json 的 localStorage（origin/name/value 三元组）；按 mtime 缓存。"""
+    return _read_state(path)["local_storage"]

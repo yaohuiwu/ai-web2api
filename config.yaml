@@ -275,6 +275,9 @@ providers:
         - "[class*='new-chat']"
     login:
       mode: manual
+      # 登录态在 localStorage：access_token 仅几分钟（前端按需刷新），
+      # refresh_token 才是真正有效期（JWT exp，实测约 90 天）→ 用它做倒计时/到期提醒
+      auth_local_storage: ["refresh_token"]
       hint: "Kimi 仅支持微信扫码 / 手机号+验证码（易盾验证码）→ 用 python -m ai_web2api.cli login kimi 或 /ui 导入 state"
     queue: {max_size: 10, timeout: 60}
     response_timeout: 180
