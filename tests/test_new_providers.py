@@ -83,7 +83,7 @@ def test_glm_has_no_session_pattern_and_waf_documented():
     assert "复用" in doc, "要写明 WAF cookie 导入后可复用（实测）"
 
 
-def test_gemini_enabled_guest_mode():
+def test_gemini_calibrated_but_disabled_by_default():
     """Gemini 游客态即可用 → 默认启用；不能配 logged_out（否则会把可用状态拒掉）。"""
     from ai_web2api.providers.gemini import GeminiProvider
     from ai_web2api.providers.registry import DRIVERS
@@ -91,7 +91,7 @@ def test_gemini_enabled_guest_mode():
     assert DRIVERS["gemini"] is GeminiProvider
     assert GeminiProvider.session_url_pattern == r"/app/([0-9a-fA-F]{8,})"
     p = _cfg("gemini")
-    assert p.enabled is True, "游客态可用 → 默认启用"
+    assert p.enabled is False, "账号侧限流（流不结束）→ 默认禁用，需要时手动开"
     assert any("ql-editor" in x for x in p.selectors.input), "实测 Quill 输入框别删"
     assert any("model-response-text" in x for x in p.selectors.response_container)
     assert p.selectors.logged_out == [], "游客态是合法可用状态，不能当未登录"

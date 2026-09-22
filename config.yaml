@@ -250,10 +250,12 @@ providers:
     min_wait_before_stable: 15.0
     thread_busy_timeout: 0
 
-  # Kimi（kimi.com）：**已实测校准**（输入/发送/正文/登录判定/附件/会话URL）
+  # Kimi（kimi.com）：**默认禁用**（选择器已校准、需要时开）
+  # 原因：站点高峰**排队/限流**严重（实测多次「和Kimi聊天的人太多了，订阅会员可进入优先队列」），
+  #      单条响应常 30s~数分钟甚至超时，不适合默认启用
   # 限制：正文缓冲后发送（思考与正文同 segment）；站点无停止按钮；登录只有 微信扫码/手机号+验证码 → 手动
   kimi:
-    enabled: true
+    enabled: false
     driver: kimi
     url: https://www.kimi.com/
     locale: zh-CN
@@ -377,11 +379,13 @@ providers:
     stable_polls: 20
     min_wait_before_stable: 8.0
 
-  # Gemini（gemini.google.com）：**游客态即可用**（实测无需登录、无验证码）→ 默认启用
+  # Gemini（gemini.google.com）：**默认禁用**（选择器已校准、需要时开）
+  # 原因：账号侧**免费额度限流**——实测密集请求后 POST StreamGenerate 虽然 200、响应头 1.4s 到达，
+  #      但**流长时间不结束**（300s 超时、页面一直"思考中"），而真人浏览器同一账号却很快
   # 游客/额度用尽后站点会降级为 Flash-Lite 仍可免费聊；抓取与模型无关（只读 DOM）
   # 登录（Google）只能手动、但非必需：登录后才能保存历史/用更多能力
   gemini:
-    enabled: true
+    enabled: false
     driver: gemini
     url: https://gemini.google.com/app
     locale: zh-CN
@@ -409,6 +413,12 @@ providers:
       login_check: []           # 游客态即可用 → 用输入框判定"可用"（**故意不配 logged_out**）
       upload_input:
         - "input[type=file]"    # ⚠ 待实测
+    # 观测型旁听（**不解析 Google 内部协议**）：只记状态码与时序，
+    # 用来判断"卡住"是排队限流 / 长思考 / 流未结束
+    network:
+      url_pattern: "assistant.lamda.BardFrontendService/StreamGenerate"
+      capture: false          # 不注入 JS 抓取（不走协议解析）
+      observe: true
     login:
       mode: manual
       # CLI 自动检测：登录后才有、游客态**不存在**（实测；早前用 aria-label*="Google 账号" 会误判）

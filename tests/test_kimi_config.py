@@ -28,7 +28,7 @@ def test_driver_registered_and_enabled():
     assert DRIVERS["kimi"] is KimiProvider
     assert issubclass(KimiProvider, WebChatProvider)
     assert KimiProvider.session_url_pattern == r"/chat/([0-9a-fA-F-]{8,})"
-    assert _kimi().enabled is True, "Kimi 已校准并实测可用，默认启用"
+    assert _kimi().enabled is False, "站点高峰排队/限流严重 → 默认禁用，需要时手动开"
 
 
 def test_login_is_manual_with_hint():
@@ -76,6 +76,7 @@ def test_enabling_kimi_registers_provider_and_exposes_model():
 
     raw = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
     raw["providers"] = {"kimi": copy.deepcopy(raw["providers"]["kimi"])}
+    raw["providers"]["kimi"]["enabled"] = True      # 默认禁用，这里显式打开以验证注册
     cfg = AppConfig.model_validate(raw)
     reg = ProviderRegistry(cfg, _StubBrowser())  # type: ignore[arg-type]
     assert "kimi" in reg.providers()
