@@ -854,7 +854,9 @@ XMLHttpRequest.prototype.send = function (body) {{
             elapsed = time.monotonic() - start
             if elapsed > timeout:
                 raise ResponseTimeoutError(
-                    f'provider "{self.name}" 发送后未检测到回复开始', provider=self.name
+                    f'provider "{self.name}" 发送后未检测到回复开始'
+                    f"（页面无新回复容器：可能被限流/排队，或选择器失配）",
+                    provider=self.name,
                 )
             if busy_timeout and elapsed > busy_timeout:  # 0/None = 关闭忙检测
                 raise ThreadBusyError(
@@ -985,7 +987,8 @@ XMLHttpRequest.prototype.send = function (body) {{
             elapsed = time.monotonic() - start
             if elapsed > timeout:
                 raise ResponseTimeoutError(
-                    f'provider "{self.name}" 发送后未检测到回复开始（{timeout:.0f}s）',
+                    f'provider "{self.name}" 发送后未检测到回复开始（{timeout:.0f}s）'
+                    f"；消息已发出但页面没有新回复容器（可能被限流/排队，或选择器失配）",
                     provider=self.name,
                 )
             # 早期确认：一段时间内既无新容器、也无停止按钮 → 消息很可能是被静默丢弃了。
@@ -1056,8 +1059,15 @@ XMLHttpRequest.prototype.send = function (body) {{
         while True:
             elapsed = time.monotonic() - start
             if elapsed > timeout:
+                # 带上“卡在哪”的原因，便于排查（站点侧慢/限流 vs 我们没找到容器）
+                if stop_seen:
+                    hint = "；页面仍显示生成中（站点侧慢或限流，可调大 response_timeout）"
+                elif md_sel is None:
+                    hint = "；未检测到正文容器（页面可能仍在加载/校验）"
+                else:
+                    hint = ""
                 raise ResponseTimeoutError(
-                    f'provider "{self.name}" 响应超时 ({timeout:.0f}s)', provider=self.name
+                    f'provider "{self.name}" 响应超时 ({timeout:.0f}s){hint}', provider=self.name
                 )
 
             # 动态发现（正文容器可能在思考结束后才出现）

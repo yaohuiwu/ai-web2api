@@ -393,21 +393,28 @@ providers:
         - "div.ql-editor[contenteditable='true']"
         - "rich-textarea .ql-editor"
       type_prompt: true
+      stream_content: false     # 长回答/列表重渲染多 → 缓冲后一次发，避免拿到中途片段
+      response_all_new: true    # 一次回答可能被拆成多个 .model-response-text → 全部拼接
       send_button:              # 实测（aria-label 中文；英文环境为 Send message）
         - 'button[aria-label="发送"]'
         - 'button[aria-label="Send message"]'
       response_container:       # 实测：助手正文容器（用户侧是 <user-query>，不会误匹配）
         - ".model-response-text"
         - "message-content .markdown"
-      thinking_container: []    # ⚠ 游客态未观测到思考区
-      stop_button: []           # ⚠ 生成中未观测到
+      thinking_container:       # 实测（登录态）：生成中的指示元素（**无文本**，仅作"已开始/进行中"信号）
+        - ".thinking-dots-animation"
+      stop_button:              # 实测（登录态）：生成中出现、结束消失 → 结束判定更可靠
+        - 'button[aria-label="停止回答"]'
+        - 'button[aria-label*="Stop"]'
       login_check: []           # 游客态即可用 → 用输入框判定"可用"（**故意不配 logged_out**）
       upload_input:
         - "input[type=file]"    # ⚠ 待实测
     login:
       mode: manual
-      # 不做自动检测：Gemini 的"账号入口"在**游客态也存在**（实测会误判成登录成功）；
-      # 因此请完成登录后回终端按【回车】手动确认（login.detect 留空 + login_check 也为空）
+      # CLI 自动检测：登录后才有、游客态**不存在**（实测；早前用 aria-label*="Google 账号" 会误判）
+      detect:
+        - 'a[href*="SignOutOptions"]'
+        - 'img[alt*="个人资料"]'
       hint: "Gemini 游客态即可用；如需保存历史/更多能力，用 ./scripts/login.sh gemini 手动登录（Google 账号）"
     queue: {max_size: 10, timeout: 60}
     response_timeout: 180
