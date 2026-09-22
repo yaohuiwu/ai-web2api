@@ -20,6 +20,7 @@ browser:
   locale: zh-CN
   login_check_interval: 900   # 定时登录态检测间隔（秒）。Qwen 对高频访问敏感，不宜过短
   state_expiry_margin: 86400 # 登录态剩余有效期低于该值才落盘 state.json（秒）；已登录且未过期则不反复写
+  auth_expiry_warn_days: 3 # 「认证即将过期」默认预警阈值（天）；手动认证 provider 可自行覆盖（见 chatgpt）
   # 定时状态检测：独立开关 + 默认 headless（即使主浏览器 headed 也不弹窗）
   status_check: true      # 定时检测登录态/保存状态总开关
   status_check_headless: false  # 用主上下文检测（独立 headless 会被 Qwen 这类站点对第二实例限流 → 误报未登录）
@@ -159,6 +160,8 @@ providers:
     login:
       mode: auto
       url: https://chat.qwen.ai/auth
+      # 认证有效期以这两个 cookie 判定（实测 ~29 天）；auto 认证只展示、不提醒
+      auth_cookies: ["token", "refresh_token"]
       username_env: QWEN_USERNAME
       password_env: QWEN_PASSWORD
       page:
@@ -229,6 +232,9 @@ providers:
     login:
       mode: manual
       hint: "ChatGPT 无密码登录；请用 python -m ai_web2api.cli login chatgpt 或 /ui 导入 state"
+      # 认证有效期以 session-token 判定（实测 ~90 天）
+      auth_cookies: ["__Secure-next-auth.session-token*"]
+      expiry_warn_days: 7   # 手动认证：提前 7 天提醒更新认证信息
     queue: {max_size: 10, timeout: 60}
     response_timeout: 180
     poll_interval: 0.2

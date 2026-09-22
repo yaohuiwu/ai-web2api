@@ -123,6 +123,11 @@ class LoginConfig(BaseModel):
     hint: str = ""
     url: str | None = None  # 登录页 URL（与聊天页不同时用，如 Qwen 的 /auth；空 = 用 provider.url）
     retries: int = 3  # 自动登录失败时的重试次数（网页登录首发可能静默无效）
+    # 认证有效期：声明哪些 cookie 代表登录态（glob，大小写不敏感）。
+    # 不配 = 无法判断（UI 显示「未知」）；切勿用「最早到期的 cookie」（会命中 WAF/偏好 cookie 误报）
+    auth_cookies: list[str] = Field(default_factory=list)
+    session_ttl_days: float | None = None  # 命中 cookie 全为会话型时，按 state.json mtime + 此 TTL 估算（可选）
+    expiry_warn_days: float | None = None  # 覆盖 browser.auth_expiry_warn_days（手动认证可设更早）
     # auto 模式：.env 中凭据的键名
     username_env: str = "DEEPSEEK_USERNAME"
     password_env: str = "DEEPSEEK_PASSWORD"
@@ -185,6 +190,7 @@ class BrowserConfig(BaseModel):
     default_timeout: float = 30.0
     login_check_interval: float = 300.0  # 后台刷新登录态间隔（秒）
     state_expiry_margin: float = 86400.0  # 登录态剩余有效期低于该值才落盘 state.json（秒）；未过期不重复写
+    auth_expiry_warn_days: float = 3.0    # 「认证即将过期」默认预警阈值（天）；provider 可用 login.expiry_warn_days 覆盖
     status_check: bool = True            # 定时状态检测总开关（关掉后后台不再访问页面）
     status_check_headless: bool = True   # 定时检测用独立 headless 浏览器（不弹窗口，默认开）
 
