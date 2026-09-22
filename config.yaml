@@ -304,7 +304,7 @@ providers:
   # 豆包（doubao.com）：**仅手动登录**（无密码登录）；容器内会提示「受区域限制，请先登录」
   # 选择器只有 composer/消息容器是实测的，其余待登录后校准 → 默认禁用
   doubao:
-    enabled: false
+    enabled: true
     driver: doubao
     url: https://www.doubao.com/chat
     locale: zh-CN
@@ -315,13 +315,17 @@ providers:
         - "div.tiptap.ProseMirror[contenteditable='true']"
         - "div[contenteditable='true']"
       type_prompt: true
-      send_button: []           # ⚠ 待实测（输入后才出现）
+      send_button:              # 实测：发送控件是 DIV（不是 button），输入后出现
+        - ".send-btn-wrapper"
       response_container:       # ⚠ 待实测（游客页 DOM 里见 .message-container / .chat-item）
         - ".message-container"
         - ".chat-item"
       thinking_container: []
       stop_button: []           # ⚠ 待实测
-      login_check: []           # ⚠ 待实测（空 = 用 input 判定；未登录时豆包不渲染输入框）
+      login_check: []           # 空 = 用 input 判定
+      logged_out:               # 反向标记：游客态也有输入框 → 右上角「登录」按钮可见即未登录
+        - '[class*="login-btn"]'          # 实测 class 带哈希：login-btn-header-CTKsn1
+        - 'button:has-text("登录")'        # 文本兜底（Playwright 选择器）
       upload_input: []          # ⚠ 待实测
     login:
       mode: manual

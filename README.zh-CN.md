@@ -58,7 +58,7 @@ docker compose logs -f        # 看启动日志，会打印可点击的 UI/API �
 
 - 登录态 / 会话与历史消息持久化在命名卷 `web2api-profiles`（登录态 `state.json`、会话+消息 SQLite `threads.db`），**容器重建不丢登录、不丢历史**；`docker compose down -v` 才会清空
 - 容器内必须监听 `0.0.0.0`（`config.yaml` 默认已是），宿主用 `${WEB2API_PUBLISH_PORT:-8000}` 映射
-- 改选择器/配置：改 `config.yaml` 后 `docker compose up -d` 重建，或放开 compose 里 `./config.yaml:/app/config.yaml:ro` 挂载直接生效
+- 改选择器/配置：改 `config.yaml` 后执行 `docker compose restart` 即生效（仓库里的 `config.yaml` 已 bind mount 进容器，**不需要 rebuild**）
 - 容器内无可见窗口，手动登录用 cookies 导入：
   `curl -X POST http://127.0.0.1:8000/admin/deepseek/login/cookies -H 'Content-Type: application/json' -d '{"cookies":[...]}'`
 - 对外暴露时建议设 `WEB2API_API_KEY`（保护 `/v1/*`）并自行用反代限制 `/admin`

@@ -94,6 +94,9 @@ class SelectorsConfig(BaseModel):
     thinking_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
     stop_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 填了可加快"生成结束"判定
     login_check: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 存在即已登录（空 = 用 input）
+    # 反向标记：**可见即视为未登录**；用于「游客态也有输入框」的站点（如豆包），
+    # 否则 login_check 回退到 input 会把游客误判成已登录（手动登录命令也会直接退出）。
+    logged_out: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
     new_chat_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 每次请求前点"新建对话"（可选）
 
     # 模式选择（radiogroup）：API mode 值 → 候选列表（旧版 UI：快速/专家/识图）。

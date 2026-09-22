@@ -59,7 +59,7 @@ Open `http://127.0.0.1:8000/ui/`. Notes:
 
 - Login state / threads and message history persist in the named volume `web2api-profiles` (login state `state.json`, threads+messages in SQLite `threads.db`) — **rebuilding the container keeps you logged in and keeps history**; only `docker compose down -v` wipes it
 - Inside the container you must listen on `0.0.0.0` (already the default in `config.yaml`); the host maps `${WEB2API_PUBLISH_PORT:-8000}`
-- Changing selectors/config: edit `config.yaml` then `docker compose up -d`, or enable the `./config.yaml:/app/config.yaml:ro` mount in compose
+- Changing selectors/config: edit `config.yaml` and run `docker compose restart` (the repo's `config.yaml` is bind-mounted into the container, so **no rebuild is needed**)
 - There is no visible window inside the container, so manual login uses state import:
   `curl -X POST http://127.0.0.1:8000/admin/deepseek/login/cookies -H 'Content-Type: application/json' -d '{"cookies":[...]}'`
 - For public exposure, set `WEB2API_API_KEY` (protects `/v1/*`) and restrict `/admin` behind your own reverse proxy

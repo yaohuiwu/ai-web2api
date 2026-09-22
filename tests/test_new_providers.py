@@ -31,10 +31,9 @@ def test_drivers_registered():
 
 
 @pytest.mark.parametrize("name", ["doubao", "glm"])
-def test_disabled_and_manual_login(name: str):
-    """两者都无密码登录；选择器未校准前必须默认禁用。"""
+def test_manual_login(name: str):
+    """两者都无密码登录（GLM 另有 WAF；豆包有区域限制）。"""
     p = _cfg(name)
-    assert p.enabled is False, f"{name} 待校准，必须默认禁用"
     assert p.login.mode == "manual"
     assert "login" in p.login.hint or "登录" in p.login.hint
 
@@ -48,7 +47,12 @@ def test_doubao_measured_selectors_and_url_template():
     assert p.selectors.type_prompt is True, "contenteditable 需逐字输入"
     assert DoubaoProvider.session_url_pattern == r"/chat/(\d{6,})"
     # 区域限制：未登录时容器内没有输入框 → 不能把"游客态"当已登录
-    assert p.selectors.login_check == [], "未校准前留空（用 input 判定）"
+    assert p.selectors.login_check == [], "留空（用 input 判定）"
+    assert p.selectors.logged_out, "游客态也有输入框 → 必须配反向标记，否则登录态误判为真"
+
+
+def test_glm_disabled_by_default():
+    assert _cfg("glm").enabled is False, "GLM 被 WAF 拦，保持禁用"
 
 
 def test_glm_has_no_session_pattern_and_waf_documented():

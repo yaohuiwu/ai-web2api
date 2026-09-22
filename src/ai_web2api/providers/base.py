@@ -106,6 +106,20 @@ class BaseProvider(abc.ABC):
             return None
         return tpl.format(base=self.cfg.url.rstrip("/"), id=url_id)
 
+    async def logged_out_visible(self, page: "Page") -> bool:
+        """是否可见「未登录标记」（``selectors.logged_out``）—— 反向判定。
+
+        典型场景：豆包游客态也有输入框，``login_check`` 回退到 input 会误判已登录；
+        配上 ``logged_out: [".login-button"]`` 即可正确判定。
+        """
+        for sel in self.cfg.selectors.logged_out:
+            try:
+                if await page.locator(sel).first.is_visible():
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
     async def check_login(self) -> bool | None:
         """检查登录态。
 
@@ -117,6 +131,12 @@ class BaseProvider(abc.ABC):
             sel = await self._goto_ready(
                 page, self.cfg.url, self.login_check_selectors, total_timeout=35.0
             )
+            if await self.logged_out_visible(page):
+                logger.info(
+                    "check_login(%s): 命中未登录标记 %s → 判定未登录",
+                    self.name, self.cfg.selectors.logged_out,
+                )
+                return False
             if sel is not None:
                 return True
             if await self._page_stuck_loading(page):

@@ -32,8 +32,9 @@ services:
     volumes:
       # 登录态 (state.json) 与 thread 持久化 (threads.json)
       - web2api-profiles:/app/profiles
-      # 想改选择器不改镜像，可放开下面这行用宿主配置覆盖：
-      # - ./config.yaml:/app/config.yaml:ro
+      # 用宿主 config.yaml 覆盖镜像内的配置：**改配置后只需 `docker compose restart`**，
+      # 不必再 rebuild（选择器/开关/provider 增删都适用）
+      - ./config.yaml:/app/config.yaml:ro
     # Chromium 需要足够大 /dev/shm，否则容易崩（默认 64MB 太小）
     shm_size: "1gb"
     # 浏览器常驻内存，给宽松一点的上限/预留

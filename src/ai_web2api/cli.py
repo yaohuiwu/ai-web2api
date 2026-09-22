@@ -210,7 +210,7 @@ async def _login_flow(args: argparse.Namespace) -> int:
             sel = await provider._goto_ready(
                 page, provider.login_url, provider.login_check_selectors, total_timeout=20.0
             )
-            if sel is not None:
+            if sel is not None and not await provider.logged_out_visible(page):
                 print(f"[{name}] 已是登录状态。")
             else:
                 # 等加载遮罩 + 切「密码登录」tab
@@ -258,6 +258,7 @@ async def _login_flow(args: argparse.Namespace) -> int:
                     if (
                         await extractor.first_match(page, provider.login_check_selectors)
                         is not None
+                        and not await provider.logged_out_visible(page)   # 游客态也有输入框
                     ):
                         ok = True
                         print(f"[{name}] 自动检测到登录成功。")
