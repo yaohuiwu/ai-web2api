@@ -1,0 +1,128 @@
+"""结束判定与超时兜底：思考持续跳动不该拖死正文；超时不该丢掉已生成的内容。
+
+回归背景（实测 Kimi）：思考区有"正在思考中 Ns"这类**持续变化**的文本，
+若 content/thinking 共用稳定计数 → 永远判不出结束 → 180s 超时，而画面上答案其实已生成。
+运行：.venv/bin/python -m pytest tests/test_response_stability.py -v
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+
+import pytest
+
+from ai_web2api.browser import extractor
+from ai_web2api.config import ProviderConfig
+from ai_web2api.providers.webchat import WebChatProvider
+
+
+class _StubBrowser:
+    default_locale = "zh-CN"
+
+
+class _NoLoc:
+    @property
+    def first(self):
+        return self
+
+    async def is_visible(self):
+        return False
+
+
+class _FakePage:
+    def __init__(self) -> None:
+        self.clock = 0.0
+
+    async def wait_for_timeout(self, ms: float) -> None:
+        await asyncio.sleep(ms / 1000)
+        self.clock += ms / 1000
+
+    def locator(self, _sel):
+        return _NoLoc()
+
+
+def _prov(**selectors) -> WebChatProvider:
+    cfg = ProviderConfig.model_validate(
+        {
+            "name": "kimi",
+            "url": "https://www.kimi.com/",
+            "models": [{"name": "kimi-web"}],
+            "selectors": selectors,
+            "poll_interval": 0.01,
+            "stable_polls": 3,
+            "min_wait_before_stable": 0.0,
+            "response_timeout": 1.0,
+        }
+    )
+    return WebChatProvider(cfg, _StubBrowser())  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_thinking_churn_does_not_block_completion(monkeypatch):
+    """思考一直变、正文几拍后稳定 → 必须能结束并产出正文（而不是超时）。"""
+    prov = _prov(response_container=[".md"], thinking_container=[".th"])
+    page = _FakePage()
+    state = {"polls": 0}
+
+    async def fake_count(_page, sel):
+        return 1 if sel == ".md" else 0
+
+    async def fake_extract(_page, sel, index=-1):
+        state["polls"] += 1
+        if sel != ".md":
+            return ""
+        return "答案" if state["polls"] >= 3 else ""      # 前几拍还没出正文
+
+    async def fake_thinking(self, _page, sel, idx):
+        return f"正在思考中 {state['polls']}s"             # 每拍都变（跳动）
+
+    monkeypatch.setattr(extractor, "count_matches", fake_count)
+    monkeypatch.setattr(extractor, "extract_markdown", fake_extract)
+    monkeypatch.setattr(WebChatProvider, "_extract_thinking", fake_thinking)
+
+    chunks = [c async for c in prov._poll_response_dom(page, {".md": 0}, {".th": 0})]
+    assert any(c.text == "答案" for c in chunks if c.kind == "content"), chunks
+    assert state["polls"] < 200, "应在稳定若干拍后结束，而不是一直轮询到超时"
+
+
+@pytest.mark.asyncio
+async def test_timeout_returns_content_instead_of_error(monkeypatch):
+    """超时兜底：内容其实是"迟到"生成的 → 返回它，而不是报 180s 超时把答案丢掉。"""
+    prov = _prov(response_container=[".md"], thinking_container=[])
+    page = _FakePage()
+    t0 = time.monotonic()
+
+    async def fake_count(_page, _sel):
+        return 1
+
+    async def fake_extract(_page, _sel, index=-1):
+        # 前 0.2s 拿不到（模拟渲染慢/容器错位），之后才拿到
+        return "迟到的答案" if time.monotonic() - t0 > 0.2 else ""
+
+    monkeypatch.setattr(extractor, "count_matches", fake_count)
+    monkeypatch.setattr(extractor, "extract_markdown", fake_extract)
+
+    chunks = [c async for c in prov._poll_response_dom(page, {".md": 0}, {})]
+    assert any("迟到的答案" in (c.text or "") for c in chunks), chunks
+
+
+@pytest.mark.asyncio
+async def test_timeout_with_nothing_still_errors(monkeypatch):
+    """真的什么都没有 → 仍然报超时（不能把空当成功）。"""
+    from ai_web2api.core.errors import ResponseTimeoutError
+
+    prov = _prov(response_container=[".md"], thinking_container=[])
+    page = _FakePage()
+
+    async def fake_count(_page, _sel):
+        return 1
+
+    async def fake_extract(_page, _sel, index=-1):
+        return ""
+
+    monkeypatch.setattr(extractor, "count_matches", fake_count)
+    monkeypatch.setattr(extractor, "extract_markdown", fake_extract)
+
+    with pytest.raises(ResponseTimeoutError):
+        [c async for c in prov._poll_response_dom(page, {".md": 0}, {})]

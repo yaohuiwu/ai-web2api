@@ -866,6 +866,29 @@ XMLHttpRequest.prototype.send = function (body) {{
         while True:
             elapsed = time.monotonic() - start
             if elapsed > timeout:
+                # 兜底：超时前再取一次 —— 页面上往往**已经生成完了**（实测：画面上答案在，
+                # 我们却报 180s 超时）。有内容就返回，别把它丢掉；真的空才报错。
+                try:
+                    final = await self._extract_content(page, md_sel, md_idx)
+                    final_th = (
+                        await self._extract_thinking(page, th_sel, th_idx) if th_sel else ""
+                    )
+                except Exception:  # noqa: BLE001
+                    final, final_th = "", ""
+                if final.strip() or final_th.strip():
+                    logger.warning(
+                        "[%s] 超时兜底：已拿到内容（content=%d chars, thinking=%d chars），"
+                        "直接返回而不是报超时",
+                        self.name, len(final), len(final_th),
+                    )
+                    if final and final != last["content"]:
+                        if buffer_content:
+                            yield StreamChunk("content", final)
+                        else:
+                            inc = _diff_increment(last["content"], final)
+                            if inc:
+                                yield StreamChunk("content", inc)
+                    return
                 raise ResponseTimeoutError(
                     f'provider "{self.name}" 响应超时 ({timeout:.0f}s)', provider=self.name
                 )
@@ -1008,6 +1031,7 @@ XMLHttpRequest.prototype.send = function (body) {{
 
         last = {"thinking": "", "content": ""}
         stable = 0
+        thinking_changed_recently = 0.0
         stop_seen = False
 
         while True:
@@ -1030,25 +1054,31 @@ XMLHttpRequest.prototype.send = function (body) {{
             md_text = await self._extract_content(page, md_sel, md_idx)
             th_text = await self._extract_thinking(page, th_sel, th_idx) if th_sel else ""
 
-            changed = False
+            # ⚠ content 与 thinking 分别算稳定：
+            # 思考区常有"正在思考中 Ns"这类**持续跳动**的文本，若共用一个计数器，
+            # 正文早已稳定也会被不断清零 → 永远判不出"结束"（实测 Kimi 排队时 180s 超时，
+            # 但画面上答案其实已经生成）。因此正文的结束判定只看**正文自己**是否稳定。
+            changed: dict[str, bool] = {"content": False, "thinking": False}
             pairs: list[tuple[Literal["thinking", "content"], str, str]] = [
                 ("thinking", th_text, "thinking"),
                 ("content", md_text, "content"),
             ]
             for kind, new, key in pairs:
-                old = last[key]
-                if new == old:
+                prev = last[key]
+                if new == prev:
                     continue
-                changed = True
+                changed[key] = True
                 if kind == "content" and buffer_content:
                     last[key] = new      # 先攒着，结束时一次性发（避免重渲染导致 diff 丢内容）
                     continue
-                inc = _diff_increment(old, new)
+                inc = _diff_increment(prev, new)
                 if inc:
                     yield StreamChunk(kind, inc)
                 # DOM 重渲染导致文本被改写（非子串非前缀）：丢弃本次增量，避免重复输出
                 last[key] = new
-            stable = 0 if changed else stable + 1
+            stable = 0 if changed["content"] else stable + 1
+            if changed["thinking"]:
+                thinking_changed_recently = time.monotonic()
 
             # 结束判定
             done = False
@@ -1065,8 +1095,9 @@ XMLHttpRequest.prototype.send = function (body) {{
                     if stable >= stable_polls * 3:
                         done = True
                 elif last["thinking"] and md_sel is not None:
-                    # 思考稳定、已有正文容器但正文还没出 → 可能"思考→正文"间隙，大幅放宽
-                    if stable >= stable_polls * 4:
+                    # 思考稳定、已有正文容器但正文还没出 → 可能"思考→正文"间隙，大幅放宽。
+                    # 用"思考最后一次变动的时间"判断（思考会持续跳动，stable 可能一直被清零）。
+                    if time.monotonic() - thinking_changed_recently > stable_polls * 4 * cfg.poll_interval:
                         done = True
                 # 否则（正文容器尚未出现）→ 继续等，避免空正文提前结束（Qwen 实测）
             if done:
