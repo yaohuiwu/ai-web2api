@@ -300,3 +300,57 @@ providers:
     poll_interval: 0.2
     stable_polls: 20
     min_wait_before_stable: 8.0
+
+  # 豆包（doubao.com）：**仅手动登录**（无密码登录）；容器内会提示「受区域限制，请先登录」
+  # 选择器只有 composer/消息容器是实测的，其余待登录后校准 → 默认禁用
+  doubao:
+    enabled: false
+    driver: doubao
+    url: https://www.doubao.com/chat
+    locale: zh-CN
+    models:
+      - {name: doubao-web, ui_label: "豆包"}
+    selectors:
+      input:                    # 实测（游客页）：tiptap / ProseMirror contenteditable
+        - "div.tiptap.ProseMirror[contenteditable='true']"
+        - "div[contenteditable='true']"
+      type_prompt: true
+      send_button: []           # ⚠ 待实测（输入后才出现）
+      response_container:       # ⚠ 待实测（游客页 DOM 里见 .message-container / .chat-item）
+        - ".message-container"
+        - ".chat-item"
+      thinking_container: []
+      stop_button: []           # ⚠ 待实测
+      login_check: []           # ⚠ 待实测（空 = 用 input 判定；未登录时豆包不渲染输入框）
+      upload_input: []          # ⚠ 待实测
+    login:
+      mode: manual
+      hint: "豆包无密码登录（手机号验证码/扫码）→ 宿主执行 ./scripts/login.sh doubao 手动登录一次"
+    queue: {max_size: 10, timeout: 60}
+    response_timeout: 180
+    poll_interval: 0.2
+    stable_polls: 20
+    min_wait_before_stable: 8.0
+
+  # 智谱清言（chatglm.cn）：**仅手动登录** + 前置**阿里云 WAF 滑动验证**
+  # headless/headful 实测都被拦在「访问验证：请按住滑块拖动到最右边」→ 需人工在宿主过验证
+  glm:
+    enabled: false
+    driver: glm
+    url: https://chatglm.cn/main/alltoolsdetail?lang=zh
+    locale: zh-CN
+    models:
+      - {name: glm-web, ui_label: "智谱清言"}
+    selectors:
+      input: []                 # ⚠ 待实测（须先过 WAF）
+      send_button: []
+      response_container: []
+      thinking_container: []
+      stop_button: []
+      login_check: []
+      upload_input: []
+    login:
+      mode: manual
+      hint: "chatglm.cn 前置阿里云 WAF 滑块且无密码登录：请在**有显示器的宿主**执行 ./scripts/login.sh glm 手动过验证并登录，再导入登录态"
+    queue: {max_size: 10, timeout: 60}
+    response_timeout: 180
