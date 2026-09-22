@@ -9,6 +9,8 @@ import json
 import time
 from pathlib import Path
 
+import pytest
+
 from ai_web2api.core.auth_expiry import compute_auth_expiry, read_state_cookies
 
 DAY = 86400.0
@@ -130,6 +132,9 @@ def test_to_dict_shape():
         "cookie",
         "saved_at",
         "saved_at_iso",
+        "login_at",
+        "login_at_iso",
+        "login_at_source",
         "validity_days",
     }
     assert d["state"] == "soon" and d["expires_at_iso"].endswith("Z")
@@ -158,18 +163,34 @@ def test_background_warns_only_manual_providers():
     assert "_auth_warned" in src  # 状态变化才记，避免刷屏
 
 
-def test_saved_at_and_validity_days():
-    """state.json 更新时间会暴露出来，并推算有效期（到期 − 更新）。"""
+def test_login_at_and_validity_days():
+    """login_at 优先作为推算基准（到期 − 首次登录）。"""
     out = compute_auth_expiry(
         [_c("token", NOW + 60 * DAY)],
         auth_cookies=["token"],
-        state_mtime=NOW,
+        state_mtime=NOW - 1 * DAY,
+        login_at=NOW - 10 * DAY,   # 10 天前登录
         warn_days=7,
         now=NOW,
     )
     d = out.to_dict()
-    assert d["saved_at"] == NOW and d["saved_at_iso"].endswith("Z")
-    assert d["validity_days"] == 60.0  # 60 天前更新、60 天后过期 → 推算有效期 60 天
+    assert d["saved_at"] == NOW - 1 * DAY
+    assert d["login_at"] == NOW - 10 * DAY and d["login_at_source"] == "recorded"
+    assert d["validity_days"] == 70.0  # 10 天前登录、60 天后过期 → 有效期 70 天
+
+
+def test_login_at_falls_back_to_state_mtime():
+    """无 sidecar → 回退 state.json mtime 并标注 state_file。"""
+    out = compute_auth_expiry(
+        [_c("token", NOW + 30 * DAY)],
+        auth_cookies=["token"],
+        state_mtime=NOW - 5 * DAY,
+        warn_days=7,
+        now=NOW,
+    )
+    d = out.to_dict()
+    assert d["login_at"] == NOW - 5 * DAY and d["login_at_source"] == "state_file"
+    assert d["validity_days"] == 35.0
 
 
 def test_saved_at_present_even_when_unknown():
@@ -178,3 +199,23 @@ def test_saved_at_present_even_when_unknown():
     d = out.to_dict()
     assert d["state"] == "unknown"
     assert d["saved_at"] == NOW - 3 * DAY and d["validity_days"] is None
+    assert d["login_at"] == NOW - 3 * DAY and d["login_at_source"] == "state_file"
+
+
+@pytest.mark.asyncio
+async def test_login_meta_sidecar(tmp_path: Path):
+    """login.json sidecar：记录首次登录时间，登出时清除。"""
+    from ai_web2api.browser.manager import BrowserManager
+    from ai_web2api.config import BrowserConfig
+
+    bm = BrowserManager(BrowserConfig(), tmp_path)
+    assert bm.login_meta_path("p") == tmp_path / "p" / "login.json"
+    assert bm.read_login_at("p") is None
+    bm.record_login_at("p", ts=1234567890.0)
+    assert bm.read_login_at("p") == 1234567890.0
+    # state.json 更新（轮换落盘）不影响 login.json
+    bm.state_path("p").write_text("{}", encoding="utf-8")
+    assert bm.read_login_at("p") == 1234567890.0
+    # 登出清除
+    await bm.clear_state("p")
+    assert bm.read_login_at("p") is None

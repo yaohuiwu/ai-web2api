@@ -28,6 +28,8 @@ class AuthExpiry:
     source: str  # cookie | session_estimate | unknown
     cookie: str | None = None
     saved_at: float | None = None  # state.json 最后更新时间（epoch 秒）
+    login_at: float | None = None  # 首次/本次登录时间（sidecar，不随轮换变化）
+    login_at_source: str | None = None  # recorded | state_file（无 sidecar 时回退 state.json mtime）
 
     def to_dict(self) -> dict:
         def iso(ts: float | None) -> str | None:
@@ -37,10 +39,14 @@ class AuthExpiry:
                 "%Y-%m-%dT%H:%M:%SZ"
             )
 
-        # 推算有效期 = 到期时间 − 最后更新时间（≈ 登录/刷新时点），仅当两者都有且为正
+        # 首次登录时间：优先 sidecar 记录；无则回退 state.json mtime（标注来源）
+        login_at, login_src = self.login_at, self.login_at_source
+        if login_at is None and self.saved_at is not None:
+            login_at, login_src = self.saved_at, "state_file"
+        # 推算有效期 = 到期时间 − 首次登录时间，仅当两者都有且为正
         validity_days = None
-        if self.expires_at is not None and self.saved_at is not None:
-            span = (self.expires_at - self.saved_at) / 86400.0
+        if self.expires_at is not None and login_at is not None:
+            span = (self.expires_at - login_at) / 86400.0
             if span > 0:
                 validity_days = round(span, 2)
         return {
@@ -53,6 +59,9 @@ class AuthExpiry:
             "cookie": self.cookie,
             "saved_at": self.saved_at,
             "saved_at_iso": iso(self.saved_at),
+            "login_at": login_at,
+            "login_at_iso": iso(login_at),
+            "login_at_source": login_src,
             "validity_days": validity_days,
         }
 
@@ -74,6 +83,7 @@ def compute_auth_expiry(
     session_ttl_days: float | None = None,
     state_mtime: float | None = None,
     warn_days: float = 3.0,
+    login_at: float | None = None,
     now: float | None = None,
 ) -> AuthExpiry:
     """按配置的 ``auth_cookies`` 计算认证有效期。
@@ -102,7 +112,10 @@ def compute_auth_expiry(
         cookie_name = str(matched[0].get("name") or "")
     else:
         return AuthExpiry(
-            _UNKNOWN, None, None, warn_days, _UNKNOWN, None, saved_at=state_mtime
+            _UNKNOWN, None, None, warn_days, _UNKNOWN, None,
+            saved_at=state_mtime,
+            login_at=login_at,
+            login_at_source="recorded" if login_at else None,
         )
 
     days_left = (expires_at - now) / 86400.0
@@ -115,6 +128,8 @@ def compute_auth_expiry(
     return AuthExpiry(
         state, expires_at, round(days_left, 2), warn_days, source, cookie_name,
         saved_at=state_mtime,
+        login_at=login_at,
+        login_at_source="recorded" if login_at else None,
     )
 
 
@@ -124,6 +139,7 @@ def compute_for_state_file(
     auth_cookies: list[str] | None = None,
     session_ttl_days: float | None = None,
     warn_days: float = 3.0,
+    login_at: float | None = None,
     now: float | None = None,
 ) -> AuthExpiry:
     """便捷封装：直接从 provider 的 state.json 路径计算（供路由与后台复用）。"""
@@ -137,6 +153,7 @@ def compute_for_state_file(
         session_ttl_days=session_ttl_days,
         state_mtime=mtime,
         warn_days=warn_days,
+        login_at=login_at,
         now=now,
     )
 

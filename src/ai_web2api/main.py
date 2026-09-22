@@ -284,6 +284,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
                 continue
             if result.get("ok"):
                 registry.set_login_status(name, True)
+                browser.record_login_at(name)  # 自动登录成功 = 一次新登录
                 logger.info('provider "%s" 自动登录成功', name)
             else:
                 logger.warning(
@@ -310,6 +311,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
                 auth_cookies=p.cfg.login.auth_cookies,
                 session_ttl_days=p.cfg.login.session_ttl_days,
                 warn_days=p.cfg.login.expiry_warn_days or cfg.browser.auth_expiry_warn_days,
+                login_at=browser.read_login_at(name),
             )
             if info.state in ("soon", "expired") and _auth_warned.get(name) != info.state:
                 logger.warning(
@@ -339,6 +341,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
                     if not before.get(name):
                         # 刚从不登录变登录（可能后台自动登录/页面恢复）→ 必须落盘
                         browser.mark_state_dirty(name)
+                        browser.record_login_at(name)  # 记一次登录时刻（不随轮换变化）
                     # 已登录且登录态未过期时这里什么都不写（save_state 内部判定）
                     await browser.save_state(name)
                 await threads.cleanup()

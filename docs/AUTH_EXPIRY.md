@@ -113,7 +113,13 @@ else:
   "days_left": 6.4,                       // 可为负（已过期）
   "warn_days": 7,
   "source": "cookie",                     // cookie | session_estimate | unknown
-  "cookie": "__Secure-next-auth.session-token.0"
+  "cookie": "__Secure-next-auth.session-token.0",
+  "saved_at": 1789953347.0,                // state.json 最后更新时间（epoch）
+  "saved_at_iso": "2026-09-21T01:15:47Z",
+  "login_at": 1787953347.0,                // 首次/本次登录时间（sidecar login.json）
+  "login_at_iso": "2026-08-23T01:15:47Z",
+  "login_at_source": "recorded",           // recorded | state_file（无 sidecar 时回退 state.json mtime）
+  "validity_days": 120.0                   // 推算有效期 = expires_at − login_at
 }
 ```
 
@@ -123,14 +129,16 @@ else:
 
 > 提醒规则：**仅 `login.mode == "manual"`** 且 `state in {soon, expired}` 才提醒；`auto`/`cookies` 只展示不提醒。
 
-1. **详情页新增两行**（所有 provider 都显示）
+1. **详情页新增三行**（所有 provider 都显示）
    - 「**认证有效期**」：
      - `ok`：`2026-12-20（还有 89 天）`
      - `soon`：黄色 `⚠ 6 天后过期（2026-09-24）`
      - `expired`：红色 `已过期（2026-09-24）`
      - `unknown`：灰色 `无法判断（会话型/未配置关键 cookie）`
-   - 「**认证信息更新**」：`更新于 2026-09-21（3 天前） · 推算有效期约 90 天`
-     - 过期/未知时可据此**反推实际有效期**（到期 − 更新）；`unknown` 时只有更新时间。
+   - 「**首次登录**」：`2026-08-23（30 天前） · 推算有效期约 120 天`
+     - `login_at` 来自 sidecar `profiles/<p>/login.json`（**只在真正登录时记一次**，不随 cookie 轮换变化）；无 sidecar 时回退 state.json mtime 并标注 `· 按 state.json 推算`。
+     - `validity_days` 以 `login_at` 为基准（比 saved_at 更接近真实有效期）。
+   - 「**认证信息更新**」：`更新于 2026-09-21（3 天前）`（= saved_at，最后一次落盘）
 2. **手动认证提醒卡**（`login_mode == "manual"` 且 `state in {soon, expired}`）——**复用现有 `.login-cta` 组件**：
    > ⚠ **chatgpt 认证约 6 天后过期**。该 provider 为手动认证，请在过期前更新：
    > `python -m ai_web2api.cli login chatgpt`
@@ -140,6 +148,8 @@ else:
 
 ## 7. 后台行为
 
+- `login_at` 记录点（sidecar `profiles/<p>/login.json`）：导入 state（`POST /admin/{p}/login/state`）、
+  注入 cookies（`login/cookies`）、自动登录成功、后台检测到「未登录→已登录」跃迁；**登出时删除**。
 - `status_check` 循环里检测到 `soon/expired` → `logger.warning` 一次（**状态变化时才记**，避免刷屏）。
 - 不弹窗、不桌面通知、不自动重登。
 

@@ -26,6 +26,7 @@ class _Browser:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.reset: list[str] = []
+        self.logins: list[str] = []
 
     def state_path(self, name: str) -> Path:
         return self.root / name / "state.json"
@@ -35,6 +36,10 @@ class _Browser:
 
     def clear_login_error(self, name: str) -> None:
         pass
+
+    def record_login_at(self, name: str, ts: float | None = None) -> float:
+        self.logins.append(name)
+        return 0.0
 
 
 class _Provider:
@@ -83,6 +88,8 @@ def test_import_writes_state_and_resets_context(tmp_path: Path):
     assert written["origins"][0]["origin"] == "https://chat.qwen.ai"
     # 重置 context
     assert browser.reset == ["fake"]
+    # 导入 = 一次新登录 → 记录首次登录时间
+    assert browser.logins == ["fake"]
 
 
 def test_import_rejects_empty_cookies(tmp_path: Path):

@@ -95,6 +95,31 @@ class BrowserManager:
     def state_path(self, provider: str) -> Path:
         return self._profiles_dir / provider / "state.json"
 
+    # ---------- 首次登录时间（sidecar，不随 cookie 轮换变化） ----------
+
+    def login_meta_path(self, provider: str) -> Path:
+        return self._profiles_dir / provider / "login.json"
+
+    def record_login_at(self, provider: str, ts: float | None = None) -> float:
+        """记录"本次登录"时刻到 ``login.json``（只在真正登录时调用，不随轮换更新）。"""
+        stamp = time.time() if ts is None else ts
+        path = self.login_meta_path(provider)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"login_at": stamp}), encoding="utf-8")
+            logger.info("login_at recorded for provider %s: %s", provider, stamp)
+        except Exception:  # noqa: BLE001
+            logger.warning("record login_at failed (provider=%s)", provider, exc_info=True)
+        return stamp
+
+    def read_login_at(self, provider: str) -> float | None:
+        """读首次登录时间；无 sidecar / 损坏 → None。"""
+        path = self.login_meta_path(provider)
+        try:
+            return float(json.loads(path.read_text(encoding="utf-8"))["login_at"])
+        except Exception:  # noqa: BLE001
+            return None
+
     # ---------- 登录失败截图（webui 调试用） ----------
 
     def login_error_path(self, provider: str) -> Path:
@@ -284,6 +309,9 @@ class BrowserManager:
         path = self.state_path(provider)
         if path.exists():
             path.unlink()
+        login_meta = self.login_meta_path(provider)
+        if login_meta.exists():
+            login_meta.unlink()  # 登出后首次登录时间也失效
 
     async def open_page(
         self,

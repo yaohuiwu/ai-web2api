@@ -477,6 +477,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 auth_cookies=pcfg.login.auth_cookies,
                 session_ttl_days=pcfg.login.session_ttl_days,
                 warn_days=pcfg.login.expiry_warn_days or cfg.browser.auth_expiry_warn_days,
+                login_at=p.browser.read_login_at(name),
             ).to_dict()
             if not logged_in:
                 auth["state"] = "logged_out"
@@ -640,6 +641,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 logger.warning("close_provider(%s) 失败", name, exc_info=True)
         await provider.browser.reset_context(name)
         provider.browser.clear_login_error(name)
+        provider.browser.record_login_at(name)  # 导入即一次新登录（不随轮换变化）
         ok = await provider.check_login()
         if ok is not None:
             registry.set_login_status(name, ok)
@@ -659,6 +661,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         # 注入即变更：必须落盘（不受"已登录未过期就不写"规则约束）
         provider.browser.mark_state_dirty(name)
         await provider.browser.save_state(name)
+        provider.browser.record_login_at(name)  # cookies 注入 = 一次新登录
         ok = await provider.check_login()
         if ok is not None:
             registry.set_login_status(name, ok)
