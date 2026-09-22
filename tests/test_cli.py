@@ -112,3 +112,18 @@ def test_console_script_declared():
     pyproject = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(encoding="utf-8")
     assert "[project.scripts]" in pyproject
     assert 'ai-web2api = "ai_web2api.cli:main"' in pyproject
+
+
+def test_login_script():
+    """便捷脚本：自动挑解释器 + 自动推导导入地址 + 有一行命令文档。"""
+    import os
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    sh = root / "scripts" / "login.sh"
+    assert sh.is_file(), "缺少 scripts/login.sh"
+    body = sh.read_text(encoding="utf-8")
+    assert "AI_WEB2API_URL" in body and "login" in body
+    assert os.access(sh, os.X_OK), "scripts/login.sh 需要可执行位"
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert "./scripts/login.sh" in readme and "ai-web2api login" in readme

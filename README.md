@@ -62,18 +62,28 @@ INFO ai_web2api: OpenAI API（局域网）：http://192.168.1.5:8000/v1
 **方式 A（推荐）自动登录**：`config.yaml` 里配 `login.mode: auto` + `.env` 写 `DEEPSEEK_USERNAME/DEEPSEEK_PASSWORD`，
 服务启动时自动登录（无头，不弹窗口）。
 
-**方式 B（推荐，需验证码/Google/滑块时）命令行手动登录**（在有显示器的本机运行；登录成功后**默认自动导入本地服务**，免重启）：
+**方式 B（推荐，需验证码/Google/滑块时）命令行手动登录**（在有显示器的本机运行；登录成功后**默认自动导入运行中的服务**，免重启）：
 
 ```bash
-python -m ai_web2api.cli login qwen            # 有头浏览器；先自动填账号密码，你补验证码/选 Google
-python -m ai_web2api.cli login deepseek --manual
-python -m ai_web2api.cli login qwen --no-import # 只写 state，不导入
+# 最省事：一条命令（自动挑解释器 + 自动推导导入地址）
+./scripts/login.sh chatgpt         # 也可不带参数 → 交互选择 provider
+
+# 等价写法（`pip install -e .` 后有短命令）
+ai-web2api login chatgpt
+ai-web2api providers               # 列出 provider：模式 / 登录态 / 认证还剩多少天
+
+# 不装也能用
+python -m ai_web2api.cli login chatgpt --manual
 ```
 
-- 生成并写入 `profiles/<provider>/state.json`；带 `--import-url` 可指定服务地址（默认由 `config.yaml` 的 host/port 推导）。
+- **Docker 部署也请在宿主执行**（容器内没有可见窗口，无法完成人工登录）；脚本会把登录态 POST 给容器服务。
+- 导入地址优先级：`--import-url` > `AI_WEB2API_URL` 环境变量 > 由 `config.yaml` 的 host/port 推导。
+  跨机器/容器示例：`AI_WEB2API_URL=http://192.168.1.10:8000 ./scripts/login.sh chatgpt`
+- 省略 provider 时会**列出候选**（标注 `manual/auto`、认证剩余天数）让你选；`--no-import` 只写 state 不导入。
+- 生成并写入 `profiles/<provider>/state.json`（首次登录时间记在 `login.json`）。
 - 详见 [`docs/MANUAL_LOGIN.md`](docs/MANUAL_LOGIN.md)。
 
-**方式 C：在 `/ui` 状态面板导入**：Provider 详情点「手动登录/导入」→ 粘贴 `state.json` 或选文件（可拖入）→ 导入。
+**方式 C：在 `/ui` 状态面板导入**：Provider 详情点「导入登录态」→ 粘贴 `state.json` 或选文件（可拖入）→ 导入。
 （接口：`POST /admin/{p}/login/state`，会写盘 + 重置 context + 复核登录态。）
 
 **方式 D（旧）：让窗口可见手动登录**（本地 non-docker）：

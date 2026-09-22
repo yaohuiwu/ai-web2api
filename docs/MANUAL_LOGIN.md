@@ -1,6 +1,6 @@
 # 手动登录：CLI 子命令 + state 导入（设计，待评审）
 
-> 状态：**已实现**（CLI 子命令 + 导入接口 + UI 粘贴/上传）。
+> 状态：**已实现**（CLI 子命令 + 导入接口 + UI 粘贴/上传；短命令 `ai-web2api login` 与 `scripts/login.sh` 亦已提供）。
 > 目标：在**有显示器的本机**用真实浏览器手动完成登录（含验证码/Google/短信），
 > 生成 `storage_state`，再导入到运行中的服务（含 Docker），无需 VNC / 改镜像。
 
@@ -16,7 +16,11 @@
 ## 2. 命令形态
 
 ```bash
-# 在项目根、宿主上运行（用项目 .venv + Playwright）
+# 最省事（推荐）：自动挑解释器 + 自动推导导入地址
+./scripts/login.sh qwen
+ai-web2api providers                                   # 列出 provider / 认证剩余天数
+
+# 在项目根、宿主上运行（等价写法）
 python -m ai_web2api.cli login qwen
 python -m ai_web2api.cli login deepseek --manual
 python -m ai_web2api.cli login               # provider 省略 → server.default_provider 或第一个启用者
