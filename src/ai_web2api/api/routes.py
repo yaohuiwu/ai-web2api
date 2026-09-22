@@ -520,7 +520,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             "threads": {
                 "active": threads.active_count() if threads is not None else 0,
                 "max": threads.max_threads if threads is not None else 0,
-                "list": thread_list,
+                "total": len(thread_list),
+                "list": thread_list,   # 供 provider 摘要统计（会话浏览请用 /ui/threads.html）
             },
         }
 

@@ -15,7 +15,7 @@ async function load() {
   lastData = data;
   renderKpis(data.server, data.threads || { active: 0, max: 0, list: [] });
   renderProviders(data.providers || []);
-  renderThreads(data.threads || { active: 0, max: 0, list: [] });
+  renderThreadSummary(data.threads || { active: 0, max: 0, total: 0, list: [] });
   renderQuickstart(data.server);
 }
 
@@ -23,7 +23,7 @@ function renderKpis(s, t) {
   const onOff = (v) => (v ? "开" : "关");
   const items = [
     ["⏱", "运行时间", fmtUptime(s.uptime_seconds), ""],
-    ["💬", "活跃会话", `${t.active} / ${t.max}`, t.active >= t.max ? "warn" : ""],
+    ["💬", "活跃会话", `${t.active} / ${t.max}`, t.active >= t.max ? "warn" : "", "/ui/threads.html"],
     ["🔌", "监听地址", `${s.host}:${s.port}`, ""],
     ["🖥", "headless", s.headless ? "是" : "否", s.headless ? "" : "muted"],
     ["💾", "thread 持久化", onOff(s.thread_persist), s.thread_persist ? "ok" : "muted"],
@@ -33,10 +33,12 @@ function renderKpis(s, t) {
   ];
   $("#kpis").innerHTML = items
     .map(
-      ([icon, k, v, tone]) => `<div class="kpi ${tone}" title="${esc(k)}">
+      ([icon, k, v, tone, href]) => `<${href ? "a" : "div"} class="kpi ${tone}${href ? " link" : ""}" title="${esc(k)}"${
+        href ? ` href="${href}"` : ""
+      }>
         <div class="kpi-top"><span class="kpi-i">${icon}</span><span class="kpi-k">${esc(k)}</span></div>
         <div class="kpi-v">${esc(v)}</div>
-      </div>`
+      </${href ? "a" : "div"}>`
     )
     .join("");
   $("#serverLine").textContent = `v${s.version} · ${s.host}:${s.port} · 运行 ${fmtUptime(s.uptime_seconds)}`;
@@ -353,48 +355,13 @@ async function actLogout(name) {
   finally { btn.disabled = false; btn.classList.remove("loading"); }
 }
 
-function renderThreads(t) {
-  $("#threadCount").textContent = `${t.active} / ${t.max} 活跃`;
-  const wrap = $("#threads");
-  const list = t.list || [];
-  if (!list.length) {
-    wrap.innerHTML = `<div class="empty"><span class="big">💬</span>当前没有会话 —— 在 Playground 发一条消息就会出现在这里</div>`;
-    return;
-  }
+function renderThreadSummary(t) {
+  // 会话浏览已独立成页（/ui/threads.html）；这里只给概览 + 入口。
+  const total = t.total ?? (t.list || []).length;
   const pct = Math.min(100, Math.round((t.active / Math.max(1, t.max)) * 100));
-  wrap.innerHTML = `
-    <div class="bar"><div style="width:${pct}%"></div></div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>thread_id</th><th>provider</th><th>model</th><th>状态</th><th>URL</th><th></th></tr></thead>
-        <tbody>${list.map((s) => `
-          <tr>
-            <td class="mono">
-              <span title="${esc(s.thread_id)}">${esc(s.thread_id)}</span>
-              <button class="btn sm copy" data-copy="${esc(s.thread_id)}" title="复制 thread_id" aria-label="复制 thread_id">⧉</button>
-            </td>
-            <td><span class="pill">${esc(s.provider)}</span></td>
-            <td class="mono">${esc(s.model || "")}</td>
-            <td>${s.loaded === false
-              ? `<span class="pill">存档</span>`
-              : `<span class="pill live">活跃 · ${s.idle_seconds ?? 0}s</span>`}</td>
-            <td class="mono" title="${esc(s.page_url || "")}">${esc(s.url_id || "—")}</td>
-            <td class="row-actions">
-              <a class="btn sm" href="/ui/playground.html?thread_id=${encodeURIComponent(s.thread_id)}" title="在 Playground 继续该会话">继续</a>
-              <button class="btn danger sm" onclick="killThread('${esc(s.thread_id)}')">销毁</button>
-            </td>
-          </tr>`).join("")}</tbody>
-      </table>
-    </div>`;
-  wrap.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => copyText(b.dataset.copy)));
-}
-
-async function killThread(id) {
-  try {
-    await api(`/admin/threads/${encodeURIComponent(id)}`, { method: "DELETE" });
-    toast(`thread ${id} 已销毁`);
-    await load();
-  } catch (e) { toast(`失败: ${e.message}`); }
+  $("#threadSummary").innerHTML =
+    `活跃 <b>${t.active}</b> / ${t.max} · 共 <b>${total}</b> 条` +
+    `<span class="mini-bar" title="活跃 ${t.active} / 上限 ${t.max}"><div style="width:${pct}%"></div></span>`;
 }
 
 async function refresh() {

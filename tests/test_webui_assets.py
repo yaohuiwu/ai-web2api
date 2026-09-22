@@ -130,10 +130,11 @@ def test_status_panel_polish():
     assert "function dotClass" in js, "provider 标签状态点未按认证状态着色"
     assert "auth-bar" in js, "缺少认证有效期进度条"
     assert "pv-summary" in js, "缺少 provider 摘要行"
-    assert "data-copy" in js, "thread_id 不可复制"
-    assert "playground.html?thread_id=" in js, "缺少「去 Playground 继续」"
     css = (WEBUI / "assets/css/index.css").read_text(encoding="utf-8")
-    assert ".auth-bar" in css and ".row-actions" in css and ".kpi-top" in css
+    assert ".auth-bar" in css and ".kpi-top" in css and ".mini-bar" in css
+    # 会话浏览已拆到独立页：这里只留摘要 + 入口（表格与逐条操作见 threads.js）
+    assert "renderThreadSummary" in js and "threads.html" in js
+    assert "renderThreads(" not in js, "状态面板不应再渲染会话表格"
     pg = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
     assert "thread_id" in pg and "URLSearchParams" in pg, "Playground 未支持 ?thread_id="
 
