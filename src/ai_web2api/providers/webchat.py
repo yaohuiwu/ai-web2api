@@ -155,6 +155,7 @@ class WebChatProvider(BaseProvider):
             # 否则消息在页面上"消失"、客户端只等到超时 → 用户表现为"丢了一个响应"。
             if not await self._confirm_sent(page, input_sel, prompt):
                 logger.warning("[%s] 发送后输入框未清空 → 判定未发出，重试一次", self.name)
+                await self._dismiss_overlays(page, reason="发送未生效")  # 常见原因：弹窗挡住发送
                 await self._send_prompt(page, input_sel, prompt)
                 if not await self._confirm_sent(page, input_sel, prompt):
                     raise ResponseTimeoutError(
@@ -978,7 +979,8 @@ XMLHttpRequest.prototype.send = function (body) {{
         th_sel: str | None = None
         start = time.monotonic()
         confirm_timeout = getattr(cfg, "send_confirm_timeout", 0) or 0
-        confirmed = False   # 是否已经确认"网页端开始生成"
+        confirmed = False   # 是否已经重发过一次
+        busy_seen = False   # 见到"繁忙/排队"提示（关掉后重发一次，仍失败才报繁忙）
         while True:
             elapsed = time.monotonic() - start
             if elapsed > timeout:
@@ -993,11 +995,12 @@ XMLHttpRequest.prototype.send = function (body) {{
                 if not delivered:
                     await self._dismiss_overlays(page, reason="探测到无生成迹象")
                     if await self._busy_hint_visible(page):
+                        # 繁忙弹窗会**挡住发送**（实测：文字留在输入框没发出去）
+                        # → 先关弹窗，再重发一次，而不是直接报错
+                        busy_seen = True
                         await self._dismiss_overlays(page, reason="繁忙提示")
-                        raise ResponseTimeoutError(
-                            f'provider "{self.name}" 网站提示繁忙/排队（可能需要订阅优先队列）：'
-                            f"已自动关闭提示弹窗，请稍后重试",
-                            provider=self.name,
+                        logger.warning(
+                            "[%s] 站点提示繁忙/排队 → 已关闭提示，重发一次试试", self.name
                         )
                 if not delivered and input_sel and prompt:
                     logger.warning(
@@ -1019,6 +1022,12 @@ XMLHttpRequest.prototype.send = function (body) {{
             if confirm_timeout and confirmed and elapsed > confirm_timeout:
                 # 已重发过一次且仍无任何迹象 → 快速失败（明确原因，不误导为"超时"）
                 if not await self._message_delivered(page, md_before, th_before):
+                    if busy_seen:
+                        raise ResponseTimeoutError(
+                            f'provider "{self.name}" 网站提示繁忙/排队（可能需要订阅优先队列）：'
+                            f"已关闭提示并重发，但页面仍未开始生成，请稍后重试",
+                            provider=self.name,
+                        )
                     raise ResponseTimeoutError(
                         f'provider "{self.name}" 消息未能发出：重发后网页端仍未开始生成'
                         f"（{elapsed:.0f}s，常见于账号限流/风控或页面未就绪），请稍后重试",

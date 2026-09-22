@@ -53,6 +53,7 @@ def _prov(**selectors) -> WebChatProvider:
             "stable_polls": 3,
             "min_wait_before_stable": 0.0,
             "response_timeout": 1.0,
+            "send_confirm_timeout": 0.05,   # 测试里尽快走到"确认/重发"分支
         }
     )
     return WebChatProvider(cfg, _StubBrowser())  # type: ignore[arg-type]
@@ -126,3 +127,52 @@ async def test_timeout_with_nothing_still_errors(monkeypatch):
 
     with pytest.raises(ResponseTimeoutError):
         [c async for c in prov._poll_response_dom(page, {".md": 0}, {})]
+
+
+@pytest.mark.asyncio
+async def test_busy_hint_dismisses_then_resends(monkeypatch):
+    """繁忙弹窗会挡住发送（实测：文字留在输入框）→ 必须先关弹窗再**重发**，而不是直接报错。"""
+    from ai_web2api.browser import extractor as ex
+
+    prov = _prov(
+        response_container=[".md"], thinking_container=[], stop_button=["button.stop"],
+        dismiss_button=["button.dismiss"],
+        busy_hint=[".modal:has-text('优先队列')"],
+    )
+    page = _FakePage()
+    sent: list[str] = []
+    counts = {"n": 1}          # 发送前 1 个容器，发送后不增加（模拟"没发出去"）
+    state = {"gen_after_resend": True}
+
+    # 注意：初次发送发生在 send()（不在本函数内），_poll_response_dom 里的 sent 只记"重发"
+    async def fake_count(_page, sel):
+        if sel == ".md" and len(sent) >= 1:      # 关掉弹窗、重发后才开始生成
+            return counts["n"] + 1
+        return counts["n"]
+
+    async def fake_extract(_page, _sel, index=-1):
+        return "答案" if len(sent) >= 1 else ""
+
+    async def fake_send(self, _page, _sel, prompt):
+        sent.append(prompt)
+
+    async def fake_dismiss(self, _page, reason=""):
+        return ["button.dismiss"]
+
+    async def fake_busy(self, _page):
+        return len(sent) < 1                     # 还没重发时，弹窗在（挡住发送）
+
+    monkeypatch.setattr(ex, "count_matches", fake_count)
+    monkeypatch.setattr(ex, "extract_markdown", fake_extract)
+    monkeypatch.setattr(type(prov), "_send_prompt", fake_send)
+    monkeypatch.setattr(type(prov), "_dismiss_overlays", fake_dismiss)
+    monkeypatch.setattr(type(prov), "_busy_hint_visible", fake_busy)
+
+    chunks = [
+        c async for c in prov._poll_response_dom(
+            page, {".md": 1}, {}, input_sel=".editor", prompt="hi"
+        )
+    ]
+    assert len(sent) == 1, f"繁忙提示后必须**重发一次**（实际重发 {len(sent)} 次）"
+    assert any("答案" in (c.text or "") for c in chunks)
+    assert state["gen_after_resend"] is True

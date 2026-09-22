@@ -172,3 +172,16 @@ def test_messages_expose_widgets(tmp_path: Path):
     assert msgs[-1]["role"] == "assistant"
     assert msgs[-1]["widgets"] == [{"id": "w1", "html": True}]
     assert msgs[0]["widgets"] is None
+
+
+def test_capture_dedupes_mirrored_frames(tmp_path: Path):
+    """同一组件常被站点镜像渲染多次（实测 4 帧 = 2 份）→ 按内容去重，只存一份。"""
+    prov = _prov(tmp_path, widget_capture="both")
+    same = dict(html="<html>same</html>", png=b"\x89PNGsame")
+    page = _FramePage([
+        _Frame("https://a.kimi-canvas.com/", **same),
+        _Frame("https://b.kimi-canvas.com/", **same),          # 镜像副本
+        _Frame("https://c.kimi-canvas.com/", html="<html>other</html>", png=b"\x89PNGother"),
+    ])
+    out = asyncio.run(prov._capture_widgets(page, set()))
+    assert len(out) == 2, out

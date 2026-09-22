@@ -258,3 +258,15 @@ def test_live_view_dismiss_button():
     js = (WEBUI / "assets/js/browser.js").read_text(encoding="utf-8")
     assert 'id="dismiss"' in html
     assert "/dismiss" in js and "关闭弹窗" in html
+
+
+def test_playground_widget_panel():
+    """交互组件面板：沙箱 iframe（不给 allow-same-origin）+ 截图切换 + 历史回填。"""
+    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+    css = (WEBUI / "assets/css/playground.css").read_text(encoding="utf-8")
+    assert "function widgetsHtml" in js and "function wireWidgets" in js
+    assert 'sandbox="allow-scripts"' in js, "组件必须沙箱运行"
+    assert "allow-same-origin" not in js, "绝不能给组件同源权限"
+    assert "widget-frame" in js and "widget-shot" in js and "看截图" in js
+    assert "m.widgets" in js and "obj.widgets" in js, "历史/流式都要回填组件"
+    assert ".widget-box" in css
