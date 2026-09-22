@@ -154,6 +154,14 @@ class ThreadManager:
         out.sort(key=lambda d: d.get("updated_at") or d.get("created_at") or 0, reverse=True)
         return out
 
+    def pages_for(self, provider: str) -> list[Page]:
+        """该 provider 活跃会话的页面（供实时画面选页；**不创建**任何页面）。"""
+        return [
+            s.page
+            for s in self._sessions.values()
+            if getattr(s, "page", None) is not None and getattr(s.provider, "name", None) == provider
+        ]
+
     def active_count(self) -> int:
         return len(self._sessions)
 

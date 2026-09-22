@@ -209,6 +209,11 @@ class ServerConfig(BaseModel):
     function_calling: bool = True
     # 仓库地址：UI 顶部显示 GitHub Star 入口 + 星标数（空 = 不显示；计数由后端带缓存拉取）
     repo_url: str | None = None
+    # 实时画面（Live View，见 docs/LIVE_VIEW.md）：**只读**直播，接口无鉴权 → 对外暴露请自加反代鉴权
+    live_view: bool = True       # 总开关；false = /admin/{p}/screen* 一律 403
+    live_control: bool = False   # 预留：输入注入（P2），默认关
+    live_fps: float = 5.0        # 默认帧率（可被 ?fps= 覆盖；生成中自动降到 1）
+    live_quality: int = 50       # 默认 JPEG 质量（可被 ?quality= 覆盖）
     # 会话绑定（thread_id）：空闲回收 TTL / 上限 / 是否并行 / 是否持久化
     thread_ttl: float = 900.0      # 秒，thread 空闲多久回收（关页面）
     max_threads: int = 8           # 同时活跃 thread 上限，超出 429

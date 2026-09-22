@@ -140,6 +140,11 @@ class ProviderRegistry:
             out.append({"id": alias, "object": "model", "created": 0, "owned_by": owner})
         return out
 
+    @property
+    def browser(self) -> BrowserManager:
+        """浏览器管理器（供实时画面选页等只读用途）。"""
+        return self._browser
+
     def providers(self) -> dict[str, BaseProvider]:
         return self._providers
 

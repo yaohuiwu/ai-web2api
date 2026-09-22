@@ -24,6 +24,11 @@ class SerialGate:
         self._waiting = 0
         self._lock = asyncio.Lock()
 
+    @property
+    def busy(self) -> bool:
+        """是否有请求正在执行（供实时画面降帧判断）。"""
+        return self._sem.locked()
+
     async def _acquire(self) -> None:
         async with self._lock:
             if self._waiting >= self._max_waiters:

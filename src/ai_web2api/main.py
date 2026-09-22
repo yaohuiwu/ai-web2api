@@ -203,6 +203,13 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
 
         logger.info("API key 鉴权已启用（%d key，保护 /v1/*）", len(cfg.server.api_keys))
     app.include_router(create_router(registry, threads))
+    if cfg.server.live_view:
+        logger.warning(
+            "实时画面已启用（server.live_view=true）：该接口**无鉴权**，同网段可看到你已登录的浏览器画面；"
+            "对外暴露请自行加反代鉴权（见 docs/LIVE_VIEW.md §5.4）"
+        )
+    if cfg.server.live_control:
+        logger.warning("实时画面「输入注入」已启用（server.live_control=true）：可被远程操作浏览器，风险自负")
     app.state.registry = registry
     app.state.browser = browser
     app.state.threads = threads

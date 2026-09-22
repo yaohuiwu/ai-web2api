@@ -160,6 +160,10 @@ class BrowserManager:
     def user_agent(self) -> str:
         return self._cfg.user_agent
 
+    def active_context(self, provider: str) -> BrowserContext | None:
+        """已有 context（**不创建**）；供实时画面选页 —— 避免"看一眼"把浏览器拉起来。"""
+        return self._contexts.get(provider)
+
     async def get_context(self, provider: str, locale: str | None = None) -> BrowserContext:
         if provider in self._contexts:
             return self._contexts[provider]

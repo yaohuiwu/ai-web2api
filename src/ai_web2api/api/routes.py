@@ -14,11 +14,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import (
     FileResponse,
     JSONResponse,
+    Response,
     StreamingResponse,
 )
 from pydantic import BaseModel
 
 from ..browser import extractor
+from ..browser.live import LiveController, capture, parse_frame_options
 from ..core.auth_expiry import compute_for_state_file
 from ..core.repo_info import repo_info
 from ..core.errors import (
@@ -534,6 +536,99 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 "total": len(thread_list),
                 "list": thread_list,   # 供 provider 摘要统计（会话浏览请用 /ui/threads.html）
             },
+        }
+
+    # ---------------- admin：实时画面 Live View（只读，见 docs/LIVE_VIEW.md） ----------------
+
+    async def _live_page(name: str):
+        """选页（**不创建**）：① 活跃 thread 页面 ② 已有 context 的最后一个页面 ③ None。"""
+        if threads is not None:
+            for page in threads.pages_for(name):
+                try:
+                    if not page.is_closed():
+                        return page
+                except Exception:  # noqa: BLE001  页面刚关闭会抛
+                    continue
+        ctx = registry.browser.active_context(name)
+        if ctx is not None:
+            for page in reversed(ctx.pages):
+                try:
+                    if not page.is_closed():
+                        return page
+                except Exception:  # noqa: BLE001
+                    continue
+        return None
+
+    def _live_busy(name: str) -> bool:
+        provider = registry.providers().get(name)
+        gate = getattr(provider, "gate", None) if provider is not None else None
+        return bool(gate is not None and gate.busy)
+
+    live = LiveController(_live_page, busy_checker=_live_busy)
+
+    def _live_disabled():
+        return JSONResponse(
+            status_code=403,
+            content={"error": {"message": "实时画面已禁用（config.yaml: server.live_view=false）"}},
+        )
+
+    def _live_unknown(name: str):
+        return JSONResponse(
+            status_code=404, content={"error": {"message": f"provider {name!r} 不存在或未启用"}}
+        )
+
+    def _live_no_page(name: str):
+        return JSONResponse(
+            status_code=503,
+            content={"error": {"message": f"没有可截图的页面（{name} 当前未打开任何页面）"}},
+        )
+
+    @router.get("/admin/{name}/screen.jpg")
+    async def screen_jpg(name: str, quality: int | None = None, clip: str | None = None):
+        """单帧 JPEG（只读）。``quality`` 1-95、``clip=x,y,w,h`` 可选。"""
+        if not registry.config.server.live_view:
+            return _live_disabled()
+        if name not in registry.providers():
+            return _live_unknown(name)
+        opts = parse_frame_options(
+            quality=quality, clip=clip, default_quality=registry.config.server.live_quality
+        )
+        try:
+            frame = await live.frame_once(name, opts)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                status_code=503, content={"error": {"message": f"截图失败：{exc}"}}
+            )
+        if frame is None:
+            return _live_no_page(name)
+        return Response(
+            content=frame, media_type="image/jpeg", headers={"Cache-Control": "no-store"}
+        )
+
+    @router.get("/admin/{name}/screen/state")
+    async def screen_state(name: str):
+        """直播状态：可用性 / 观众数 / 参数 / 页面信息 / 是否正在生成。"""
+        if not registry.config.server.live_view:
+            return _live_disabled()
+        if name not in registry.providers():
+            return _live_unknown(name)
+        page = await _live_page(name)
+        page_url = None
+        viewport = None
+        if page is not None:
+            try:
+                page_url = page.url
+                size = page.viewport_size
+                viewport = dict(size) if size else None
+            except Exception:  # noqa: BLE001
+                pass
+        return {
+            "provider": name,
+            "available": page is not None,
+            "page_url": page_url,
+            "viewport": viewport,
+            "busy": _live_busy(name),
+            **live.state(name),
         }
 
     # ---------------- admin：会话绑定管理 ----------------
