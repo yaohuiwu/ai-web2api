@@ -320,6 +320,7 @@ server:
   port: 8000
   default_provider: deepseek   # which provider gets fallback aliases for common OpenAI model names (gpt-4 etc.); empty = first enabled
   function_calling: true       # master switch for tool calling; false = ignore tools entirely (avoids risk control from injected tool prompts)
+  repo_url: https://github.com/yaohuiwu/ai-web2api  # top-right Star button + star count in the UI (empty = hidden)
 browser:
   headless: true           # silent (no window); override via .env: WEB2API_HEADLESS > DEEPSEEK_HEADLESS
   locale: zh-CN            # page language (decides DeepSeek UI text / whether Chinese selectors match)
@@ -403,6 +404,7 @@ providers:                 # a list form is also accepted
 | GET | `/v1/models` | Model list |
 | POST | `/v1/chat/completions` | Chat completion (`stream` uses SSE) |
 | GET | `/healthz` | Health check + per-provider login state |
+| GET | `/admin/repo` | Repo info for the UI Star badge (`stars`/`forks`, cached 10 min, never fails the UI) |
 | GET | `/admin/status` | Aggregated status (server info, providers incl. `auth_expiry`, threads summary) |
 | POST | `/admin/{p}/login/auto` | Automatic login (reads .env credentials, see below) |
 | POST | `/admin/{p}/login/start` | Open the login window (manual login) |

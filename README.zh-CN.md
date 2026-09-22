@@ -321,6 +321,7 @@ server:
   port: 8000
   default_provider: deepseek   # 常见 OpenAI 模型名(gpt-4 等)兜底别名挂给谁；空 = 首个启用 provider
   function_calling: true       # 工具调用总开关；false = 完全忽略 tools（避免注入工具提示触发网页端风控）
+  repo_url: https://github.com/yaohuiwu/ai-web2api  # UI 右上角 Star 入口 + 星标数（空 = 隐藏）
 browser:
   headless: true           # 静默运行（不弹窗口）；可用 .env 覆盖：WEB2API_HEADLESS > DEEPSEEK_HEADLESS
   locale: zh-CN            # 页面语言（决定 DeepSeek UI 文案 / 中文选择器是否匹配）
@@ -404,6 +405,7 @@ providers:                 # 也支持 list 写法
 | GET | `/v1/models` | 模型列表 |
 | POST | `/v1/chat/completions` | 聊天补全（`stream` 走 SSE） |
 | GET | `/healthz` | 健康检查 + 各 provider 登录态 |
+| GET | `/admin/repo` | UI Star 徽章用的仓库信息（`stars`/`forks`，缓存 10 分钟，失败不影响界面） |
 | GET | `/admin/status` | 聚合状态（服务信息、各 provider 含 `auth_expiry`、会话摘要） |
 | POST | `/admin/{p}/login/auto` | 自动登录（读 .env 凭据，见下） |
 | POST | `/admin/{p}/login/start` | 打开登录窗口（手动登录） |

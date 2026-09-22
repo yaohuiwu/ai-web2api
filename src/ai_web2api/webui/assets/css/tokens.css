@@ -32,6 +32,7 @@
   --warn: #92400e;   --warn-bg: #fffbeb;     --warn-border: #fde68a;
   --ok-text: #047857; --warn-text: #b45309;  --danger-text: #b91c1c;
   --accent: linear-gradient(135deg, #2563eb, #7c3aed);
+  --star: #e3b341;
 
   /* 气泡 */
   --user-bg: #e8f0fe;      --user-border: #cdddfd;

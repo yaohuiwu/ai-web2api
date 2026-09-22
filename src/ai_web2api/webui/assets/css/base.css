@@ -78,6 +78,16 @@ header .sub { color: var(--muted); font-size: 12px; font-variant-numeric: tabula
 }
 .toggle input { accent-color: var(--blue); }
 
+/* GitHub Star 徽章（三页 header 共用） */
+.gh-star {
+  display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
+  padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--card); color: var(--text); font-size: 13px;
+}
+.gh-star:hover { background: var(--hover); border-color: var(--border-strong); }
+.gh-star .gh-icon { color: var(--star); font-size: 14px; line-height: 1; }
+.gh-star .gh-count { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.6em; text-align: center; }
+
 /* ---------- footer ---------- */
 footer {
   display: flex; gap: var(--sp-4); flex-wrap: wrap; align-items: center;

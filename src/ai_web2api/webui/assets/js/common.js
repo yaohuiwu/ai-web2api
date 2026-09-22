@@ -18,8 +18,8 @@ async function api(path, opts = {}) {
   return body;
 }
 
-// 仓库地址：留空则不显示 GitHub 链接（填上后两页 footer 自动出现）
-const REPO_URL = "";
+// 仓库地址：UI 顶部 Star 入口 + 页脚链接（后端 /admin/repo 会回传真实地址，保持同源）
+const REPO_URL = "https://github.com/yaohuiwu/ai-web2api";
 
 // toast：页面没有 .toast 元素时自动创建（两页共用）
 function toast(msg) {
@@ -65,3 +65,22 @@ function renderFooter() {
      </span>`;
 }
 document.addEventListener("DOMContentLoaded", renderFooter);
+
+// 顶部 GitHub Star 徽章：星标数由后端带缓存拉取（GitHub 匿名限流），
+// 失败/未配置时只显示 "Star" 文案 —— 链接始终可用，不影响界面。
+function renderRepoBadge() {
+  const el = document.querySelector("[data-gh-star]");
+  if (!el) return;
+  el.href = REPO_URL;
+  const count = el.querySelector(".gh-count");
+  fetch("/admin/repo")
+    .then((r) => r.json())
+    .then((d) => {
+      if (d && d.url) el.href = d.url;
+      if (count) count.textContent = d && d.stars != null ? String(d.stars) : "Star";
+    })
+    .catch(() => {
+      if (count) count.textContent = "Star";
+    });
+}
+document.addEventListener("DOMContentLoaded", renderRepoBadge);

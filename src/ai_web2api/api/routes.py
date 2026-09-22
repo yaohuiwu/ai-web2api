@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from ..browser import extractor
 from ..core.auth_expiry import compute_for_state_file
+from ..core.repo_info import repo_info
 from ..core.errors import (
     ProviderError,
     RateLimitedError,
@@ -460,6 +461,15 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         yield "data: [DONE]\n\n"
 
     # ---------------- admin：系统状态 ----------------
+
+    @router.get("/admin/repo")
+    async def repo_endpoint():
+        """仓库信息（UI 顶部 Star 入口 + 星标数）。
+
+        后端带缓存拉取（GitHub 匿名限流 60/h），失败返回 ``error`` 且不影响界面；
+        未配置 ``server.repo_url`` 时全部为 null（UI 自动隐藏）。
+        """
+        return await asyncio.to_thread(repo_info, registry.config.server.repo_url)
 
     @router.get("/admin/status")
     async def system_status(request: Request):

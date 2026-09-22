@@ -204,6 +204,8 @@ class ServerConfig(BaseModel):
     default_provider: str | None = None
     # Function Calling 总开关；false = 完全忽略 tools（不注入工具提示，避免触发网页端风控）
     function_calling: bool = True
+    # 仓库地址：UI 顶部显示 GitHub Star 入口 + 星标数（空 = 不显示；计数由后端带缓存拉取）
+    repo_url: str | None = None
     # 会话绑定（thread_id）：空闲回收 TTL / 上限 / 是否并行 / 是否持久化
     thread_ttl: float = 900.0      # 秒，thread 空闲多久回收（关页面）
     max_threads: int = 8           # 同时活跃 thread 上限，超出 429

@@ -11,6 +11,7 @@ server:
   # 常见 OpenAI 模型名（gpt-4 等）兜底别名挂给哪个 provider；空 = 第一个启用的 provider
   default_provider: deepseek
 
+  repo_url: https://github.com/yaohuiwu/ai-web2api  # UI 顶部 Star 入口 + 星标数（空 = 隐藏）
 browser:
   headless: true          # 静默运行（不弹浏览器窗口）；由 .env 覆盖：
                           # 优先级 WEB2API_HEADLESS > DEEPSEEK_HEADLESS(<PROVIDER>_HEADLESS) > 本项

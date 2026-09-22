@@ -196,3 +196,19 @@ def test_threads_page_features():
     # 三个页面导航互链
     for name in ("index.html", "playground.html", "threads.html"):
         assert "/ui/threads.html" in (WEBUI / name).read_text(encoding="utf-8")
+
+
+def test_github_star_badge():
+    """UI 顶部：GitHub 仓库入口 + Star 星标数（后端带缓存拉取，失败降级为 Star 文案）。"""
+    common = (WEBUI / "assets/js/common.js").read_text(encoding="utf-8")
+    assert 'const REPO_URL = "https://github.com/yaohuiwu/ai-web2api"' in common
+    assert "function renderRepoBadge" in common and 'fetch("/admin/repo")' in common
+    assert 'textContent = "Star"' in common, "拉取失败时应降级显示 Star"
+    for name in HTML_FILES:
+        html = (WEBUI / name).read_text(encoding="utf-8")
+        assert "data-gh-star" in html, f"{name} 缺少 Star 徽章"
+        assert "github.com/yaohuiwu/ai-web2api" in html, f"{name} 缺少仓库链接"
+    base = (WEBUI / "assets/css/base.css").read_text(encoding="utf-8")
+    assert ".gh-star" in base
+    tokens = (WEBUI / "assets/css/tokens.css").read_text(encoding="utf-8")
+    assert "--star:" in tokens, "星标颜色未进 tokens（硬编码色值会破坏暗色主题）"
