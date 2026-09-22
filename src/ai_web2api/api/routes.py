@@ -596,6 +596,26 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             content={"error": {"message": f"没有可截图的页面（{name} 当前未打开任何页面）"}},
         )
 
+    @router.post("/admin/{name}/dismiss")
+    async def dismiss_overlays(name: str, thread_id: str | None = None):
+        """关闭该 provider 页面上的弹窗/遮罩（配置的 ``selectors.dismiss_button``）。
+
+        用途：弹窗挡住输入导致发送失败时，先手工清障（UI 画面页也有对应按钮）。
+        """
+        provider = registry.providers().get(name)
+        if provider is None:
+            return _live_unknown(name)
+        page, shown = await _live_page(name, thread_id)
+        if page is None:
+            return _live_no_page(name)
+        try:
+            dismissed = await provider._dismiss_overlays(page, reason="手工清障")
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                status_code=503, content={"error": {"message": f"关闭弹窗失败：{exc}"}}
+            )
+        return {"provider": name, "shown_thread_id": shown, "dismissed": dismissed}
+
     @router.get("/admin/{name}/screen.jpg")
     async def screen_jpg(
         name: str,

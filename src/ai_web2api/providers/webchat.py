@@ -138,7 +138,16 @@ class WebChatProvider(BaseProvider):
             logger.info("[%s] sending prompt (%d chars): %.60r", self.name, len(prompt), prompt)
             if self.net_enabled:
                 await self._reset_net_capture(page)
-            await self._send_prompt(page, input_sel, prompt)
+            await self._dismiss_overlays(page, reason="发送前")   # 弹窗会挡住输入/发送
+            try:
+                await self._send_prompt(page, input_sel, prompt)
+            except ResponseTimeoutError:
+                raise
+            except Exception as exc:  # noqa: BLE001  遮罩拦截/元素不可交互 → 明确报错，别 500
+                raise ResponseTimeoutError(
+                    f'provider "{self.name}" 发送失败：{exc}（可能被弹窗/遮罩拦截，已尝试关闭；请重试）',
+                    provider=self.name,
+                ) from exc
             # 确认网页端真的接受了这条消息：点发送成功 ≠ 消息发出（实测 ChatGPT 会静默丢掉），
             # 否则消息在页面上"消失"、客户端只等到超时 → 用户表现为"丢了一个响应"。
             if not await self._confirm_sent(page, input_sel, prompt):
@@ -630,6 +639,45 @@ class WebChatProvider(BaseProvider):
                 return True
         return False
 
+    async def _dismiss_overlays(self, page: Page, *, reason: str = "") -> list[str]:
+        """点掉遮挡输入的弹窗/横幅（``selectors.dismiss_button``，出现即点）。
+
+        站点弹窗（繁忙提示、公告、升级引导）会挡住输入框或吞掉点击 —— 实测 Kimi 的
+        「和Kimi聊天的人太多了，订阅会员可进入优先队列」就是这类。返回实际点掉的选择器。
+        """
+        dismissed: list[str] = []
+        for sel in getattr(self.cfg.selectors, "dismiss_button", []) or []:
+            loc = page.locator(sel)
+            try:
+                total = await loc.count()
+            except Exception:  # noqa: BLE001
+                continue
+            # ⚠ 必须逐个找"可见的"那个：站点常把弹窗模板多份渲染在 DOM 里，
+            # 只取 .first 会点到隐藏的那份（实测 Kimi 弹窗就关不掉）。
+            for i in range(min(total, 8)):
+                try:
+                    item = loc.nth(i)
+                    if not await item.is_visible():
+                        continue
+                    await item.click(timeout=3000)
+                    dismissed.append(sel)
+                    logger.info(
+                        "[%s] 已关闭弹窗%s：%s（第 %d/%d 个匹配）",
+                        self.name, f"（{reason}）" if reason else "", sel, i + 1, total,
+                    )
+                    await page.wait_for_timeout(200)
+                    break
+                except Exception:  # noqa: BLE001  某个匹配点不动就试下一个
+                    continue
+        return dismissed
+
+    async def _busy_hint_visible(self, page: Page) -> bool:
+        """站点是否在提示"繁忙/排队/限流"（用于给出明确错误）。"""
+        for sel in getattr(self.cfg.selectors, "busy_hint", []) or []:
+            if await self._is_visible(page, sel):
+                return True
+        return False
+
     async def _confirm_sent(
         self, page: Page, input_sel: str, prompt: str, *, timeout: float = 8.0
     ) -> bool:
@@ -909,6 +957,15 @@ XMLHttpRequest.prototype.send = function (body) {{
             # 重发一次；重发后仍无迹象就快速失败，而不是死等满 response_timeout。
             if confirm_timeout and not confirmed and elapsed > confirm_timeout:
                 delivered = await self._message_delivered(page, md_before, th_before)
+                if not delivered:
+                    await self._dismiss_overlays(page, reason="探测到无生成迹象")
+                    if await self._busy_hint_visible(page):
+                        await self._dismiss_overlays(page, reason="繁忙提示")
+                        raise ResponseTimeoutError(
+                            f'provider "{self.name}" 网站提示繁忙/排队（可能需要订阅优先队列）：'
+                            f"已自动关闭提示弹窗，请稍后重试",
+                            provider=self.name,
+                        )
                 if not delivered and input_sel and prompt:
                     logger.warning(
                         "[%s] %.0fs 内无任何生成迹象 → 判定未发出，重发一次", self.name, elapsed

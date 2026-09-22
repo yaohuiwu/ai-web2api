@@ -80,6 +80,10 @@ class SelectorsConfig(BaseModel):
     # 一次回答被拆成多条消息/多个容器时（如 Kimi 工具调用），把检测到的新容器**全部拼接**，
     # 否则只会拿到第一段（默认关，仅需要的站点开）
     response_all_new: bool = False
+    # 会遮挡输入的弹窗/横幅：出现即点掉（如 Kimi 的「和Kimi聊天的人太多了」提示）
+    dismiss_button: list[str] = Field(default_factory=list)
+    # 出现 = 站点在提示繁忙/排队/限制：用于给出明确错误，而不是干等超时
+    busy_hint: list[str] = Field(default_factory=list)
     response_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = [".ds-markdown"]
     thinking_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
     stop_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []  # 填了可加快"生成结束"判定

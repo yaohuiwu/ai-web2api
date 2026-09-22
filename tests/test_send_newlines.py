@@ -196,3 +196,94 @@ async def test_message_not_delivered(monkeypatch):
 
     monkeypatch.setattr(extractor, "count_matches", fake_count)
     assert await prov._message_delivered(_DeliverPage({}), {".md": 3}, {}) is False
+
+
+# ---------- 弹窗自动关闭 / 繁忙提示（Kimi 排队弹窗实测） ----------
+
+
+class _Btn:
+    def __init__(self, visible=True, fail=False):
+        self._visible = visible
+        self._fail = fail
+        self.clicked = 0
+
+    @property
+    def first(self):
+        return self
+
+    async def is_visible(self):
+        return self._visible
+
+    async def click(self, timeout=0):
+        if self._fail:
+            raise RuntimeError("click intercepted")
+        self.clicked += 1
+
+
+class _Locator:
+    """模拟 Playwright locator：count()/nth()/is_visible()/click()。"""
+
+    def __init__(self, items, fail=False):
+        self._items = list(items)
+        self._fail = fail
+        self.clicked = 0
+
+    async def count(self):
+        return len(self._items)
+
+    def nth(self, i):
+        return self._items[i]
+
+    async def is_visible(self):
+        return False
+
+    async def click(self, timeout=0):
+        raise RuntimeError("noop")
+
+
+class _OverlayPage:
+    def __init__(self, mapping):
+        self._mapping = mapping
+
+    def locator(self, sel):
+        return self._mapping[sel]
+
+    async def wait_for_timeout(self, _ms):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_dismiss_overlays_clicks_visible_only():
+    prov = _prov(dismiss_button=["button.a", "button.b"])
+    hidden, visible = _Btn(visible=False), _Btn(visible=True)
+    out = await prov._dismiss_overlays(
+        _OverlayPage({"button.a": _Locator([hidden, visible]), "button.b": _Locator([_Btn(visible=False)])})
+    )
+    assert out == ["button.a"], "应点到第 2 个（可见的那个），而不是 .first（隐藏模板）"
+    assert visible.clicked == 1 and hidden.clicked == 0
+
+
+@pytest.mark.asyncio
+async def test_dismiss_overlays_swallows_click_errors():
+    """关不掉也不能影响主流程。"""
+    prov = _prov(dismiss_button=["button.a"])
+    out = await prov._dismiss_overlays(
+        _OverlayPage({"button.a": _Locator([_Btn(visible=True, fail=True)])})
+    )
+    assert out == []
+
+
+@pytest.mark.asyncio
+async def test_busy_hint_visible(monkeypatch):
+    from ai_web2api.providers.webchat import WebChatProvider
+
+    prov = _prov(busy_hint=[".modal:has-text('优先队列')"])
+
+    async def _vis(_page, sel):
+        return sel == ".modal:has-text('优先队列')"
+
+    monkeypatch.setattr(WebChatProvider, "_is_visible", staticmethod(_vis))
+    assert await prov._busy_hint_visible(_OverlayPage({})) is True
+
+    prov2 = _prov()
+    assert await prov2._busy_hint_visible(_OverlayPage({})) is False
