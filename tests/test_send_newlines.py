@@ -37,9 +37,14 @@ class _Page:
         self.keyboard = _Keyboard(self.rec)
 
 
-def _prov() -> WebChatProvider:
+def _prov(**selectors) -> WebChatProvider:
     cfg = ProviderConfig.model_validate(
-        {"name": "chatgpt", "url": "https://chatgpt.com/", "models": [{"name": "gpt-5-web"}]}
+        {
+            "name": "chatgpt",
+            "url": "https://chatgpt.com/",
+            "models": [{"name": "gpt-5-web"}],
+            "selectors": selectors,
+        }
     )
     return WebChatProvider(cfg, _StubBrowser())  # type: ignore[arg-type]
 
@@ -172,7 +177,10 @@ async def test_message_delivered_via_stop_button(monkeypatch):
         return 3          # 没增加
 
     monkeypatch.setattr(extractor, "count_matches", fake_count)
-    monkeypatch.setattr(WebChatProvider, "_is_visible", staticmethod(lambda page, sel: True))
+    async def _visible(_page, _sel):
+        return True
+
+    monkeypatch.setattr(WebChatProvider, "_is_visible", staticmethod(_visible))
     assert await prov._message_delivered(_DeliverPage({}), {".md": 3}, {}) is True
 
 
