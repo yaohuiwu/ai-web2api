@@ -20,7 +20,7 @@ from fastapi.responses import (
 from pydantic import BaseModel
 
 from ..browser import extractor
-from ..browser.live import LiveController, capture, parse_frame_options
+from ..browser.live import MJPEG_BOUNDARY, LiveController, capture, mjpeg_part, parse_frame_options
 from ..core.auth_expiry import compute_for_state_file
 from ..core.repo_info import repo_info
 from ..core.errors import (
@@ -603,6 +603,44 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             return _live_no_page(name)
         return Response(
             content=frame, media_type="image/jpeg", headers={"Cache-Control": "no-store"}
+        )
+
+    @router.get("/admin/{name}/stream.mjpg")
+    async def stream_mjpg(
+        name: str,
+        request: Request,
+        fps: float | None = None,
+        quality: int | None = None,
+        clip: str | None = None,
+    ):
+        """MJPEG 直播（只读）：浏览器 `<img src>` 原生渲染。
+
+        多观众共享同一采集循环（扇出）；页面不存在时不主动创建 → 直接 503。
+        """
+        if not registry.config.server.live_view:
+            return _live_disabled()
+        if name not in registry.providers():
+            return _live_unknown(name)
+        if await _live_page(name) is None:
+            return _live_no_page(name)
+        opts = parse_frame_options(
+            fps=fps,
+            quality=quality,
+            clip=clip,
+            default_fps=registry.config.server.live_fps,
+            default_quality=registry.config.server.live_quality,
+        )
+
+        async def gen():
+            async for frame in live.subscribe(name, opts):
+                if await request.is_disconnected():
+                    break
+                yield mjpeg_part(frame)
+
+        return StreamingResponse(
+            gen(),
+            media_type=f"multipart/x-mixed-replace; boundary={MJPEG_BOUNDARY}",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
 
     @router.get("/admin/{name}/screen/state")

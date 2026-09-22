@@ -76,6 +76,19 @@ def parse_frame_options(
     )
 
 
+MJPEG_BOUNDARY = "frame"
+
+
+def mjpeg_part(frame: bytes, boundary: str = MJPEG_BOUNDARY) -> bytes:
+    """把一帧 JPEG 包成 MJPEG 分片（multipart/x-mixed-replace）。"""
+    head = (
+        f"--{boundary}\r\n"
+        f"Content-Type: image/jpeg\r\n"
+        f"Content-Length: {len(frame)}\r\n\r\n"
+    ).encode()
+    return head + frame + b"\r\n"
+
+
 async def capture(page: Page, opts: FrameOptions, *, timeout_ms: float = 10_000) -> bytes:
     """截一帧 JPEG。**不做服务端缩放**（无图像库；带宽靠 quality/clip 控制）。"""
     kwargs: dict = {

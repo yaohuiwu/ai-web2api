@@ -226,3 +226,44 @@ def test_screen_jpg_and_state_with_page(tmp_path: Path, monkeypatch):
     assert state["viewport"] == {"width": 1440, "height": 900}
     assert state["streaming"] is False and state["viewers"] == 0
     assert "busy" in state
+
+
+# ---------- MJPEG ----------
+
+
+def test_mjpeg_part_framing():
+    from ai_web2api.browser.live import mjpeg_part
+
+    part = mjpeg_part(JPEG)
+    assert part.startswith(b"--frame\r\nContent-Type: image/jpeg\r\n")
+    assert f"Content-Length: {len(JPEG)}".encode() in part
+    assert part.endswith(JPEG + b"\r\n")
+
+
+def test_stream_without_page_returns_503(tmp_path: Path):
+    r = _app(tmp_path).get("/admin/fake/stream.mjpg")
+    assert r.status_code == 503 and "没有可截图的页面" in r.json()["error"]["message"]
+
+
+def test_stream_disabled_returns_403(tmp_path: Path):
+    assert _app(tmp_path, live_view=False).get("/admin/fake/stream.mjpg").status_code == 403
+
+
+def test_stream_mjpg_sends_frames(tmp_path: Path, monkeypatch):
+    """路由 + 分帧：把订阅替换成有界帧流（真 MJPEG 永不结束，TestClient 会等不到响应结束）。"""
+    page = _StubPage()
+    monkeypatch.setattr(BrowserManager, "active_context", lambda self, name: _StubCtx(page))
+
+    async def bounded_subscribe(self, provider, opts):
+        for _ in range(2):
+            yield JPEG
+
+    monkeypatch.setattr(LiveController, "subscribe", bounded_subscribe)
+
+    r = _app(tmp_path).get("/admin/fake/stream.mjpg", params={"fps": 10})
+    assert r.status_code == 200
+    assert "multipart/x-mixed-replace" in r.headers["content-type"]
+    assert r.headers["x-accel-buffering"] == "no"
+    body = r.content
+    assert body.count(b"--frame\r\nContent-Type: image/jpeg\r\n") == 2
+    assert body.count(JPEG) == 2
