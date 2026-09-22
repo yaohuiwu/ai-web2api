@@ -139,6 +139,10 @@ class LoginConfig(BaseModel):
     hint: str = ""
     url: str | None = None  # 登录页 URL（与聊天页不同时用，如 Qwen 的 /auth；空 = 用 provider.url）
     retries: int = 3  # 自动登录失败时的重试次数（网页登录首发可能静默无效）
+    # 登录成功的**真实标记**（可选）：`./scripts/login.sh` 用它自动确认"真的登录成功"。
+    # 为空则该 provider 不做自动检测，只接受用户按回车确认 ——
+    # 避免游客态站点（Gemini 游客可用）把输入框误判成登录成功。
+    detect: list[str] = Field(default_factory=list)
     # 认证有效期：声明哪些 cookie 代表登录态（glob，大小写不敏感）。
     # 不配 = 无法判断（UI 显示「未知」）；切勿用「最早到期的 cookie」（会命中 WAF/偏好 cookie 误报）
     auth_cookies: list[str] = Field(default_factory=list)

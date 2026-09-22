@@ -43,6 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("provider", nargs="?", help="provider 名（省略 = server.default_provider / 首个启用）")
     p.add_argument("--config", default=os.environ.get("AI_WEB2API_CONFIG", "config.yaml"))
     p.add_argument("--manual", action="store_true", help="不自动填表，纯手动")
+    p.add_argument("--force-login", dest="force_login", action="store_true",
+                   help="即使看起来已登录/可用，也强制走登录流程（游客态站点用）")
     p.add_argument("--timeout", type=float, default=600.0, help="等待登录成功的最长秒数")
     p.add_argument("--out", default=None, help="state 输出路径（默认 profiles/<p>/state.json）")
     p.add_argument(
@@ -210,8 +212,17 @@ async def _login_flow(args: argparse.Namespace) -> int:
             sel = await provider._goto_ready(
                 page, provider.login_url, provider.login_check_selectors, total_timeout=20.0
             )
-            if sel is not None and not await provider.logged_out_visible(page):
-                print(f"[{name}] 已是登录状态。")
+            # 只有**配置了"登录标记"**（login_check 非空）且命中时才认为已登录：
+            # 否则游客态站点（如 Gemini 游客可用、豆包游客也有输入框）会命中输入框而被误判，
+            # 用户就跑不了手动登录（命令直接退出）。--force-login 可强制走登录流程。
+            already_logged_in = bool(provider.cfg.selectors.login_check)
+            if (
+                already_logged_in
+                and sel is not None
+                and not await provider.logged_out_visible(page)
+                and not getattr(args, "force_login", False)
+            ):
+                print(f"[{name}] 已是登录状态（如需强制重新登录，加 --force-login）。")
             else:
                 # 等加载遮罩 + 切「密码登录」tab
                 if not await provider._page_stuck_loading(page):
@@ -237,6 +248,11 @@ async def _login_flow(args: argparse.Namespace) -> int:
                             await _type_into(page.locator(u).first, creds["username"])
                             await _type_into(page.locator(p).first, creds["password"])
                             print(f"[{name}] 已自动填入账号密码（验证码/Google 请手动完成）。")
+                if not (provider.cfg.login.detect or provider.cfg.selectors.login_check):
+                    print(
+                        f"[{name}] 未配置 login.detect（登录标记）→ 不会自动检测；"
+                        f"请完成登录后回终端按【回车】保存。"
+                    )
                 print(
                     f"[{name}] 请在弹出的浏览器窗口完成登录（Google / 验证码 / 滑块均可）。\n"
                     f"        完成后回到本终端按【回车】保存（也会尝试自动检测）。"
@@ -255,11 +271,13 @@ async def _login_flow(args: argparse.Namespace) -> int:
                         ok = True
                         print(f"[{name}] 已确认，保存登录态…")
                         break
-                    if (
-                        await extractor.first_match(page, provider.login_check_selectors)
-                        is not None
-                        and not await provider.logged_out_visible(page)   # 游客态也有输入框
-                    ):
+                    # 只用"登录标记"判断，**绝不**用 input 兜底：
+                    # 游客态站点（Gemini/豆包）输入框一直在，会把"没登录"误判成登录成功。
+                    # 优先级：login.detect → selectors.login_check（真登录标记）；两者都空则不自动检测。
+                    detect_sels = list(provider.cfg.login.detect) or list(
+                        provider.cfg.selectors.login_check
+                    )
+                    if detect_sels and await extractor.first_match(page, detect_sels) is not None:
                         ok = True
                         print(f"[{name}] 自动检测到登录成功。")
                         break

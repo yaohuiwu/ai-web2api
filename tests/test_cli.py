@@ -142,3 +142,26 @@ def test_post_state_explains_404(monkeypatch):
     ok, msg = _post_state("http://127.0.0.1:8000", "kimi", {"cookies": [{"name": "a"}]}, None)
     assert ok is False
     assert "404" in msg and "enabled" in msg and "重启" in msg
+
+
+def test_login_auto_detect_never_falls_back_to_input():
+    """自动检测只用"登录标记"，绝不用 input 兜底（游客态站点会误判成登录成功）。"""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "src" / "ai_web2api" / "cli.py").read_text(encoding="utf-8")
+    assert "provider.cfg.login.detect" in src
+    # 自动检测那段不能再出现 login_check_selectors（它含 input 兜底）
+    detect_block = src[src.index("detect_sels"): src.index("detect_sels") + 500]
+    assert "login_check_selectors" not in detect_block, "自动检测不得回退到输入框判定"
+
+
+def test_login_detect_config_default_empty():
+    from ai_web2api.config import ProviderConfig
+
+    cfg = ProviderConfig.model_validate({"name": "x", "url": "https://x/", "models": [{"name": "m"}]})
+    assert cfg.login.detect == [], "默认不做自动检测（需显式配置登录标记）"
+    cfg2 = ProviderConfig.model_validate(
+        {"name": "x", "url": "https://x/", "models": [{"name": "m"}],
+         "login": {"detect": ["img.avatar"]}}
+    )
+    assert cfg2.login.detect == ["img.avatar"]

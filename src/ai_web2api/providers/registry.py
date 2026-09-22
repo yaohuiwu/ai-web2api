@@ -12,6 +12,7 @@ from ..core.errors import ModelNotFoundError
 from .base import BaseProvider, first_match, wait_first_match
 from .chatgpt import ChatGPTProvider
 from .doubao import DoubaoProvider
+from .gemini import GeminiProvider
 from .glm import GlmProvider
 from .kimi import KimiProvider
 from .deepseek import DeepSeekProvider
@@ -27,6 +28,7 @@ DRIVERS: dict[str, type[BaseProvider]] = {
     "kimi": KimiProvider,
     "doubao": DoubaoProvider,
     "glm": GlmProvider,
+    "gemini": GeminiProvider,
 }
 
 # 常见 OpenAI 模型名（llama_index 等客户端默认使用）→ 自动映射到首选 provider 的默认模型。

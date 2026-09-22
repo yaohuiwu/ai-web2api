@@ -32,6 +32,7 @@ PROVIDERS = [
     ("kimi-web", "kimi"),
     ("doubao-web", "doubao"),
     ("glm-web", "glm"),
+    ("gemini-web", "gemini"),
 ]
 REF_SEL = {
     "deepseek": ".ds-assistant-message-main-content",
@@ -39,6 +40,7 @@ REF_SEL = {
     "kimi": ".chat-content-item-assistant .markdown-container:not(.toolcall-content-text) .markdown",
     "doubao": '[data-container-type="block-v2"] > div:not([class*="justify-end"]) .md-box-root',
     "glm": ".markdown-body:not(.thinking-content *)",
+    "gemini": ".model-response-text",
 }
 THINK_SEL = {
     "deepseek": ".ds-think-content",
@@ -46,6 +48,7 @@ THINK_SEL = {
     "kimi": ".markdown-container.toolcall-content-text",
     "doubao": "",
     "glm": ".thinking-content .markdown-body",
+    "gemini": "",
 }
 
 pytestmark = pytest.mark.live
@@ -116,11 +119,14 @@ async def _read_page(provider: str, url: str) -> tuple[str, str]:
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
-        ctx = await browser.new_context(
-            storage_state=f"profiles/{provider}/state.json",
-            locale="en-US" if provider == "chatgpt" else "zh-CN",
-            viewport={"width": 1440, "height": 900},
-        )
+        opts = {
+            "locale": "en-US" if provider == "chatgpt" else "zh-CN",
+            "viewport": {"width": 1440, "height": 900},
+        }
+        state = Path(f"profiles/{provider}/state.json")
+        if state.is_file():                      # 游客态站点（如 Gemini）可能还没有登录态
+            opts["storage_state"] = str(state)
+        ctx = await browser.new_context(**opts)
         page = await ctx.new_page()
         await page.goto(url, wait_until="domcontentloaded", timeout=40000)
         await page.wait_for_timeout(10000)

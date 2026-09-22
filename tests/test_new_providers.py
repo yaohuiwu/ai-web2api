@@ -83,9 +83,25 @@ def test_glm_has_no_session_pattern_and_waf_documented():
     assert "复用" in doc, "要写明 WAF cookie 导入后可复用（实测）"
 
 
+def test_gemini_enabled_guest_mode():
+    """Gemini 游客态即可用 → 默认启用；不能配 logged_out（否则会把可用状态拒掉）。"""
+    from ai_web2api.providers.gemini import GeminiProvider
+    from ai_web2api.providers.registry import DRIVERS
+
+    assert DRIVERS["gemini"] is GeminiProvider
+    assert GeminiProvider.session_url_pattern == r"/app/([0-9a-fA-F]{8,})"
+    p = _cfg("gemini")
+    assert p.enabled is True, "游客态可用 → 默认启用"
+    assert any("ql-editor" in x for x in p.selectors.input), "实测 Quill 输入框别删"
+    assert any("model-response-text" in x for x in p.selectors.response_container)
+    assert p.selectors.logged_out == [], "游客态是合法可用状态，不能当未登录"
+    assert p.selectors.type_prompt is True
+
+
 def test_docs_and_readme_reference_both():
-    for name, provider in (("doubao", "Doubao"), ("glm", "GLM")):
+    for name in ("doubao", "glm", "gemini"):
         assert (ROOT / "docs" / f"PROVIDER_{name.upper()}.md").is_file()
     for f in ("README.md", "README.zh-CN.md"):
         text = (ROOT / f).read_text(encoding="utf-8")
-        assert "docs/PROVIDER_DOUBAO.md" in text and "docs/PROVIDER_GLM.md" in text, f
+        for doc in ("docs/PROVIDER_DOUBAO.md", "docs/PROVIDER_GLM.md", "docs/PROVIDER_GEMINI.md"):
+            assert doc in text, f"{f} 缺少 {doc}"
