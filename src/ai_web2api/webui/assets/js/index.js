@@ -163,10 +163,14 @@ function renderProviderDetail(p) {
        </div>`
     : "";
   const notLogged = !p.logged_in;
-  const cmd = `python -m ai_web2api.cli login ${p.name}`;
+  // 一条命令完成登录并导入**当前访问的服务**（服务器可能是容器/远程）
+  const cmd = `./scripts/login.sh ${p.name} --import-url ${location.origin}`;
+  const cmdAlt = `ai-web2api login ${p.name} --import-url ${location.origin}`;
+  const cmdBlock = `<span class="cmd"><code>${esc(cmd)}</code><button class="btn sm" onclick="copyText('${cmd}')">复制</button></span>`;
   const notice = notLogged
-    ? `<div class="login-cta">⚠ 未登录。在本机运行 <code>${esc(cmd)}</code>（登录完会自动导入），或在下方粘贴/选择 <code>state.json</code>。
-         <button class="btn sm" onclick="copyText('${cmd}')">复制命令</button></div>`
+    ? `<div class="login-cta">⚠ 未登录。在<b>项目根目录</b>执行下面命令（登录完自动导入）：
+         ${cmdBlock}
+         <span class="muted">或在下方粘贴 / 选择 <code>state.json</code></span></div>`
     : "";
   // 认证有效期（后端 /admin/status 的 auth_expiry；可能缺失 → 降级显示）
   const ae = p.auth_expiry || {};
@@ -198,6 +202,11 @@ function renderProviderDetail(p) {
     if (ae.login_at_source === "state_file") loginText += " · 按 state.json 推算";
     if (validityDays != null) loginText += ` · 推算有效期约 ${validityDays} 天`;
   }
+  const loginStamp = loginAt
+    ? `${String(ae.login_at_iso).replace("T", " ").slice(0, 19)}（${loginAgo} 天前${
+        ae.login_at_source === "state_file" ? "，按 state.json 推算" : ""
+      }）`
+    : "—";
   const aeClsExtra = (() => {
     // 有效期进度条：剩余 / 推算有效期（无推算值时不显示）
     if (aeState === "unknown" || days == null || !validityDays) return "";
@@ -210,9 +219,8 @@ function renderProviderDetail(p) {
     ? `<div class="login-cta ${aeState === "expired" ? "danger" : "warn"}">⚠ <b>${esc(p.name)} 认证${
         aeState === "expired" ? "已过期" : `约 ${days} 天后过期`
       }</b>。该 provider 为手动认证，请尽快更新：
-         <code>${esc(cmd)}</code>
-         <button class="btn sm" onclick="copyText('${cmd}')">复制命令</button>
-         <button class="btn sm" onclick="actManualLogin('${p.name}')">导入登录态</button>
+         ${cmdBlock}
+         <button class="btn sm" onclick="actManualLogin('${p.name}')">改用导入 state.json</button>
        </div>`
     : "";
   detail.innerHTML = `
@@ -244,7 +252,10 @@ function renderProviderDetail(p) {
       <button class="btn danger" onclick="actLogout('${p.name}')">退出登录</button>
     </div>
     <div class="manual-panel" id="manualPanel" ${notLogged ? "" : "hidden"}>
-      <div class="mp-line">本机运行（登录完会自动导入）：<code id="manualCmd">${esc(cmd)}</code></div>
+      <div class="mp-line">在<b>项目根目录</b>运行（登录完会自动导入当前服务）：</div>
+      <div class="mp-line">${cmdBlock}</div>
+      <div class="mp-line muted">等价命令：<code>${esc(cmdAlt)}</code>；或设置 <code>AI_WEB2API_URL</code> 后省略 <code>--import-url</code>。</div>
+      <div class="mp-line muted">最近一次登录：${esc(loginStamp)}</div>
       <div class="mp-line muted">或粘贴 / 拖入 <code>state.json</code>：</div>
       <textarea id="statePaste" rows="5" spellcheck="false" placeholder='{"cookies":[...],"origins":[...]}'></textarea>
       <div class="mp-actions">

@@ -163,3 +163,13 @@ def test_quickstart_panel():
     assert "location.origin" in js, "片段未按访问来源生成 base_url"
     assert "chat.completions.create" in js, "缺少 OpenAI SDK 片段"
     assert ".qs-pre" in css and ".qs-tab" in css
+
+
+def test_login_guidance_uses_one_command_with_import_url():
+    """UI 登录引导：一条命令 + 自动带上当前服务地址（不分本机/Docker）。"""
+    js = (WEBUI / "assets/js/index.js").read_text(encoding="utf-8")
+    assert "./scripts/login.sh" in js, "未引导使用便捷脚本"
+    assert "ai-web2api login" in js, "未给出短命令等价写法"
+    assert "--import-url ${location.origin}" in js, "命令未自动带上当前服务地址"
+    assert "function copyText" not in js, "copyText 应只在 common.js 定义"
+    assert "loginStamp" in js, "导入面板未显示最近登录时间"
