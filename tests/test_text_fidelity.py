@@ -25,16 +25,23 @@ CASES = [
     ("code", "用 Python 写一个快速排序函数，带中文注释，必须放在代码块里"),
     ("table", "用 markdown 表格对比快速排序、归并排序、堆排序的时间/空间复杂度，3 列"),
 ]
-PROVIDERS = [("deepseek-web", "deepseek"), ("gpt-5-web", "chatgpt"), ("kimi-web", "kimi")]
+PROVIDERS = [
+    ("deepseek-web", "deepseek"),
+    ("gpt-5-web", "chatgpt"),
+    ("kimi-web", "kimi"),
+    ("doubao-web", "doubao"),
+]
 REF_SEL = {
     "deepseek": ".ds-assistant-message-main-content",
     "chatgpt": '[data-message-author-role="assistant"] .markdown',
     "kimi": ".chat-content-item-assistant .markdown-container:not(.toolcall-content-text) .markdown",
+    "doubao": '[data-container-type="block-v2"] > div:not([class*="justify-end"]) .md-box-root',
 }
 THINK_SEL = {
     "deepseek": ".ds-think-content",
     "chatgpt": "",
     "kimi": ".markdown-container.toolcall-content-text",
+    "doubao": "",
 }
 
 pytestmark = pytest.mark.live

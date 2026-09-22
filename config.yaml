@@ -315,12 +315,13 @@ providers:
         - "div.tiptap.ProseMirror[contenteditable='true']"
         - "div[contenteditable='true']"
       type_prompt: true
+      stream_content: false     # 表格/代码类回答重渲染多 → 缓冲后一次发，避免拿到残片
+      response_all_new: true    # 一次回答可能被拆成多个 .md-box-root → 新容器全部拼接
       send_button:              # 实测：发送控件是 DIV（不是 button），输入后出现
         - ".send-btn-wrapper"
-      response_container:       # ⚠ 待实测（游客页 DOM 里见 .message-container / .chat-item）
-        - ".message-container"
-        - ".chat-item"
-      thinking_container: []
+      response_container:       # 实测：助手回答（`.md-box-root` 同时匹配用户提问，必须排除右侧对齐的那侧）
+        - '[data-container-type="block-v2"] > div:not([class*="justify-end"]) .md-box-root'
+      thinking_container: []    # ⚠ 待实测（本轮回复无深度思考折叠区）
       stop_button: []           # ⚠ 待实测
       login_check: []           # 空 = 用 input 判定
       logged_out:               # 反向标记：游客态也有输入框 → 右上角「登录」按钮可见即未登录
