@@ -243,33 +243,35 @@ providers:
     min_wait_before_stable: 15.0
     thread_busy_timeout: 0
 
-  # Kimi（kimi.com）：脚手架就绪但**默认禁用** —— response_container / login_check 待登录后实测校准
-  # 登录只有「微信扫码」/「手机号 + 验证码」（带易盾验证码）→ 只能手动登录
+  # Kimi（kimi.com）：**已实测校准**（输入/发送/正文/登录判定/附件/会话URL）
+  # 限制：正文缓冲后发送（思考与正文同 segment）；站点无停止按钮；登录只有 微信扫码/手机号+验证码 → 手动
   kimi:
-    enabled: false
+    enabled: true
     driver: kimi
     url: https://www.kimi.com/
-    locale: zh-CN               # Kimi 为中文 UI
+    locale: zh-CN
+    session_url: "{base}/chat/{id}"   # 会话 URL 模板（thread 恢复用）
     models:
       - {name: kimi-web, ui_label: "Kimi"}
     selectors:
-      input:                    # 实测：contenteditable，逐字输入可被 React 受理
+      input:
         - ".chat-input-editor"
         - "div[contenteditable='true']"
       type_prompt: true
-      send_button:              # 实测（输入后才出现）
+      stream_content: false     # 思考与正文同处一段 → 缓冲后一次发，避免把"思考已完成…"当正文
+      send_button:
         - ".send-button-container"
-      response_container:       # ⚠ 待实测（见 docs/PROVIDER_KIMI.md 的校准步骤）
-        - ".message-list .markdown"
-        - ".message-list-container .markdown"
-      thinking_container: []
-      stop_button: []           # ⚠ 待实测
-      login_check:              # ⚠ 待实测：未登录也能输入，必须校准否则误判为已登录
+      response_container:       # 实测：答案的 .markdown-container **不带** toolcall-content-text（带的是思考）
+        - ".chat-content-item-assistant .markdown-container:not(.toolcall-content-text) .markdown"
+      thinking_container:       # 思考/工具折叠区（取不到不影响正文）
+        - ".chat-content-item-assistant .toolcall-rollup"
+      stop_button: []           # 实测：站点无停止按钮 → 靠 stable_polls 判结束
+      login_check:              # 实测：登录后才有头像（未登录也能输入，必须靠它判定）
         - ".user-area__main img"
       upload_input:
         - "input.hidden-input[type='file']"
         - "input[type=file]"
-      new_chat_button:          # ⚠ 待实测
+      new_chat_button:          # ⚠ 未实测（缺失不影响：无状态请求直接开新页面）
         - "[class*='new-chat']"
     login:
       mode: manual

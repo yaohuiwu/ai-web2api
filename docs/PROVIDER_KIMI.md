@@ -1,43 +1,48 @@
-# Kimi（kimi.com）接入说明（脚手架，待校准）
+# Kimi（kimi.com）接入
 
-> 状态：**默认 `enabled: false`**。已实测：登录方式、输入框、发送按钮、附件入口。
-> **待校准**：`response_container`、`login_check`、`stop_button`（需登录后实测，本文末给了步骤）。
+> 状态：**可用**（`enabled: true`）。选择器已**实测校准**，并端到端验证过（正文提取、思考分离、会话复用）。
 > 驱动：`src/ai_web2api/providers/kimi.py`（`KimiProvider`，纯配置驱动，复用通用 `WebChatProvider`）。
 
-## 1. 实测结论（2026-09，未登录状态）
+## 1. 实测结论（2026-09，登录态）
 
-| 项 | 结果 | 说明 |
-|---|---|---|
-| 站点 | `https://www.kimi.com/` | `kimi.moonshot.cn` / `kimi.com` 均 302 到它 |
-| 登录方式 | **微信扫码 / 手机号 + 验证码** | 弹层里有 `phone-form__phone-input`(tel) / `phone-form__code-input`(验证码)，且带**易盾验证码** `yidun_input` → 无密码登录，**自动化不现实**，故 `login.mode: manual` |
-| 输入框 | `div.chat-input-editor[contenteditable=true]` | 无 `textarea`；逐字输入 `press_sequentially` **有效**（受控组件受理），故 `type_prompt: true` |
-| 发送按钮 | `div.send-button-container` | 输入内容后才出现 |
-| 附件入口 | `input.hidden-input[type=file][multiple]` | 隐藏 input，直接 `set_input_files` |
-| 消息列表 | `.message-list` / `.message-list-container` | 容器已确认；**单条正文容器未确认** |
-| 游客可用 | 未登录**也能在输入框输入** | → 若不校准 `login_check`，会把「未登录」误判成「已登录」 |
+| 项 | 结果 |
+|---|---|
+| 站点 | `kimi.moonshot.cn` / `kimi.com` → 302 到 **`https://www.kimi.com/`** |
+| 登录 | **微信扫码 / 手机号 + 验证码**（带**易盾验证码** `yidun_input`，无密码登录）→ 只能 `login.mode: manual` |
+| 输入框 | `div.chat-input-editor[contenteditable=true]`（无 textarea）；逐字输入有效 → `type_prompt: true` |
+| 发送 | `div.send-button-container`（输入后出现） |
+| 附件 | `input.hidden-input[type=file][multiple]` |
+| **正文** | `.chat-content-item-assistant .markdown-container:not(.toolcall-content-text) .markdown` |
+| 思考 | 同一条消息里 **带** `toolcall-content-text` 的那个 `.markdown-container`（另有 `.toolcall-rollup`） |
+| 结束判定 | **站点没有停止按钮** → `stop_button: []`，靠 `stable_polls` 稳定性判定（短回答约 20s 返回） |
+| 会话 URL | `https://www.kimi.com/chat/<uuid>` → `session_url: "{base}/chat/{id}"`，`session_url_pattern = r"/chat/([0-9a-fA-F-]{8,})"` |
+| 登录判定 | `.user-area__main img`（登录后才有头像）。**未登录也能在输入框输入**（游客），所以不能用输入框判登录 |
 
-## 2. 校准步骤（约 5 分钟）
+端到端验证（真登录 + 真消息）：
 
-```bash
-# 1) 打开配置
-#    config.yaml → providers.kimi.enabled: true
-# 2) 手动登录（在宿主执行，会打开浏览器）
-./scripts/login.sh kimi          # 或 ai-web2api login kimi
-# 3) 发一条测试消息，让服务 dump 响应区 DOM（这是现有的调试接口）
-curl -X POST http://127.0.0.1:8000/admin/kimi/debug/probe \
-  -H 'Content-Type: application/json' -d '{"message": "你好"}'
-#    → 从输出里挑出「每个助手回复只有一个」的容器，填进 selectors.response_container 第一位
-# 4) 逐个验证其它选择器（返回数 > 0 即命中）
-curl 'http://127.0.0.1:8000/admin/kimi/debug/dom?selector=.message-list'
-curl 'http://127.0.0.1:8000/admin/kimi/debug/dom?selector=%5Bclass*%3D%22stop%22%5D'
-# 5) 登录态判定：登录前后各跑一次，挑「只在登录后出现」的选择器
-curl 'http://127.0.0.1:8000/admin/kimi/debug/dom?selector=.user-area__main'
-# 6) 把确认的选择器写进 config.yaml（候选列表第一位优先匹配），重启服务
+```
+POST /v1/chat/completions {"model":"kimi-web",...}  → content='收到'（思考单独进 reasoning_content，不混正文）
+thread_id 复用：第 1 轮"记住 7" → 第 2 轮只发最后一条 → 正确答 '7'（且会话 URL 已落库）
 ```
 
-## 3. 已知取舍
+## 2. 已知取舍
 
-- **不逆向内部 API**：本项目原则是纯 DOM 自动化，Kimi 同样走 `selectors`；若后续 UI 改版，只改配置。
-- `selectors.stop_button` 留空也能跑：结束判定退化为「稳定 N 次无变化」（`stable_polls`），只是慢一点。
-- `server.function_calling` 对 Kimi 同样适用（prompt 注入，与站点无关）。
-- 若 Kimi 出现「同一会话串行排队」类问题，调 `thread_busy_timeout`（默认 20s）。
+- **正文为缓冲发送**（`stream_content: false`）：Kimi 把思考与正文放在同一个 segment，逐字 diff 会把「思考已完成…」当正文发出去；缓冲后一次发更稳（代价：没有逐字流式观感）。
+- **无停止按钮**：结束判定靠 `stable_polls`（当前 20）× 3 + `min_wait_before_stable`，短回答约 20s；想更快可调小 `stable_polls`（有截断风险）。
+- **认证有效期显示「未知」**：Kimi 的登录态在 **localStorage**（`access_token` 几分钟、`refresh_token` JWT **实测约 90 天**），cookie 里没有可判定的过期时间；UI 的 `auth_cookies` 只读 cookie，故显示未知。
+- 不逆向内部 API：与其它 provider 一样只走 DOM 选择器，改版只需改配置。
+
+## 3. 改版后如何重新校准（约 5 分钟）
+
+```bash
+# 1) 发一条测试消息，dump 响应区 DOM（现有调试接口）
+curl -X POST http://127.0.0.1:8000/admin/kimi/debug/probe \
+  -H 'Content-Type: application/json' -d '{"message": "只回复两个字：收到"}'
+# 2) 逐个验证候选选择器（返回数 > 0 即命中；注意区分「思考」与「正文」两个 .markdown-container）
+curl 'http://127.0.0.1:8000/admin/kimi/debug/dom?selector=.chat-content-item-assistant%20.markdown'
+# 3) 登录态判定：登录前后各看一眼，挑「只在登录后出现」的
+curl 'http://127.0.0.1:8000/admin/kimi/debug/dom?selector=.user-area__main'
+# 4) 改 config.yaml → providers.kimi.selectors.*（候选列表第一位优先），重启服务
+```
+
+> 用我们的提取器直接对比输出最省事：`extract_markdown(page, sel)` —— 正文应只含答案，不含「思考已完成…」。

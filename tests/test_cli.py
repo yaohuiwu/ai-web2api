@@ -127,3 +127,18 @@ def test_login_script():
     assert os.access(sh, os.X_OK), "scripts/login.sh 需要可执行位"
     readme = (root / "README.md").read_text(encoding="utf-8")
     assert "./scripts/login.sh" in readme and "ai-web2api login" in readme
+
+
+def test_post_state_explains_404(monkeypatch):
+    """导入返回 404 → 明确提示「provider 未注册 / 需要 enabled + 重启」而不是干巴巴 Not Found。"""
+    import urllib.error
+
+    from ai_web2api.cli import _post_state
+
+    def boom(req, timeout=20):
+        raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    ok, msg = _post_state("http://127.0.0.1:8000", "kimi", {"cookies": [{"name": "a"}]}, None)
+    assert ok is False
+    assert "404" in msg and "enabled" in msg and "重启" in msg

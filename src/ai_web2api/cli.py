@@ -19,6 +19,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -163,6 +164,19 @@ def _post_state(url: str, provider: str, state: dict, api_key: str | None) -> tu
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             return True, r.read().decode()[:200]
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", "replace")[:200]
+        except Exception:  # noqa: BLE001
+            pass
+        hint = ""
+        if e.code == 404:
+            hint = (
+                "  ← provider 未注册：确认 config.yaml 里 providers.<name>.enabled: true，"
+                "并重启服务（Docker 需 docker compose up -d --build，config 是打进镜像的）"
+            )
+        return False, f"HTTP {e.code} {e.reason}{' ' + body if body else ''}{hint}"
     except Exception as e:  # noqa: BLE001
         return False, str(e)
 
