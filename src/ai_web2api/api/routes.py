@@ -19,6 +19,7 @@ from fastapi.responses import (
 from pydantic import BaseModel
 
 from ..browser import extractor
+from ..core.auth_expiry import compute_auth_expiry, read_state_cookies
 from ..core.errors import (
     ProviderError,
     RateLimitedError,
@@ -469,14 +470,26 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         for name, p in registry.providers().items():
             pcfg = p.cfg
             state_file = Path(cfg.profiles_dir) / name / "state.json"
+            logged_in = registry.login_status().get(name, False)
+            # 认证有效期：只认配置的 auth_cookies；未配置/无法判断 → unknown
+            auth = compute_auth_expiry(
+                read_state_cookies(state_file),
+                auth_cookies=pcfg.login.auth_cookies,
+                session_ttl_days=pcfg.login.session_ttl_days,
+                state_mtime=state_file.stat().st_mtime if state_file.exists() else None,
+                warn_days=pcfg.login.expiry_warn_days or cfg.browser.auth_expiry_warn_days,
+            ).to_dict()
+            if not logged_in:
+                auth["state"] = "logged_out"
             providers.append(
                 {
                     "name": name,
                     "driver": pcfg.driver or name,
                     "enabled": pcfg.enabled,
                     "url": pcfg.url,
-                    "logged_in": registry.login_status().get(name, False),
+                    "logged_in": logged_in,
                     "login_mode": pcfg.login.mode,
+                    "auth_expiry": auth,
                     "has_state_file": state_file.exists(),
                     "login_error_screenshot": p.browser.login_error_path(name).exists(),
                     "login_error_at": p.browser.login_error_mtime(name),
