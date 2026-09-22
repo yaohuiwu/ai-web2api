@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import pathlib
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,15 @@ def test_doubao_measured_selectors_and_url_template():
     # 区域限制：未登录时容器内没有输入框 → 不能把"游客态"当已登录
     assert p.selectors.login_check == [], "留空（用 input 判定）"
     assert p.selectors.logged_out, "游客态也有输入框 → 必须配反向标记，否则登录态误判为真"
+
+
+def test_glm_disabled_by_default_with_reason():
+    """GLM 默认禁用：WAF 拦自动化 + 票据仅 ~30 分钟（详见 docs/PROVIDER_GLM.md）。"""
+    cfg = (pathlib.Path(__file__).resolve().parent.parent / "config.yaml").read_text(encoding="utf-8")
+    idx = cfg.index("  glm:")
+    block = cfg[max(0, idx - 900): idx + 400]      # 禁用原因写在 glm: 之前的注释里
+    assert _cfg("glm").enabled is False, "GLM 默认禁用"
+    assert "30 分钟" in block and "WAF" in block, "配置里必须写明禁用原因（WAF + 票据 30 分钟）"
 
 
 def test_glm_calibrated_selectors():
