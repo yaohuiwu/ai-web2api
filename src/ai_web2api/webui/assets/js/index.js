@@ -16,6 +16,7 @@ async function load() {
   renderKpis(data.server, data.threads || { active: 0, max: 0, list: [] });
   renderProviders(data.providers || []);
   renderThreads(data.threads || { active: 0, max: 0, list: [] });
+  renderQuickstart(data.server);
 }
 
 function renderKpis(s, t) {
@@ -49,6 +50,68 @@ function dotClass(p) {
   if (st === "expired") return "off";
   if (st === "soon") return "warn";
   return "on";
+}
+
+// ---- 快速接入：按访问来源生成 curl / Python / Node 片段 ----
+let qsActive = "curl";
+
+function qsSnippets(s, model) {
+  const origin = location.origin;
+  const key = s.api_keys_configured ? "sk-你的key" : "unused";
+  const auth = s.api_keys_configured ? " \\\n  -H 'Authorization: Bearer sk-你的key'" : "";
+  return {
+    curl:
+      `curl -s ${origin}/v1/chat/completions \\\n` +
+      `  -H 'Content-Type: application/json'${auth} \\\n` +
+      `  -d '{"model":"${model}","messages":[{"role":"user","content":"你好"}]}'`,
+    python:
+      `# pip install openai\nfrom openai import OpenAI\n\n` +
+      `client = OpenAI(base_url="${origin}/v1", api_key="${key}")\n` +
+      `resp = client.chat.completions.create(\n    model="${model}",\n` +
+      `    messages=[{"role": "user", "content": "你好"}],\n)\n` +
+      `print(resp.choices[0].message.content)`,
+    node:
+      `// npm i openai\nimport OpenAI from "openai";\n\n` +
+      `const client = new OpenAI({ baseURL: "${origin}/v1", apiKey: "${key}" });\n` +
+      `const resp = await client.chat.completions.create({\n  model: "${model}",\n` +
+      `  messages: [{ role: "user", content: "你好" }],\n});\n` +
+      `console.log(resp.choices[0].message.content);`,
+  };
+}
+
+function renderQuickstart(s) {
+  const el = $("#quickstart");
+  if (!el || !lastData) return;
+  const list = lastData.providers || [];
+  const cur = list.find((p) => p.name === selectedProvider) || list[0] || {};
+  const model = cur.default_model || "deepseek-web";
+  const snips = qsSnippets(s, model);
+  el.innerHTML = `
+    <div class="panel-head">
+      <h2>快速接入</h2>
+      <span class="muted">
+        模型 <code>${esc(model)}</code> · ${s.api_keys_configured ? "需 API Key" : "未启用鉴权"} ·
+        <a href="/docs" target="_blank" rel="noopener">/docs</a>
+      </span>
+    </div>
+    <div class="qs">
+      <div class="qs-tabs">
+        ${Object.keys(snips).map((k) => `<button class="qs-tab ${k === qsActive ? "active" : ""}" data-qs="${k}">${k}</button>`).join("")}
+      </div>
+      <div class="qs-body">
+        <button class="btn sm" id="qsCopy">复制</button>
+        <pre class="qs-pre"><code></code></pre>
+      </div>
+    </div>`;
+  const code = el.querySelector(".qs-pre code");
+  const setTab = (k) => {
+    qsActive = k;
+    el.querySelectorAll(".qs-tab").forEach((b) => b.classList.toggle("active", b.dataset.qs === k));
+    code.textContent = snips[k];
+  };
+  el.querySelectorAll(".qs-tab").forEach((b) => (b.onclick = () => setTab(b.dataset.qs)));
+  el.querySelector("#qsCopy").onclick = () => copyText(snips[qsActive]);
+  setTab(qsActive);
 }
 
 function renderProviders(providers) {

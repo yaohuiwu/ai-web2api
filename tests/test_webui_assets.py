@@ -149,3 +149,17 @@ def test_playground_polish():
     assert "threadSearch" in html and "#threadSearch" in js, "缺少会话搜索"
     assert "advToggle" in html and ".toolbar-toggle" in css, "缺少窄屏高级项折叠"
     assert "msg-foot" in css and "#rawPanel" in css
+
+
+def test_quickstart_panel():
+    """快速接入：curl / Python / Node 片段 + 复制（开源项目标配）。"""
+    html = (WEBUI / "index.html").read_text(encoding="utf-8")
+    js = (WEBUI / "assets/js/index.js").read_text(encoding="utf-8")
+    css = (WEBUI / "assets/css/index.css").read_text(encoding="utf-8")
+    assert 'id="quickstart"' in html
+    assert "function qsSnippets" in js and "renderQuickstart" in js
+    for k in ("curl", "python", "node"):
+        assert k in js
+    assert "location.origin" in js, "片段未按访问来源生成 base_url"
+    assert "chat.completions.create" in js, "缺少 OpenAI SDK 片段"
+    assert ".qs-pre" in css and ".qs-tab" in css

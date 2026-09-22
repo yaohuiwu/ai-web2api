@@ -130,3 +130,20 @@ tbody tr:last-child td { border-bottom: none; }
 .bar > div { height: 100%; background: var(--accent); border-radius: var(--radius-pill); }
 .empty { color: var(--muted); font-size: 13px; padding: var(--sp-5) 18px; text-align: center; }
 .empty .big { display: block; font-size: 26px; opacity: .55; margin-bottom: 6px; }
+
+/* 快速接入（curl / Python / Node 片段） */
+.qs { padding: 14px 18px; }
+.qs-tabs { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.qs-tab {
+  border: 1px solid var(--border); background: var(--card); color: var(--muted);
+  border-radius: var(--radius-pill); padding: 3px 12px; font-size: 12.5px; cursor: pointer;
+}
+.qs-tab:hover { background: var(--hover); }
+.qs-tab.active { background: var(--blue-bg); color: var(--blue-text); border-color: transparent; font-weight: 600; }
+.qs-body { position: relative; }
+.qs-pre {
+  margin: 0; background: var(--code-block-bg); color: var(--code-block-fg);
+  border-radius: var(--radius-md); padding: 12px 14px; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.5;
+}
+.qs-body .btn { position: absolute; top: 8px; right: 8px; }
