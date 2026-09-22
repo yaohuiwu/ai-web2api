@@ -37,7 +37,7 @@
 | **ChatGPT** | ✅ **可用，但必须 headful** | `gpt-5-web`、`gpt-4o-web`、`o3-web` | **仅手动登录**（无密码登录：Google OAuth） | Sentinel 会拦 headless，必须 headful（`WEB2API_HEADLESS=false`，Docker 里靠 Xvfb）。会话 token 约 90 天，登录一次可长期复用 |
 | **Kimi** | ✅ **可用 —— 需手动登录** | `kimi-web` | **仅手动**（微信扫码 / 手机号 + 验证码，带易盾验证码） | 已端到端验证：输入、发送、正文提取（思考单独分离）、附件、会话复用（thread 恢复）。正文为**缓冲发送**（思考与正文同处一段），站点无停止按钮 → 靠稳定性判定结束。登录态在 localStorage → 用 `login.auth_local_storage: ["refresh_token"]` 解 JWT 的 `exp`，面板显示约 90 天并在到期前提醒 |
 | **豆包 Doubao** | ✅ **可用 —— 需手动登录** | `doubao-web` | **仅手动**（手机号验证码/扫码，无密码登录） | 已端到端验证（14.7s）并通过文本保真度回归（3/3 用例、覆盖率 1.00）。正文用**区分角色**的选择器（`.md-box-root` 也匹配用户提问）；被拆成多个容器的回答会**拼接**（`response_all_new`）+ **缓冲发送**（`stream_content: false`）。游客态也有输入框 → 登录态靠**反向标记**判定（[`docs/PROVIDER_DOUBAO.md`](docs/PROVIDER_DOUBAO.md)） |
-| **智谱清言 GLM** | ⚠️ **被阿里云 WAF 滑块阻挡** | `glm-web` | **仅手动** | chatglm.cn 对 **headless 与 headful 都**返回「滑动验证」页，DOM 自动化过不去。变通（脆弱）：在宿主可视浏览器里人工过验证后导入登录态（[`docs/PROVIDER_GLM.md`](docs/PROVIDER_GLM.md)） |
+| **智谱清言 GLM** | ✅ **可用 —— 需人工过 WAF 一次 + 保活** | `glm-web` | **仅手动**（手机号验证码/扫码） | chatglm.cn 前置**阿里云 WAF 滑块**，headless 与 headful 自动化都被拦；在宿主人工过一次（`./scripts/login.sh glm`）并导入 state 后**容器内可复用**，但票据会过期需周期性重验。已端到端验证（19.7s、正文干净、思考分离）（[`docs/PROVIDER_GLM.md`](docs/PROVIDER_GLM.md)） |
 | **Qwen / 通义** | ⚠️ **实验性 —— 不稳定、响应慢、登录容易被墙** | `qwen3.7-plus-web` | `mode: auto` 或手动 | **默认禁用**（`enabled: false`，需要时改 `true`）。站点 UI 改版频繁、选择器易失效，响应明显更慢，登录常被网络/风控拦截（可能需要自备网络环境）——按"能用就用"对待，不建议生产使用 |
 
 > **文本捕获保真度**（2026-09-22 实测）：长文本、代码块、Markdown 表格三类用例下，

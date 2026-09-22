@@ -51,8 +51,15 @@ def test_doubao_measured_selectors_and_url_template():
     assert p.selectors.logged_out, "游客态也有输入框 → 必须配反向标记，否则登录态误判为真"
 
 
-def test_glm_disabled_by_default():
-    assert _cfg("glm").enabled is False, "GLM 被 WAF 拦，保持禁用"
+def test_glm_calibrated_selectors():
+    """GLM 已校准（需宿主人工过 WAF 一次 + 导入 state）：选择器别删。"""
+    p = _cfg("glm")
+    assert p.url.startswith("https://chatglm.cn")
+    assert any("textarea" in s for s in p.selectors.input), "实测是可见 textarea"
+    assert any("thinking-content" in s for s in p.selectors.response_container), \
+        "正文选择器必须排除思考（思考也在 .markdown-body 里）"
+    assert p.selectors.login_check, "登录后侧栏有用户名 → 必须配 login_check"
+    assert p.selectors.send_button == [], "实测无发送按钮：用 Enter"
 
 
 def test_glm_has_no_session_pattern_and_waf_documented():
@@ -63,6 +70,7 @@ def test_glm_has_no_session_pattern_and_waf_documented():
     doc = (ROOT / "docs" / "PROVIDER_GLM.md").read_text(encoding="utf-8")
     assert "WAF" in doc and "滑动" in doc and "人工" in doc
     assert "headful" in doc, "要写明 headful 也被拦（不是 headless 特征问题）"
+    assert "复用" in doc, "要写明 WAF cookie 导入后可复用（实测）"
 
 
 def test_docs_and_readme_reference_both():

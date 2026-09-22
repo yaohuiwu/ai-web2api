@@ -1,30 +1,56 @@
-# 智谱清言（chatglm.cn）接入说明（**受 WAF 阻挡，默认禁用**）
+# 智谱清言（chatglm.cn）接入说明
 
-> 状态：**默认 `enabled: false`**，且**当前不具备纯自动化条件**。
-> 驱动：`src/ai_web2api/providers/glm.py`（`GlmProvider`，纯配置驱动）。登录：**仅手动**（无密码登录）。
+> 状态：**可用，但需要"人工过 WAF 一次 + 保活"**。驱动：`src/ai_web2api/providers/glm.py`。
+> 登录：**仅手动**（无密码登录：手机号验证码/扫码）。
 
-## 1. 实测结论（2026-09）
+## 1. 站点前置：阿里云 WAF 滑动验证
 
-| 项 | 结果 |
+| 环境 | 结果 |
 |---|---|
-| 站点 | `https://chatglm.cn/main/alltoolsdetail?lang=zh` |
-| **访问前置** | **阿里云 WAF 滑动验证**：页面标题即「滑动验证页面」，正文「访问验证 别离开，为了更好的访问体验，请进行验证，通过后即可继续访问网页 请按住滑块，拖动到最右边」 |
-| headless | ❌ 落到验证页，无输入框 |
-| **headful（Xvfb）** | ❌ **同样落到验证页**（`editable=0`）→ 不是"headless 特征"问题，DOM 自动化**无法通过** |
-| 登录方式 | 无密码（手机号验证码/扫码）→ `login.mode: manual` |
-| 会话 URL | 形态未确认（`alltoolsdetail?…`）→ 暂不启用 thread 恢复（`session_url_pattern = None`） |
+| 宿主 headless | ❌ 「滑动验证页面：请按住滑块，拖动到最右边」 |
+| 容器 headful（Xvfb） | ❌ 同样被拦（`editable=0`） |
+| 容器 headful + **服务同款反自动化参数 + 真实 UA** | ❌ 仍被拦（09:21:21 UTC 实测） |
 
-> 本项目原则是**纯 DOM 自动化、不逆向内部接口**；滑块属于站点反爬机制，不做破解/打码接入。
+**结论：换参数/换 headless 都过不去；能过的是"人"。** 但流程可行：
 
-## 2. 如果仍要使用：可行路径与代价
+```bash
+./scripts/login.sh glm     # 打开真实可见窗口：先手动拖滑块过 WAF，再完成登录
+```
+实测（2026-09-22）：宿主完成一次人工验证后，`storage_state` 里同时带上了
+**WAF cookie**（`acw_sc__v3` / `acw_tc` / `cdn_sec_tc` / `ssxmod_itna*`）与
+**登录 cookie**（`chatglm_token` / `chatglm_refresh_token` / `chatglm_user_id`），
+导入服务后**容器内可直接复用**（无需再过滑块，标题为「智谱清言」并显示用户名）。
 
-1. 在**有显示器的宿主**上执行 `./scripts/login.sh glm`：人工拖滑块 + 完成登录；
-2. 脚本会把 `storage_state`（**含 WAF cookie**）导入服务；容器与宿主同一出口 IP，理论上可复用；
-3. 然后按 `docs/PROVIDER_DOUBAO.md` 的第 2 节校准 `input` / `send_button` / `response_container` / `login_check`；
-4. **风险**：阿里云 WAF 的验证 cookie 存活时间通常很短（分钟~小时级，且与 IP/指纹绑定），
-   一旦失效就要人工重新过滑块 → **不适合长期无人值守**。建议只在"临时用一下"时开启。
+> ⚠️ **保活**：WAF 票据有存活期（阿里云通常分钟~小时级，且与 IP/指纹相关）。失效后需要**再人工过一次**。
+> 因此 GLM 适合"临时用一下"，不适合长期无人值守；长期稳定建议改用**智谱开放平台官方 API**。
 
-## 3. 结论
+## 2. 实测选择器（已校准）
 
-- 想要稳定可用，建议改用**官方 API**（智谱开放平台）而不是网页自动化；
-- 若坚持网页方式，请把本 provider 当作**实验性、需人工保活**的能力，保持 `enabled: false`，用时再开。
+| 项 | 值 |
+|---|---|
+| 输入框 | `textarea.scroll-display-none`（**可见 textarea**，不是 contenteditable → 用 `fill()`） |
+| 发送 | **无发送按钮** → `send_button: []`（回车发送） |
+| **正文容器** | `.markdown-body:not(.thinking-content *)`（count=1，纯正文） |
+| 思考容器 | `.thinking-content .markdown-body` |
+| 为什么必须排除 | **思考与正文都用 `.markdown-body`**；直接取 `.answer-content .markdown-body` 会拿到 2 个（末条是正文，但拼接时会把思考混进来） |
+| 登录判定 | `.sidebar-user-name` / `.userInfoBar`（登录后侧栏显示用户名） |
+| 缓冲/拼接 | `stream_content: false` + `response_all_new: true`（表格/代码重渲染多、回答可能拆多容器） |
+| 会话 URL | 形态未确认（`alltoolsdetail?…`）→ 暂不启用 thread 恢复 |
+
+## 3. 端到端验证
+
+```
+GET /admin/glm/login/status        → logged_in: true
+POST /v1/chat/completions {"model":"glm-web","thread_id":"glm-cal-1", ...}
+→ content='我是智谱清言，由智谱AI开发的大语言模型GLM驱动的智能助手，可以帮你回答问题、写作创作、分析问题等。'   19.7s，无思考污染
+文本保真度回归：tests/test_text_fidelity.py -k glm
+```
+
+## 4. 改版后如何重新校准
+
+```bash
+curl -X POST http://127.0.0.1:8000/admin/glm/debug/probe \
+  -H 'Content-Type: application/json' -d '{"message": "只回复两个字：收到"}'
+curl 'http://127.0.0.1:8000/admin/glm/debug/dom?selector=.markdown-body'   # 看正文/思考的区分是否还在
+```
+改完 `config.yaml` 只需 `docker compose restart`（配置已 bind mount，不必 rebuild）。

@@ -30,18 +30,21 @@ PROVIDERS = [
     ("gpt-5-web", "chatgpt"),
     ("kimi-web", "kimi"),
     ("doubao-web", "doubao"),
+    ("glm-web", "glm"),
 ]
 REF_SEL = {
     "deepseek": ".ds-assistant-message-main-content",
     "chatgpt": '[data-message-author-role="assistant"] .markdown',
     "kimi": ".chat-content-item-assistant .markdown-container:not(.toolcall-content-text) .markdown",
     "doubao": '[data-container-type="block-v2"] > div:not([class*="justify-end"]) .md-box-root',
+    "glm": ".markdown-body:not(.thinking-content *)",
 }
 THINK_SEL = {
     "deepseek": ".ds-think-content",
     "chatgpt": "",
     "kimi": ".markdown-container.toolcall-content-text",
     "doubao": "",
+    "glm": ".thinking-content .markdown-body",
 }
 
 pytestmark = pytest.mark.live
