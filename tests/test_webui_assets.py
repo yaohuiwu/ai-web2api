@@ -86,3 +86,25 @@ def test_playground_shows_waiting_indicator():
     # 非流式也要显示（整包等待最容易以为卡死）
     assert "sendNonStream" in js and "showPending(pendingDiv)" in js
     assert ".pending" in css and "pending-bounce" in css
+
+
+def test_no_hardcoded_colors_outside_tokens():
+    """色值必须集中在 tokens.css —— 其它 CSS 只能用变量（保证暗色主题不漏）。"""
+    for f in sorted((WEBUI / "assets/css").glob("*.css")):
+        if f.name == "tokens.css":
+            continue
+        body = f.read_text(encoding="utf-8")
+        found = re.findall(r"#[0-9a-fA-F]{3,8}\b", body)
+        assert not found, f"{f.name} 仍有硬编码色值：{found[:5]}"
+
+
+def test_theme_tokens_and_toggle():
+    assert (WEBUI / "assets/css/tokens.css").is_file()
+    assert (WEBUI / "assets/js/theme.js").is_file()
+    css = (WEBUI / "assets/css/tokens.css").read_text(encoding="utf-8")
+    assert '[data-theme="dark"]' in css, "缺少暗色主题变量"
+    for name in HTML_FILES:
+        html = (WEBUI / name).read_text(encoding="utf-8")
+        assert "assets/css/tokens.css" in html, f"{name} 未引入 tokens.css"
+        assert "assets/js/theme.js" in html, f"{name} 未引入 theme.js"
+        assert "data-theme-toggle" in html, f"{name} 缺少主题切换按钮"

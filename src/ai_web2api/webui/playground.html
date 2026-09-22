@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ai-web2api · OpenAI 测试</title>
+<script src="assets/js/theme.js"></script>
+<link rel="stylesheet" href="assets/css/tokens.css">
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/playground.css">
 </head>
@@ -12,6 +14,7 @@
   <h1>OpenAI API 测试</h1>
   <a href="/ui/">← 状态面板</a>
   <span class="spacer"></span>
+  <button class="btn theme-toggle" data-theme-toggle onclick="toggleTheme()" aria-label="切换主题">🌙</button>
   <div class="opts">
     <label>模型
       <select id="model"><option>加载中…</option></select>

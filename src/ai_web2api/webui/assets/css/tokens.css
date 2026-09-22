@@ -1,0 +1,95 @@
+/* 设计令牌：颜色 / 尺寸 / 字体。亮色为默认，[data-theme="dark"] 覆盖。
+   规则：除本文件外，其它 CSS **不得**出现硬编码色值（用变量）。 */
+:root {
+  color-scheme: light;
+
+  /* 背景 / 表面 */
+  --bg: #f5f6f8;
+  --bg-glow: radial-gradient(1200px 500px at 50% -200px, #eef2ff 0%, transparent 60%);
+  --card: #ffffff;
+  --surface-2: #fbfcfe;      /* 表头 / 面板内嵌区 */
+  --surface-3: #f1f5f9;      /* chip / 附件底色 */
+  --hover: #eef1f5;
+  --header-bg: rgba(255, 255, 255, .82);
+
+  /* 文本 / 边框 */
+  --text: #1c2733;
+  --muted: #6b7686;
+  --border: #e3e6ea;
+  --border-strong: #d0d5dd;
+
+  /* 代码 */
+  --code-bg: #f0f2f5;
+  --code-border: #e3e6ea;
+  --code-block-bg: #1c2733;
+  --code-block-fg: #d6e2f0;
+
+  /* 语义色 */
+  --blue: #2563eb;   --blue-hover: #1d4ed8;  --blue-bg: #e8f0fe;   --blue-fg: #ffffff;
+  --blue-text: #2563eb;
+  --green: #17a673;  --green-bg: #e6f7f0;
+  --red: #d64545;    --red-bg: #fdecec;      --red-border: #f3c1c1; --red-strong: #dc2626;
+  --warn: #92400e;   --warn-bg: #fffbeb;     --warn-border: #fde68a;
+  --ok-text: #047857; --warn-text: #b45309;  --danger-text: #b91c1c;
+  --accent: linear-gradient(135deg, #2563eb, #7c3aed);
+
+  /* 气泡 */
+  --user-bg: #e8f0fe;      --user-border: #cdddfd;
+  --assistant: #ffffff;    --assistant-border: #e3e6ea;
+  --thinking-bg: #f7f8fa;  --thinking-border: #c9a227;
+  --tool-call-bg: #eef2ff; --tool-call-border: #c7d2fe;
+  --tool-result-bg: #ecfdf5; --tool-result-border: #a7f3d0;
+  --toast-bg: #111827;     --toast-fg: #ffffff;
+
+  /* 圆角 / 阴影 / 间距 / 字体 */
+  --radius: 14px;
+  --radius-md: 10px;
+  --radius-sm: 7px;
+  --radius-pill: 999px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 6px 20px -8px rgba(16, 24, 40, .18);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .06);
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 22px; --sp-6: 32px;
+  --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0e1116;
+  --bg-glow: radial-gradient(1200px 500px at 50% -200px, #16203a 0%, transparent 60%);
+  --card: #151a21;
+  --surface-2: #1a212a;
+  --surface-3: #1f2733;
+  --hover: #212a35;
+  --header-bg: rgba(21, 26, 33, .86);
+
+  --text: #e6e9ef;
+  --muted: #98a2b3;
+  --border: #262d38;
+  --border-strong: #3a4350;
+
+  --code-bg: #1f2733;
+  --code-border: #2b3441;
+  --code-block-bg: #0b0f14;
+  --code-block-fg: #cbd5e1;
+
+  --blue: #2563eb;   --blue-hover: #1d4ed8;  --blue-bg: rgba(59, 130, 246, .18);
+  --blue-text: #7aa9fa;
+  --green: #34d399;  --green-bg: rgba(52, 211, 153, .15);
+  --red: #f87171;    --red-bg: rgba(248, 113, 113, .15); --red-border: rgba(248, 113, 113, .35);
+  --red-strong: #fca5a5;
+  --warn: #fbbf24;   --warn-bg: rgba(251, 191, 36, .13); --warn-border: rgba(251, 191, 36, .35);
+  --ok-text: #4ade80; --warn-text: #fbbf24;  --danger-text: #f87171;
+  --accent: linear-gradient(135deg, #3b82f6, #8b5cf6);
+
+  --user-bg: rgba(106, 161, 248, .16); --user-border: rgba(106, 161, 248, .38);
+  --assistant: #151a21;  --assistant-border: #262d38;
+  --thinking-bg: #1a212a; --thinking-border: #a16207;
+  --tool-call-bg: rgba(106, 161, 248, .12); --tool-call-border: rgba(106, 161, 248, .32);
+  --tool-result-bg: rgba(52, 211, 153, .10); --tool-result-border: rgba(52, 211, 153, .30);
+  --toast-bg: #e6e9ef; --toast-fg: #111827;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -10px rgba(0, 0, 0, .6);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
+}

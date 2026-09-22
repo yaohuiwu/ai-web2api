@@ -1,24 +1,45 @@
-/* 共享样式：变量 / reset / 通用按钮（index 与 playground 复用） */
-:root {
-  --bg: #f5f6f8; --card: #fff; --border: #e3e6ea;
-  --text: #1c2733; --muted: #6b7686;
-  --blue: #2563eb; --blue-bg: #e8f0fe;
-  --green: #17a673; --green-bg: #e6f7f0;
-  --red: #d64545; --red-bg: #fdecec;
-  --user: #2563eb; --user-bg: #e8f0fe;
-  --assistant: #fff; --assistant-border: #e3e6ea;
-  --radius: 10px;
-}
+/* 共享基础：reset / 排版 / 通用按钮。依赖 tokens.css（须先加载）。 */
 * { box-sizing: border-box; }
+
 body {
-  margin: 0; background: var(--bg); color: var(--text);
-  font: 14px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.6 var(--font);
+  -webkit-font-smoothing: antialiased;
 }
+
+a { color: var(--blue-text); }
+code, pre, kbd, .mono { font-family: var(--mono); }
+
 .btn {
-  border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, opacity .15s ease;
 }
-.btn:hover { background: #eef1f5; }
-.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
-.btn.primary:hover { background: #1d4ed8; }
+.btn:hover { background: var(--hover); }
+.btn:focus-visible { outline: 2px solid var(--blue-text); outline-offset: 1px; }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: var(--blue-fg); }
+.btn.primary:hover { background: var(--blue-hover); }
 .btn.danger { color: var(--red); }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn.loading { opacity: .7; pointer-events: none; }
+.btn.icon { display: inline-flex; align-items: center; gap: 4px; }
+
+kbd {
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 11.5px;
+}
+
+/* 主题切换按钮（两页 header 共用） */
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 0;
+  border-radius: var(--radius-sm); font-size: 15px; line-height: 1;
+}
