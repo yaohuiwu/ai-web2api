@@ -102,6 +102,17 @@ function renderProviderDetail(p) {
   else if (aeState === "expired") aeText = `已过期（${aeDate}）`;
   else if (aeState === "logged_out") aeText = "未登录";
   else if (aeState === "unknown") aeText = "无法判断（会话型 / 未配置关键 cookie）";
+  // state.json 更新时间：过期/未知时可据此推算实际有效期
+  const savedAt = ae.saved_at;
+  const savedDate = ae.saved_at_iso ? ae.saved_at_iso.slice(0, 10) : "";
+  const savedAgo =
+    savedAt != null ? Math.max(0, Math.round((Date.now() / 1000 - savedAt) / 86400)) : null;
+  const validityDays = ae.validity_days != null ? Math.round(ae.validity_days) : null;
+  let savedText = "—";
+  if (savedAt) {
+    savedText = `更新于 ${savedDate}（${savedAgo} 天前）`;
+    if (validityDays != null) savedText += ` · 推算有效期约 ${validityDays} 天`;
+  }
   // 仅手动认证 provider 快过期/已过期时提醒（自动认证无需人工干预）
   const manualWarn = p.login_mode === "manual" && (aeState === "soon" || aeState === "expired");
   const expiryCard = manualWarn
@@ -125,6 +136,7 @@ function renderProviderDetail(p) {
       <dt>地址</dt><dd class="mono">${esc(p.url)}</dd>
       <dt>登录模式</dt><dd>${esc(p.login_mode)} · ${p.has_state_file ? "state.json ✓" : "state.json ✗（无持久化登录态）"}</dd>
       <dt>认证有效期</dt><dd class="auth-${esc(aeState || "unknown")}">${aeText}</dd>
+      <dt>认证信息更新</dt><dd class="mono">${savedText}</dd>
       <dt>默认模型</dt><dd class="mono">${esc(p.default_model || "—")}</dd>
       <dt>响应超时</dt><dd>${p.response_timeout}s</dd>
     </dl>

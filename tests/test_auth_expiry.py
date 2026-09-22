@@ -128,6 +128,9 @@ def test_to_dict_shape():
         "warn_days",
         "source",
         "cookie",
+        "saved_at",
+        "saved_at_iso",
+        "validity_days",
     }
     assert d["state"] == "soon" and d["expires_at_iso"].endswith("Z")
 
@@ -153,3 +156,25 @@ def test_background_warns_only_manual_providers():
     assert "_warn_auth_expiry" in src
     assert 'p.cfg.login.mode != "manual"' in src
     assert "_auth_warned" in src  # 状态变化才记，避免刷屏
+
+
+def test_saved_at_and_validity_days():
+    """state.json 更新时间会暴露出来，并推算有效期（到期 − 更新）。"""
+    out = compute_auth_expiry(
+        [_c("token", NOW + 60 * DAY)],
+        auth_cookies=["token"],
+        state_mtime=NOW,
+        warn_days=7,
+        now=NOW,
+    )
+    d = out.to_dict()
+    assert d["saved_at"] == NOW and d["saved_at_iso"].endswith("Z")
+    assert d["validity_days"] == 60.0  # 60 天前更新、60 天后过期 → 推算有效期 60 天
+
+
+def test_saved_at_present_even_when_unknown():
+    """无 auth_cookies（unknown）也要给出更新时间 —— 供人工推算。"""
+    out = compute_auth_expiry([_c("x", NOW + DAY)], state_mtime=NOW - 3 * DAY, now=NOW)
+    d = out.to_dict()
+    assert d["state"] == "unknown"
+    assert d["saved_at"] == NOW - 3 * DAY and d["validity_days"] is None

@@ -27,21 +27,33 @@ class AuthExpiry:
     warn_days: float
     source: str  # cookie | session_estimate | unknown
     cookie: str | None = None
+    saved_at: float | None = None  # state.json 最后更新时间（epoch 秒）
 
     def to_dict(self) -> dict:
-        iso = None
-        if self.expires_at is not None:
-            iso = _dt.datetime.fromtimestamp(self.expires_at, _dt.timezone.utc).strftime(
+        def iso(ts: float | None) -> str | None:
+            if ts is None:
+                return None
+            return _dt.datetime.fromtimestamp(ts, _dt.timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             )
+
+        # 推算有效期 = 到期时间 − 最后更新时间（≈ 登录/刷新时点），仅当两者都有且为正
+        validity_days = None
+        if self.expires_at is not None and self.saved_at is not None:
+            span = (self.expires_at - self.saved_at) / 86400.0
+            if span > 0:
+                validity_days = round(span, 2)
         return {
             "state": self.state,
             "expires_at": self.expires_at,
-            "expires_at_iso": iso,
+            "expires_at_iso": iso(self.expires_at),
             "days_left": self.days_left,
             "warn_days": self.warn_days,
             "source": self.source,
             "cookie": self.cookie,
+            "saved_at": self.saved_at,
+            "saved_at_iso": iso(self.saved_at),
+            "validity_days": validity_days,
         }
 
 
@@ -89,7 +101,9 @@ def compute_auth_expiry(
         source = "session_estimate"
         cookie_name = str(matched[0].get("name") or "")
     else:
-        return AuthExpiry(_UNKNOWN, None, None, warn_days, _UNKNOWN, None)
+        return AuthExpiry(
+            _UNKNOWN, None, None, warn_days, _UNKNOWN, None, saved_at=state_mtime
+        )
 
     days_left = (expires_at - now) / 86400.0
     if expires_at <= now:
@@ -98,7 +112,10 @@ def compute_auth_expiry(
         state = "soon"
     else:
         state = "ok"
-    return AuthExpiry(state, expires_at, round(days_left, 2), warn_days, source, cookie_name)
+    return AuthExpiry(
+        state, expires_at, round(days_left, 2), warn_days, source, cookie_name,
+        saved_at=state_mtime,
+    )
 
 
 def compute_for_state_file(
