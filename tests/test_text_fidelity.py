@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -73,6 +74,15 @@ def _coverage(reference: str, output: str) -> tuple[float, list[str]]:
         return 1.0, []
     missing = [s for s in sents if _norm(s)[:24] not in _norm(output)]
     return 1 - len(missing) / len(sents), [s[:30] for s in missing[:3]]
+
+
+def _drop(thread_id: str) -> None:
+    """用完即删：活跃 thread 有上限（`server.max_threads`，默认 8），否则连续跑会被 429 挡住。"""
+    try:
+        req = urllib.request.Request(f"{BASE}/admin/threads/{thread_id}", method="DELETE")
+        urllib.request.urlopen(req, timeout=15).close()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _post(model: str, text: str, thread_id: str) -> dict:
@@ -149,12 +159,15 @@ def _record(entry: dict) -> None:
 async def test_text_fidelity(model: str, provider: str, tag: str, prompt: str):
     """正文必须覆盖页面可见文本（≥95% 句子命中），且不得把思考当正文。"""
     thread_id = f"fid-{provider}-{tag}"
-    message = _post(model, prompt, thread_id)
-    content = message.get("content") or ""
-    url = _page_url(thread_id)
-    if not url:
-        pytest.skip(f"{provider} 未记录会话 URL（无法读页面比对）")
-    reference, thinking = await _read_page(provider, url)
+    try:
+        message = _post(model, prompt, thread_id)
+        content = message.get("content") or ""
+        url = _page_url(thread_id)
+        if not url:
+            pytest.skip(f"{provider} 未记录会话 URL（无法读页面比对）")
+        reference, thinking = await _read_page(provider, url)
+    finally:
+        await asyncio.to_thread(_drop, thread_id)   # 释放活跃会话额度
 
     coverage, missing = _coverage(reference, content)
     leaked = LEAK_RE.search(content.strip()[:200])

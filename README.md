@@ -36,9 +36,9 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 | **Qwen / Tongyi** | ⚠️ **Experimental — unstable, slow, login easily blocked** | `qwen3.7-plus-web` | `mode: auto` or manual | **Disabled by default** (`enabled: false`; set `true` to try). The site's UI selectors change often, responses are noticeably slower, and login is frequently blocked by network/risk control — treat it as best-effort, not production |
 
 > **Text-capture fidelity** (measured 2026-09-22): across long-form, code-block and markdown-table cases,
-> DeepSeek and ChatGPT scored **1.00 sentence coverage with zero thinking contamination** (6/6 cases);
-> Kimi was skipped because the account was queued by the site. Method, raw results, how to re-run and the
-> regression threshold: [`docs/TEXT_FIDELITY.md`](docs/TEXT_FIDELITY.md) (`./scripts/text_fidelity.sh`).
+> **DeepSeek, ChatGPT, Kimi and Doubao scored 1.00 sentence coverage with zero thinking contamination (12/12 cases)**;
+> GLM was skipped because its Aliyun WAF ticket (~30 min TTL) had expired. Method, raw results, the regression
+> threshold and the two pitfalls found while running it: [`docs/TEXT_FIDELITY.md`](docs/TEXT_FIDELITY.md) (`./scripts/text_fidelity.sh`).
 
 ## Quick start
 

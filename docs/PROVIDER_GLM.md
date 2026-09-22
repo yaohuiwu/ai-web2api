@@ -21,7 +21,9 @@
 **登录 cookie**（`chatglm_token` / `chatglm_refresh_token` / `chatglm_user_id`），
 导入服务后**容器内可直接复用**（无需再过滑块，标题为「智谱清言」并显示用户名）。
 
-> ⚠️ **保活**：WAF 票据有存活期（阿里云通常分钟~小时级，且与 IP/指纹相关）。失效后需要**再人工过一次**。
+> ⚠️ **保活（实测 TTL ≈ 30 分钟）**：`acw_sc__v3` / `acw_tc` 到期后，容器内**立刻退回滑块页**
+> （`logged_in: false`），而登录 cookie（`chatglm_token` 30 天 / `refresh_token` 180 天）**仍然有效** ——
+> 即"掉线"是 **WAF 票据过期**，不是登录过期。失效后重跑一次 `./scripts/login.sh glm` 即可。
 > 因此 GLM 适合"临时用一下"，不适合长期无人值守；长期稳定建议改用**智谱开放平台官方 API**。
 
 ## 2. 实测选择器（已校准）
