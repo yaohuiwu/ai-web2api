@@ -1,6 +1,7 @@
 # 实时浏览器画面（Live View / Remote Control）— 设计，待 review
 
-> 状态：**待 review**（未实现）。目标：让 UI 能**实时看到**指定 provider 的浏览器画面，
+> 状态：**P1 已实现（只读直播）** —— `screen.jpg` / `stream.mjpg` / `screen/state` + `/ui/browser.html`；
+> P2（输入注入）/ P3（X11 整窗）/ WS / 认证仍待定。目标：让 UI 能**实时看到**指定 provider 的浏览器画面，
 > 并（可选）**直接操作它** —— 最主要的价值是把「手动登录（验证码/扫码/OAuth）」从宿主 CLI 搬进 UI。
 
 ## 1. 场景与非目标
@@ -217,4 +218,12 @@
 |---|---|---|
 | C1 | `feat(live): single-frame screen.jpg + screen/state + config` | 取页/截帧/错误语义/`SerialGate.busy`/访问器 + 单测 |
 | C2 | `feat(live): MJPEG stream with fan-out and auto-stop` | 采集循环/扇出/丢帧/宽限自停 + 单测 |
-| C3 | `ui(live): browser.html live view page + entry + docs` | 页面/nav/入口按钮/README + 静态与 Playwright 验证 |
+| C3 | ✅ `ui(live): browser.html live view page + entry + docs` | 页面/nav/入口按钮/README + 静态与 Playwright 验证 |
+
+### P1 实测（容器内，DeepSeek 真实页面）
+```
+screen.jpg   HTTP 200 image/jpeg 34.7KB（视口 1440x900）
+screen/state {"available":true,"page_url":"https://chat.deepseek.com/a/chat/s/…","viewport":{1440,900},"viewers":0}
+stream.mjpg  HTTP 200 multipart/x-mixed-replace  3 秒 13 帧（≈4.3fps，目标 5）451KB
+/ui/browser.html?provider=deepseek  naturalWidth=1440 正常成帧；暂停 → viewers=0 且 streaming=false（自动停采集）
+```

@@ -250,6 +250,7 @@ function renderProviderDetail(p) {
       <button class="btn" onclick="actLoginStatus('${p.name}')">刷新登录状态</button>
       <button class="btn primary" onclick="actAutoLogin('${p.name}')">自动登录</button>
       <button class="btn" onclick="actManualLogin('${p.name}')">导入登录态</button>
+      <a class="btn" href="/ui/browser.html?provider=${encodeURIComponent(p.name)}" title="实时查看该 provider 的浏览器画面">查看画面 →</a>
       <button class="btn" onclick="actScreenshot('${p.name}')">抓取截图</button>
       <button class="btn danger" onclick="actLogout('${p.name}')">退出登录</button>
     </div>

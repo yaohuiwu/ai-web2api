@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 WEBUI = Path(__file__).resolve().parent.parent / "src" / "ai_web2api" / "webui"
-HTML_FILES = ("index.html", "playground.html", "threads.html")
+HTML_FILES = ("index.html", "playground.html", "threads.html", "browser.html")
 
 
 def test_no_inline_style_or_script():
@@ -212,3 +212,20 @@ def test_github_star_badge():
     assert ".gh-star" in base
     tokens = (WEBUI / "assets/css/tokens.css").read_text(encoding="utf-8")
     assert "--star:" in tokens, "星标颜色未进 tokens（硬编码色值会破坏暗色主题）"
+
+
+def test_live_view_page():
+    """实时画面页（只读直播）：MJPEG <img> + 暂停 + 保存当前帧 + 未鉴权提示。"""
+    html = (WEBUI / "browser.html").read_text(encoding="utf-8")
+    js = (WEBUI / "assets/js/browser.js").read_text(encoding="utf-8")
+    css = (WEBUI / "assets/css/browser.css").read_text(encoding="utf-8")
+    for el in ("provider", "fps", "quality", "pause", "save", "live", "status"):
+        assert f'id="{el}"' in html, f"browser.html 缺少 #{el}"
+    assert "stream.mjpg" in js and "screen.jpg" in js and "screen/state" in js
+    assert "live-warn" in html and "请勿对外暴露" in html, "必须提示未鉴权风险"
+    assert ".screen-wrap" in css
+    # 其它页导航与状态面板入口
+    for name in HTML_FILES:
+        assert "/ui/browser.html" in (WEBUI / name).read_text(encoding="utf-8"), name
+    idx = (WEBUI / "assets/js/index.js").read_text(encoding="utf-8")
+    assert "/ui/browser.html?provider=" in idx, "provider 详情缺「查看画面」入口"

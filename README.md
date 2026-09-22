@@ -13,7 +13,7 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 
 > Design docs: [`docs/DESIGN.md`](docs/DESIGN.md) (§3 covers provider extension points); Qwen in [`docs/PROVIDER_QWEN.md`](docs/PROVIDER_QWEN.md); ChatGPT in [`docs/PROVIDER_CHATGPT.md`](docs/PROVIDER_CHATGPT.md); Kimi in [`docs/PROVIDER_KIMI.md`](docs/PROVIDER_KIMI.md); auth expiry in [`docs/AUTH_EXPIRY.md`](docs/AUTH_EXPIRY.md). **DeepSeek / ChatGPT are enabled by default** (Qwen is wired up but `enabled: false`; turn it on when needed).
 
-**Web UI at `/ui/`**: status dashboard (login state + **auth expiry countdown**, per-provider models/aliases, one-click import of login state), **Playground** (chat with streaming, thinking panel, attachment upload, function-calling tester, raw request/response + copy-as-curl, waiting indicator with elapsed seconds), and a **Threads** page (search, provider filter, pagination). Light/dark theme, responsive layout.
+**Web UI at `/ui/`**: status dashboard (login state + **auth expiry countdown**, per-provider models/aliases, one-click import of login state), **Playground** (chat with streaming, thinking panel, attachment upload, function-calling tester, raw request/response + copy-as-curl, waiting indicator with elapsed seconds), a **Threads** page (search, provider filter, pagination) and a **Live view** page (read-only browser view). Light/dark theme, responsive layout.
 
 ## Features
 
@@ -26,6 +26,7 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 - **Attachments / image understanding** — OpenAI-style multi-part `content` with `image_url` (data URL or http link), uploaded through the page
 - **Function calling** — native `tools` / `tool_choice`, implemented by prompt injection and parsed back into standard `tool_calls` (streaming included)
 - **Built-in web UI** — status dashboard (login state, auth expiry, models/aliases, one-click state import), Playground (streaming chat, thinking panel, attachment preview, tool tester, raw request/response + copy-as-curl, elapsed-time indicator) and a Threads page (search, provider filter, pagination) — light/dark theme, responsive
+- **Live view (read-only)** — watch the provider's real browser from the UI (`/ui/browser.html`, MJPEG at 5 fps); frames fan out to all viewers, stop when nobody watches, and drop to 1 fps while a request is in flight. **Unauthenticated by design for now** — do not expose it publicly (`server.live_view`)
 - **Docker-ready** — the image ships Chromium; `WEB2API_HEADLESS=false` runs headful under Xvfb for sites that insist on a real display (e.g. ChatGPT's Sentinel)
 
 ## Supported providers
@@ -405,6 +406,9 @@ providers:                 # a list form is also accepted
 | GET | `/v1/models` | Model list |
 | POST | `/v1/chat/completions` | Chat completion (`stream` uses SSE) |
 | GET | `/healthz` | Health check + per-provider login state |
+| GET | `/admin/{p}/screen.jpg` | Single JPEG frame of the provider page (live view, read-only) |
+| GET | `/admin/{p}/stream.mjpg` | MJPEG live stream (fan-out, auto-stop when nobody watches) |
+| GET | `/admin/{p}/screen/state` | Live view state (availability, viewers, page URL, busy) |
 | GET | `/admin/repo` | Repo info for the UI Star badge (`stars`/`forks`, cached 10 min, never fails the UI) |
 | GET | `/admin/status` | Aggregated status (server info, providers incl. `auth_expiry`, threads summary) |
 | POST | `/admin/{p}/login/auto` | Automatic login (reads .env credentials, see below) |

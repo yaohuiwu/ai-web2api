@@ -25,7 +25,8 @@
 - **会话绑定（`thread_id`）** —— 同一 Web 会话跨请求复用、不同 thread 并行，会话与消息落 SQLite，**多轮记忆跨服务重启保持**
 - **附件 / 图片识别** —— OpenAI 风格的多部分 `content` + `image_url`（data URL 或 http 外链），经页面真实上传
 - **Function Calling** —— 原生 `tools` / `tool_choice`，以 prompt 注入实现，再解析回标准 `tool_calls`（支持流式）
-- **自带 Web 界面** —— 状态面板（登录态、认证有效期、模型/别名、一键导入登录态）、Playground（流式对话、思考面板、附件预览、工具测试、原始报文 + 复制为 curl、等待秒数）与会话页（搜索 / provider 过滤 / 分页）——亮暗主题、响应式布局
+- **自带 Web 界面** —— 状态面板（登录态、认证有效期、模型/别名、一键导入登录态）、Playground（流式对话、思考面板、附件预览、工具测试、原始报文 + 复制为 curl、等待秒数）会话页（搜索 / provider 过滤 / 分页）与**实时画面页**（只读直播）——亮暗主题、响应式布局
+- **实时画面（只读）** —— 在 UI 里看该 provider 的真实浏览器界面（`/ui/browser.html`，MJPEG 5fps）；多观众共享同一帧、无人观看自动停、生成中自动降到 1fps。**接口暂不鉴权**，请勿对外暴露（`server.live_view`）
 - **Docker 友好** —— 镜像自带 Chromium；`WEB2API_HEADLESS=false` 在 Xvfb 下跑 headful，应对必须"真实显示器"的站点（如 ChatGPT 的 Sentinel）
 
 ## 支持的 provider
@@ -406,6 +407,9 @@ providers:                 # 也支持 list 写法
 | GET | `/v1/models` | 模型列表 |
 | POST | `/v1/chat/completions` | 聊天补全（`stream` 走 SSE） |
 | GET | `/healthz` | 健康检查 + 各 provider 登录态 |
+| GET | `/admin/{p}/screen.jpg` | 单帧截图（实时画面，只读） |
+| GET | `/admin/{p}/stream.mjpg` | MJPEG 直播（扇出、无人观看自动停） |
+| GET | `/admin/{p}/screen/state` | 直播状态（可用性 / 观众数 / 页面 URL / 是否生成中） |
 | GET | `/admin/repo` | UI Star 徽章用的仓库信息（`stars`/`forks`，缓存 10 分钟，失败不影响界面） |
 | GET | `/admin/status` | 聚合状态（服务信息、各 provider 含 `auth_expiry`、会话摘要） |
 | POST | `/admin/{p}/login/auto` | 自动登录（读 .env 凭据，见下） |
