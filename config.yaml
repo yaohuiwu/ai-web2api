@@ -276,8 +276,9 @@ providers:
         - ".send-button-container"
       response_container:       # 实测：答案的 .markdown-container **不带** toolcall-content-text（带的是思考）
         - ".chat-content-item-assistant .markdown-container:not(.toolcall-content-text) .markdown"
-      thinking_container:       # 思考/工具折叠区（取不到不影响正文）
-        - ".chat-content-item-assistant .toolcall-rollup"
+      thinking_container:       # 真实推理文本（**不要**用宽泛的 .toolcall-rollup：它会带上
+        - ".chat-content-item-assistant .markdown-container.toolcall-content-text"
+        - ".chat-content-item-assistant .toolcall-rollup"   # 兜底：混有 UI 文案，仅窄选择器失效时用
       stop_button: []           # 实测：站点无停止按钮 → 靠 stable_polls 判结束
       login_check:              # 实测：登录后才有头像（未登录也能输入，必须靠它判定）
         - ".user-area__main img"

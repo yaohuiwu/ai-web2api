@@ -80,3 +80,15 @@ def test_enabling_kimi_registers_provider_and_exposes_model():
     reg = ProviderRegistry(cfg, _StubBrowser())  # type: ignore[arg-type]
     assert "kimi" in reg.providers()
     assert "kimi-web" in reg.get_provider("kimi").exposed_models
+
+
+def test_thinking_selector_is_narrow_first():
+    """思考选择器必须**先窄后宽**：`.toolcall-rollup` 会把「正在思考中 / 使用 N 个工具」等
+    UI 文案混进 reasoning_content（实测把 '正在思考中' 粘在推理前面）。
+    """
+    sels = _kimi().selectors.thinking_container
+    assert sels, "Kimi 应有 thinking 选择器"
+    assert "toolcall-content-text" in sels[0], f"首选必须是纯推理容器，当前：{sels[0]}"
+    assert sels[0] != ".chat-content-item-assistant .toolcall-rollup"
+    # 宽的只作兜底（排后面）
+    assert all("toolcall-rollup" not in s for s in sels[:1])
