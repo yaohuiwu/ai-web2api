@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
+import sys
 import urllib.request
+from pathlib import Path
 from typing import Iterator, cast
 
 import pytest
@@ -29,8 +32,17 @@ from openai import BadRequestError, InternalServerError, NotFoundError, OpenAI
 
 BASE = os.getenv("AI_WEB2API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 MODEL = "deepseek-web"
-QUICK = "只回复两个字：收到"          # 短提示词，减少等待
-THINK_PROMPT = "先简短思考再只回复：好"
+
+# 题目/关键字一律**随机生成**：固定重复文本是自动化特征（实测会被站点风控盯上）。
+# 复现用 TEXT_FIDELITY_SEED=42；题目库在 tests/prompts/corpus.yaml。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from prompt_pool import SHORT, sample_one, seed_from_env  # noqa: E402
+
+_rng = random.Random(seed_from_env())
+QUICK = sample_one(SHORT, seed=seed_from_env())        # 短提示词，减少等待
+THINK_PROMPT = sample_one(SHORT, seed=seed_from_env())  # 要求"先简短思考"再回答
+SECRET_NUM = _rng.randint(10, 99)                       # 记忆类用例的随机数字
+CODENAME = _rng.choice(["Alpha", "Bravo", "Delta", "Omega", "Sigma", "Nova", "Zulu"])
 
 PNG_B64 = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQ"
            "AAAABJRU5ErkJggg==")
@@ -179,7 +191,7 @@ def test_chat_multi_turn_history(client: OpenAI):
         client,
         model=MODEL,
         messages=[
-            {"role": "user", "content": "记住数字 7。"},
+            {"role": "user", "content": f"记住数字 {SECRET_NUM}。"},
             {"role": "assistant", "content": "好的。"},
             {"role": "user", "content": "我刚让你记住的数字是几？只回复数字"},
         ],
@@ -221,7 +233,7 @@ def test_thread_binding(client: OpenAI):
     r1 = _create(
         client,
         model=MODEL,
-        messages=[{"role": "user", "content": "记住：我的代号是 Alpha。"}],
+        messages=[{"role": "user", "content": f"记住：我的代号是 {CODENAME}。"}],
         extra_body={"thread_id": tid, "deep_think": False, "search": False},
     )
     assert _thread_id(r1) == tid
@@ -232,7 +244,7 @@ def test_thread_binding(client: OpenAI):
         client,
         model=MODEL,
         messages=[
-            {"role": "user", "content": "记住：我的代号是 Alpha。"},
+            {"role": "user", "content": f"记住：我的代号是 {CODENAME}。"},
             {"role": "user", "content": "我的代号是什么？只回复代号"},
         ],
         extra_body={"thread_id": tid, "deep_think": False, "search": False},

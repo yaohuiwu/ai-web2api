@@ -2,6 +2,8 @@
 # 文本捕获保真度回归（日常跑）：断言"我们返回的正文 == 页面可见文本"。
 #   ./scripts/text_fidelity.sh              # 全部 provider（Kimi 排队时自动 skip）
 #   ./scripts/text_fidelity.sh deepseek     # 只跑一个 provider
+#   TEXT_FIDELITY_SEED=42 ./scripts/text_fidelity.sh   # 固定随机种子（复现本次题目）
+# 题目从 tests/prompts/corpus.yaml **随机取**（不重复同一句话，避免被站点风控识别）
 # 退出码 = pytest 结果（非 0 即有用例不达标）→ 可直接给 cron/监控告警。
 # 详见 docs/TEXT_FIDELITY.md
 set -euo pipefail

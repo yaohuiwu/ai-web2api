@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import time
 from pathlib import Path
 import re
@@ -21,11 +22,14 @@ import urllib.request
 import pytest
 
 BASE = "http://127.0.0.1:8000"
-CASES = [
-    ("long", "分 5 点介绍中国的世界遗产，每点 2-3 句话，用 markdown 列表"),
-    ("code", "用 Python 写一个快速排序函数，带中文注释，必须放在代码块里"),
-    ("table", "用 markdown 表格对比快速排序、归并排序、堆排序的时间/空间复杂度，3 列"),
-]
+
+# 题目**从本地文本库随机取样**（不用固定文本：重复同一句话是自动化特征，实测会被弹人机验证）。
+# 需要复现时：TEXT_FIDELITY_SEED=42 .venv/bin/python -m pytest -m live tests/test_text_fidelity.py
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from prompt_pool import sample_cases, seed_from_env  # noqa: E402
+
+CASES = sample_cases(seed=seed_from_env())
+RUN_ID = f"{int(time.time()) % 100000:05d}"      # 每轮用全新会话，避免上下文累积/复用同一 thread
 PROVIDERS = [
     ("deepseek-web", "deepseek"),
     ("gpt-5-web", "chatgpt"),
@@ -164,7 +168,7 @@ def _record(entry: dict) -> None:
 @pytest.mark.asyncio
 async def test_text_fidelity(model: str, provider: str, tag: str, prompt: str):
     """正文必须覆盖页面可见文本（≥95% 句子命中），且不得把思考当正文。"""
-    thread_id = f"fid-{provider}-{tag}"
+    thread_id = f"fid-{provider}-{tag}-{RUN_ID}"
     try:
         message = _post(model, prompt, thread_id)
         content = message.get("content") or ""
@@ -180,8 +184,10 @@ async def test_text_fidelity(model: str, provider: str, tag: str, prompt: str):
     _record({
         "ts": round(time.time()), "provider": provider, "model": model, "case": tag,
         "coverage": round(coverage, 3), "content_len": len(content),
+        "prompt": prompt[:80], "run": RUN_ID,
         "reasoning_len": len(message.get("reasoning_content") or ""),
         "leak": leaked.group(0) if leaked else None, "missing": missing,
     })
-    assert coverage >= 0.95, f"[{provider}/{tag}] 覆盖率 {coverage:.2f}，缺 {missing}"
-    assert not leaked, f"[{provider}/{tag}] 正文里混进了思考特征文本：{leaked.group(0)!r}"
+    ctx = f"[{provider}/{tag}] 题目：{prompt!r}"
+    assert coverage >= 0.95, f"{ctx} 覆盖率 {coverage:.2f}，缺 {missing}"
+    assert not leaked, f"{ctx} 正文里混进了思考特征文本：{leaked.group(0)!r}"
