@@ -52,12 +52,17 @@ docker compose logs | grep '\[timeline\]' | grep settle_lag | tail -20
 | deepseek | **net** | 0.62s | **0.00s** | 0.00s | `net_close` |
 | chatgpt | dom | 4.46s | **1.28s** | 0.41s | `stop_button` |
 | doubao | dom | 15.33s | **12.72s** | 0.42s | `stability` |
+| chatgpt（表格题） | dom | 2.54s | 13.55s | 0.41s | `stop_button`（**站点侧**，非我们的问题） |
 
 **读法（诊断处方）**
 - `ttft` 大 → 站点侧（排队/限流/自身思考）。例：豆包首字 15s。
-- `settle_lag` 大 → **我们的结束判定太保守**：要么调 `stable_polls`/`min_wait_before_stable`，
-  要么给它找一个**更快的结束信号**（网络 `close`、停止按钮、消息工具栏）。
-  例：豆包 12.7s（正文 3.6s 就不变了，却在 16.4s 才定稿）——**当前最大的可优化项**。
+- `settle_lag` 大 → **要结合 `finalize` 判断责任方**（这是最容易误判的一项）：
+  | `finalize` | 含义 | 该怎么做 |
+  |---|---|---|
+  | `stability` / `timeout_fallback` | **我们的判据保守**（站点信号没用上） | 调 `stable_polls`/`min_wait_before_stable`，或补一个更快的结束信号（停止按钮 / 消息工具栏 / 网络 `close`）。例：豆包 `settle_lag=12.72s`，正文 3.64s 就不再变 → **当前最大可优化项** |
+  | `stop_button` / `net_close` | **站点侧仍在生成**（我们跟着站点） | 一般不用动；若要更快，只能"提前收尾"（有截断风险）。例：ChatGPT 表格用例 `settle_lag=13.55s`，正文 5.55s 完成但站点到 19.1s 才结束 |
+  | `timeout_fallback` | 站点卡住/限流，我们兜底返回已生成内容 | 看 `net`/错误信息定位站点侧 |
+
 - `tail` 大 → 定稿补发/组件捕获/收尾逻辑重。
 - `extract_ms_total/polls` 大 → 抓取本身重（选择器太宽/页面太大）。
 - `path=net` 相比 `dom`：结束信号是硬的（`net_close`）→ `settle_lag` 天然为 0。
