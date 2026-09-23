@@ -214,3 +214,23 @@ class StorageStatePayload(BaseModel):
 
     cookies: list[dict[str, Any]] = Field(default_factory=list)
     origins: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class LiveInputRequest(BaseModel):
+    """画面交互请求（POST /admin/{provider}/input）。见 docs/LIVE_CONTROL.md。
+
+    坐标为**页面 CSS 像素**（与 Playwright 鼠标一致）；拖拽一次请求完成（起点→终点）。
+    """
+
+    action: str
+    x: float | None = None
+    y: float | None = None
+    x2: float | None = None
+    y2: float | None = None
+    dx: float = 0
+    dy: float = 0
+    text: str = ""
+    key: str = ""
+    steps: int = 12
+    delay_ms: int = 25
+    button: str = "left"

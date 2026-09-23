@@ -15,7 +15,9 @@ server:
   # 实时画面（只读）：/ui/browser.html 看当前 provider 的浏览器画面
   # ⚠ 接口无鉴权：同网段可见你已登录的浏览器；对外暴露请自行加反代鉴权（见 docs/LIVE_VIEW.md §5.4）
   live_view: true          # 总开关；false = 直播接口一律 403
-  live_control: false      # 预留：输入注入（P2），默认关
+  live_control: true       # 画面交互（点击/拖拽/输入）：开关。开启后 /admin/{p}/input 可用
+                           # ⚠️ 与本服务同网络的人都能操作浏览器（信任边界同 /admin 其它接口）
+                           # 需要更严时：设 WEB2API_API_KEY 并只用内网暴露
   live_fps: 5              # 默认帧率
   live_busy_fps: 2         # 生成中帧率上限（避免抢占自动化；写死 1 太顿）
   live_crop: ""             # ""=整页；“last”=只裁最后一条回复（Playground 会显式传 crop=last）

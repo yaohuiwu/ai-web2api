@@ -1,6 +1,6 @@
 # 画面交互（点击 / 拖拽 / 输入）设计 — 方案对比与选型
 
-> 状态：**设计待评审**（未实现）。开关沿用 `server.live_control`（**默认 false**）。
+> 状态：**已实现（P1 + P2）**，开关 `server.live_control`（默认 false；本项目 config.yaml 已打开）。
 > 前置：画面改为**整页**（已改）；缩放控件保留（适应/100%/150%/200%）。
 
 ## 1. 目标 / 非目标
@@ -133,6 +133,46 @@ POST /admin/{provider}/input
 | **生成中点击被站点忽略**（如点"停止"） | 面板头部显示"生成中"；输入**串行化**（`asyncio.Lock`），不会交错成坏序列 |
 | **坐标过期（≤1 帧 ≈200ms）**：画面是旧状态 → 点偏 | 状态栏显示**帧龄**；动作本身会触发重绘，下一帧很快纠正 |
 | 面板自身滚动被误当页面滚动 | 我们只换算**图片像素**；页面滚动状态与截图一致，不影响映射 |
+
+## 7.7 实现与端到端验证（本地假站点，不碰真站点）
+
+**接口**：`POST /admin/{provider}/input?thread_id=…`
+```json
+{"action":"click|move|down|up|drag|wheel|type|key|reload|to_bottom",
+ "x":640,"y":320,"x2":900,"y2":320,"dx":0,"dy":600,"text":"…","key":"Enter","steps":12,"delay_ms":25}
+→ {"ok":true,"action":"click","mapped":{"x":640,"y":320},"viewport":{...},"elapsed_ms":34}
+```
+- 门禁：`server.live_control=false` → **403**（UI 自动隐藏交互区）；未知 provider → 404；参数错 → 400；
+- 同 provider 输入**串行**（`asyncio.Lock`）；每个动作记一条 `live input …` 审计日志；
+- 只做**必要**动作，**不提供任意 JS 执行**。
+
+**UI（Playground 右栏）**：`🖱 交互` 开关（默认关，记忆）＋控制条
+`输入到页面 / Enter / Esc / Tab / ⌫ / ↑↓ / 刷新 / 回底 / 重置输入`；
+画面上**单击=点击**、**拖拽=拖拽**（>4px 判定，虚线引导）、**滚轮滚面板**（`Shift+滚轮` 才发给页面）。
+
+**端到端实测**（`scripts/control_e2e.py`，对 `tests/fake_chat.html`，读页面 `window.__probe()` 断言）：
+
+| 动作 | 结果 |
+|---|---|
+| click | `down@25,14` + `btn-click` ✓（含 hover） |
+| drag | 起点 `down@60,40` → 终点 `up@120,80` ✓（坐标精确；一次请求内插值 8 步） |
+| type + Enter | 页面收到 `你: 你好` 并回复 ✓ |
+| wheel | 页面滚动 `scroll@300` ✓ |
+| 重置输入 | `up` + `Esc` ✓ |
+| 开关关闭 | 403 ✓ |
+
+跑法：
+```bash
+AI_WEB2API_CONFIG=config.fake.yaml .venv/bin/python -m ai_web2api.main      # 假站点（live_control: true）
+curl -s -X POST http://127.0.0.1:8001/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"fake-web","thread_id":"e2e-1","messages":[{"role":"user","content":"你好"}]}'
+.venv/bin/python scripts/control_e2e.py
+```
+
+**单元测试**：`tests/test_live_control.py`（参数校验/坐标夹取/拖拽插值与"异常也要 up"/类型键盘滚轮/403 门禁）。
+
+**信任边界**（同 `docs/LIVE_VIEW.md` 提示）：开启 `live_control` 后，**同网络可达者都能操作这个浏览器**
+（与 `/admin` 其它接口同一级别）。要更严：设 `WEB2API_API_KEY` 并只在内网暴露，或把服务放反代鉴权之后。
 
 ## 8. 测试计划
 

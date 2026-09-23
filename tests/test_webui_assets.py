@@ -344,3 +344,21 @@ def test_splitter_drag_cannot_leak_listeners():
     for token in ("pointercancel", '"blur"', "e.buttons === 0", "removeEventListener(\"pointermove\"",
                   "removeEventListener(\"pointerup\"", "setPointerCapture"):
         assert token in js, f"缺少拖拽收尾处理：{token}"
+
+
+def test_live_control_ui_guards():
+    """画面交互：默认关、位移阈值区分点击/拖拽、可解卡、滚轮不抢（Shift 才发页面）。"""
+    html = (WEBUI / "playground.html").read_text(encoding="utf-8")
+    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+    css = (WEBUI / "assets/css/playground.css").read_text(encoding="utf-8")
+
+    for el in ("liveCtrl", "liveCtrlBar", "liveType", "liveResetInput", "liveReload", "liveBottom", "liveGuide"):
+        assert f'id="{el}"' in html, f"缺少交互元素 {el}"
+    assert "aiw2api_live_ctrl" in js and 'liveInteractive = !!on' in js
+    assert "DRAG_THRESHOLD_PX" in js and "> DRAG_THRESHOLD_PX" in js, "必须用位移阈值区分点击/拖拽"
+    assert 'action: "drag"' in js and 'action: "click"' in js
+    assert '"Escape"' in js and 'action: "up"' in js, "重置输入要发 up + Esc"
+    assert "shiftKey" in js, "滚轮默认滚面板，Shift 才发给页面"
+    assert "pointerdown" in js and "pointerup" in js and "setPointerCapture" in js
+    assert "/input" in js and "livePagePoint" in js
+    assert ".ctrl" in css

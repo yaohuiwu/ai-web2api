@@ -20,6 +20,8 @@ from fastapi.responses import (
 from pydantic import BaseModel
 
 from ..browser import extractor
+from ..browser.control import InputAction as _InputAction
+from ..browser.control import apply_input as _apply_input
 from ..browser.live import (
     MJPEG_BOUNDARY,
     LiveController,
@@ -56,6 +58,7 @@ from .schemas import (
     ResponseMessage,
     StorageStatePayload,
     normalize_message,
+    LiveInputRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -498,6 +501,50 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         未配置 ``server.repo_url`` 时全部为 null（UI 自动隐藏）。
         """
         return await asyncio.to_thread(repo_info, registry.config.server.repo_url)
+
+    # ---------------- 画面交互（control）：把点/拖/打字变成真实输入 ----------------
+
+    _input_locks: dict[str, asyncio.Lock] = {}
+
+    @router.post("/admin/{name}/input")
+    async def live_input(name: str, body: LiveInputRequest, thread_id: str | None = None):
+        """画面交互（点击/拖拽/输入）。
+
+        **默认关闭**：``server.live_control=false`` 时一律 403（UI 会自动隐藏交互区）。
+        设计见 docs/LIVE_CONTROL.md（真实输入事件、拖拽一次请求内完成、同 provider 串行）。
+        """
+        if not registry.config.server.live_control:
+            return JSONResponse(
+                status_code=403,
+                content={"error": {"message": "画面交互未开启：请在 config.yaml 设 server.live_control: true"}},
+            )
+        req = _InputAction(
+            action=body.action, x=body.x, y=body.y, x2=body.x2, y2=body.y2, dx=body.dx, dy=body.dy,
+            text=body.text, key=body.key, steps=body.steps, delay_ms=body.delay_ms, button=body.button,
+        )
+        err = req.validate()                 # 先校验参数（与目标无关的坏输入一律 400）
+        if err:
+            return JSONResponse(status_code=400, content={"error": {"message": err}})
+        if name not in registry.providers():
+            return JSONResponse(status_code=404, content={"error": {"message": f"未知 provider：{name}"}})
+
+        page, _focus = await _live_page(name, thread_id)
+        if page is None:
+            return _live_no_page(name)
+        lock = _input_locks.setdefault(name, asyncio.Lock())
+        async with lock:                     # 同一 provider 串行，避免动作交错成坏序列
+            try:
+                result = await _apply_input(page, req)
+            except Exception as exc:  # noqa: BLE001  页面在动/元素失效等
+                logger.warning("live input failed provider=%s action=%s: %s", name, req.action, exc)
+                return JSONResponse(
+                    status_code=503, content={"error": {"message": f"输入失败：{exc}"}}
+                )
+        logger.info(
+            "live input provider=%s action=%s mapped=%s elapsed=%sms",
+            name, req.action, result.get("mapped"), result.get("elapsed_ms"),
+        )
+        return {"ok": True, **result}
 
     @router.get("/admin/timeline")
     async def timeline_endpoint(provider: str | None = None, limit: int = 50):

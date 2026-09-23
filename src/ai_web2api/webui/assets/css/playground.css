@@ -50,6 +50,23 @@
   .live-body img { max-width: 100%; max-height: 100%; display: block; }
   .live-body { overflow: auto; }                      /* 放大后可滚动查看 */
   .live-body img.fill { width: 100%; height: auto; max-width: none; max-height: none; }
+  .live-body { position: relative; }
+  #live.ctrl { cursor: crosshair; }                       /* 交互模式：十字光标 */
+  #liveGuide {                                            /* 拖拽引导线（虚线） */
+    position: absolute; border: 1px dashed var(--blue); background: color-mix(in srgb, var(--blue) 12%, transparent);
+    pointer-events: none; display: none;
+  }
+  .live-ctrl {
+    display: flex; align-items: center; gap: 4px; padding: 6px 8px;
+    border-top: 1px solid var(--border); flex-wrap: wrap;
+  }
+  .live-ctrl[hidden] { display: none; }
+  .live-ctrl input[type=text] {
+    flex: 1; min-width: 120px; font-size: 12px; padding: 3px 6px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text);
+  }
+  .live-ctrl .btn.sm { padding: 2px 6px; font-size: 11px; }
+  .live-head .btn.active { background: var(--blue); color: var(--blue-fg); }
   .live-sel {
     background: var(--card); color: var(--text); border: 1px solid var(--border);
     border-radius: 6px; font-size: 11px; padding: 2px 4px; max-width: 84px;

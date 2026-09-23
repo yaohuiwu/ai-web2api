@@ -29,6 +29,18 @@
   </div>
   <div id="attach-preview" class="attach-row"></div>
   <input type="file" id="attach-input" multiple accept=".png,.jpg,.jpeg,.pdf,.txt,.md" style="display:none">
+  <div id="probe" style="border:1px dashed #88a; padding:8px; margin:8px 0;">
+    <b style="font-size:12px">输入探针（control 测试用）</b>
+    <div id="dragbox" style="width:120px;height:80px;background:#eef;border:1px solid #88a;margin:6px 0;cursor:crosshair">
+      拖我
+    </div>
+    <button id="probe-btn">点我</button>
+    <button id="probe-reset">清空记录</button>
+    <div id="probe-log" style="font-size:12px;color:#333;min-height:16px"></div>
+    <div id="scroll-area" style="height:80px;overflow:auto;border:1px solid #ccc;margin-top:6px">
+      <div style="height:600px">可滚动区域</div>
+    </div>
+  </div>
   <div id="messages"></div>
   <textarea id="chat-input" placeholder="输入消息，回车发送"></textarea>
 <script>
@@ -119,6 +131,19 @@
       }, 2000);
     });
   }
+
+  // ---- 输入探针：记录真实输入事件（供 control 端到端断言）----
+  const probeLog = document.getElementById('probe-log');
+  const probeRec = [];
+  const rec = (s) => { probeRec.push(s); probeLog.textContent = probeRec.slice(-6).join(" | "); };
+  const dbox = document.getElementById('dragbox');
+  dbox.addEventListener('mousedown', (e) => rec(`down@${Math.round(e.offsetX)},${Math.round(e.offsetY)}`));
+  dbox.addEventListener('mouseup', (e) => rec(`up@${Math.round(e.offsetX)},${Math.round(e.offsetY)}`));
+  dbox.addEventListener('click', (e) => rec(`click@${Math.round(e.offsetX)},${Math.round(e.offsetY)}`));
+  document.getElementById('probe-btn').addEventListener('click', () => rec('btn-click'));
+  document.getElementById('probe-reset').addEventListener('click', () => { probeRec.length = 0; probeLog.textContent = ''; });
+  document.getElementById('scroll-area').addEventListener('scroll', function () { rec(`scroll@${Math.round(this.scrollTop)}`); });
+  window.__probe = () => probeRec;
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }

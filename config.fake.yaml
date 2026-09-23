@@ -4,13 +4,15 @@ server:
   host: 127.0.0.1
   port: 8001
   # 测试用小 TTL：thread 空闲 10s 回收；login_check_interval 缩短让清扫尽快跑
-  thread_ttl: 10
+  thread_ttl: 120
   max_threads: 4
   thread_parallel: true
+  live_control: true  # 端到端测试需要（/admin/{p}/input）
   thread_persist: false  # 假页 URL 无会话 id（file:// 不匹配 /a/chat/s/），无需持久化
 
 browser:
-  headless: true  # 主浏览器（用户可手动登录/调试）
+  headless: true
+  debug_port: 9333   # 端到端测试用：CDP 连到假站点页面读探针  # 主浏览器（用户可手动登录/调试）
   login_check_interval: 5.0
   # 定时状态检测：独立开关 + 默认 headless（不弹浏览器窗口）
   status_check: true

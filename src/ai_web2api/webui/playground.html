@@ -94,10 +94,28 @@
       <option value="1.5">150%</option>
       <option value="2">200%</option>
     </select>
+    <button class="btn sm" id="liveCtrl" title="交互模式：可在画面上点击/拖拽/输入（需 server.live_control: true）">🖱 交互</button>
     <button class="btn sm" id="liveDismiss" title="关闭页面上的遮挡弹窗（如繁忙提示/协议确认）">关遮挡</button>
     <button class="btn sm" id="liveClose" title="收起画面（也可用顶部「▥ 画面」）">✕</button>
   </div>
-  <div class="live-body"><img id="live" alt="实时画面（只读）" hidden></div>
+  <div class="live-body">
+    <img id="live" alt="实时画面（只读）" hidden>
+    <div id="liveGuide" hidden></div>
+  </div>
+  <div class="live-ctrl" id="liveCtrlBar" hidden>
+    <input type="text" id="liveType" placeholder="输入到页面（Enter 发送文字）" autocomplete="off">
+    <button class="btn sm" id="liveTypeSend">输入</button>
+    <button class="btn sm" data-key="Enter">Enter</button>
+    <button class="btn sm" data-key="Escape">Esc</button>
+    <button class="btn sm" data-key="Tab">Tab</button>
+    <button class="btn sm" data-key="Backspace">⌫</button>
+    <button class="btn sm" data-key="ArrowUp">↑</button>
+    <button class="btn sm" data-key="ArrowDown">↓</button>
+    <span class="spacer"></span>
+    <button class="btn sm" id="liveReload" title="刷新页面">刷新</button>
+    <button class="btn sm" id="liveBottom" title="回到底部">回底</button>
+    <button class="btn sm" id="liveResetInput" title="解开卡住的拖拽（发 up + Esc）">重置输入</button>
+  </div>
 </aside>
 </div>
 

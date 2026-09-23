@@ -248,7 +248,7 @@ stream.mjpg  HTTP 200 multipart/x-mixed-replace  3 秒 13 帧（≈4.3fps，目�
 | 关遮挡 | 「关遮挡」按钮 → `POST /admin/{p}/dismiss`（繁忙提示/协议弹窗挡住输入时很有用） |
 | 窄屏 | ≤900px 自动上下分栏（对话在上、画面在下） |
 
-> 注：画面是**只读直播**（P1 设计）；**交互（点击/拖拽/输入）设计见 [`LIVE_CONTROL.md`](LIVE_CONTROL.md)**，由 `server.live_control` 开关控制（默认 false）。
+> 注：默认是**只读直播**；**交互（点击/拖拽/输入）已实现**：Playground 右栏点 `🖱 交互` 即可，由 `server.live_control` 开关控制（默认 false，本项目已打开）。见 [`LIVE_CONTROL.md`](LIVE_CONTROL.md)。
 
 ## 画面清晰度：三个手段（v0.1.x）
 

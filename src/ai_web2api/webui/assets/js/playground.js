@@ -911,6 +911,8 @@ async function loadProviderMap() {
 }
 
 let liveAvailable = null;          // 该 provider 当前是否有打开的页面（无页面 → 503）
+let liveViewport = null;           // 页面 CSS 视口（来自 /screen/state）→ 坐标换算
+let liveInteractive = false;       // 交互模式（默认关；需 server.live_control: true）
 let liveRetryTimer = null;
 
 function showLiveHint(msg) {
@@ -964,6 +966,7 @@ async function pollLiveState(p, tid) {
     if (st.page_url) bits.push(String(st.page_url).replace(/^https?:\/\/[^/]+/, ""));
     $("#liveMeta").textContent = bits.join(" · ") || "—";
     liveAvailable = !!st.available;
+    liveViewport = st.viewport || liveViewport;
     if (!st.available) {
       // 没有打开的页面：不发流（省资源），给出可行动提示；页面一出现（发消息后）自动恢复
       if ($("#live")) { const img = $("#live"); img.removeAttribute("src"); img.hidden = true; }
@@ -1056,6 +1059,154 @@ function initLivePane() {
   if (zoomSel) zoomSel.value = liveZoom();
   loadProviderMap();
 }
+// ---------- 画面交互（control）：点击 / 拖拽 / 输入 / 滚轮（默认关） ----------
+// 坐标换算：只认**图片像素 → 页面 CSS 像素**（比例换算，与 device_scale_factor 无关）。
+// 反复强调的两条防护：① 位移 >4px 才算拖拽（否则手抖会把"点击"变成拖拽）；
+// ② 「重置输入」发 up + Esc（万一某次拖拽没松开，避免后续点击全乱）。
+const CTRL_KEY = "aiw2api_live_ctrl";
+const DRAG_THRESHOLD_PX = 4;
+
+function ctrlOn() { return localStorage.getItem(CTRL_KEY) === "1"; }
+
+function livePagePoint(ev) {
+  const img = $("#live");
+  if (!img || !img.clientWidth) return null;
+  const r = img.getBoundingClientRect();
+  const vw = (liveViewport && liveViewport.width) || img.naturalWidth || 1440;
+  const vh = (liveViewport && liveViewport.height) || img.naturalHeight || 900;
+  return {
+    x: Math.round(((ev.clientX - r.left) / r.width) * vw),
+    y: Math.round(((ev.clientY - r.top) / r.height) * vh),
+  };
+}
+
+async function postInput(payload) {
+  const p = liveProvider();
+  if (!p) return null;
+  const tid = liveThread();
+  const q = tid ? `?thread_id=${encodeURIComponent(tid)}` : "";
+  try {
+    const res = await fetch(`/admin/${encodeURIComponent(p)}/input${q}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.status === 403) {
+      setCtrl(false);
+      toast("画面交互未开启（server.live_control: false）");
+      return null;
+    }
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast((j.error && j.error.message) || `输入失败（HTTP ${res.status}）`);
+      return null;
+    }
+    return await res.json();
+  } catch (e) {
+    toast("输入请求失败：" + e.message);
+    return null;
+  }
+}
+
+function setCtrl(on) {
+  liveInteractive = !!on;
+  localStorage.setItem(CTRL_KEY, on ? "1" : "0");
+  const bar = $("#liveCtrlBar"), img = $("#live"), btn = $("#liveCtrl");
+  if (bar) bar.hidden = !on;
+  if (btn) btn.classList.toggle("active", !!on);
+  if (img) img.classList.toggle("ctrl", !!on);
+  if (!on && img) img.style.cursor = "";
+}
+
+function showGuide(x1, y1, x2, y2) {
+  const g = $("#liveGuide"), img = $("#live");
+  if (!g || !img) return;
+  const r = img.getBoundingClientRect(), body = img.parentElement.getBoundingClientRect();
+  const l = Math.min(x1, x2), t = Math.min(y1, y2);
+  g.style.left = `${l - body.left}px`;
+  g.style.top = `${t - body.top}px`;
+  g.style.width = `${Math.abs(x2 - x1)}px`;
+  g.style.height = `${Math.abs(y2 - y1)}px`;
+  g.style.display = "block";
+  void r;
+}
+
+function hideGuide() { const g = $("#liveGuide"); if (g) g.style.display = "none"; }
+
+function initLiveControl() {
+  const img = $("#live"), bar = $("#liveCtrlBar");
+  if (!img || !bar) return;
+  setCtrl(ctrlOn());
+
+  $("#liveCtrl").onclick = () => setCtrl(!ctrlOn());
+
+  let start = null, moved = false;
+
+  img.addEventListener("pointerdown", (e) => {
+    if (!liveInteractive) return;                       // 只读模式：完全不拦截
+    const p = livePagePoint(e);
+    if (!p) return;
+    start = { ...p, cx: e.clientX, cy: e.clientY };
+    moved = false;
+    try { img.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+  });
+
+  img.addEventListener("pointermove", (e) => {
+    if (!start || !liveInteractive) return;
+    const dx = Math.abs(e.clientX - start.cx), dy = Math.abs(e.clientY - start.cy);
+    if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) moved = true;
+    if (moved) showGuide(start.cx, start.cy, e.clientX, e.clientY);
+  });
+
+  img.addEventListener("pointerup", async (e) => {
+    if (!start || !liveInteractive) return;
+    const end = livePagePoint(e);
+    const wasMoved = moved;
+    const s = start;
+    start = null; moved = false;
+    hideGuide();
+    if (!end) return;
+    if (wasMoved) {
+      await postInput({ action: "drag", x: s.x, y: s.y, x2: end.x, y2: end.y });
+    } else {
+      await postInput({ action: "click", x: end.x, y: end.y });
+    }
+  });
+
+  // 滚轮：默认滚**面板**；Shift+滚轮才发给页面（避免误操作站点）
+  img.addEventListener("wheel", (e) => {
+    if (!liveInteractive || !e.shiftKey) return;
+    e.preventDefault();
+    const p = livePagePoint(e);
+    postInput({ action: "wheel", x: p ? p.x : 0, y: p ? p.y : 0, dx: e.deltaX, dy: e.deltaY });
+  }, { passive: false });
+
+  // 输入框 + 快捷键
+  const typeBox = $("#liveType");
+  const sendType = () => {
+    const text = typeBox.value;
+    if (!text) return;
+    typeBox.value = "";
+    postInput({ action: "type", text });
+  };
+  $("#liveTypeSend").onclick = sendType;
+  typeBox.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendType(); }
+  });
+  bar.querySelectorAll("[data-key]").forEach((b) => {
+    b.onclick = () => postInput({ action: "key", key: b.getAttribute("data-key") });
+  });
+  $("#liveReload").onclick = () => postInput({ action: "reload" });
+  $("#liveBottom").onclick = () => postInput({ action: "to_bottom" });
+  $("#liveResetInput").onclick = async () => {           // 解卡：发 up + Esc
+    await postInput({ action: "up", x: 0, y: 0 });
+    await postInput({ action: "key", key: "Escape" });
+    toast("已重置输入状态");
+  };
+}
+initLiveControl();
+
 // ---------- 中缝拖拽：左右调整"对话 / 画面"宽度（双击复位，宽度记忆） ----------
 const LIVE_W_KEY = "aiw2api_live_width";
 
