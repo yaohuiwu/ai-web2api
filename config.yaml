@@ -1,6 +1,7 @@
 # ai-web2api 配置
 server:
-  host: 0.0.0.0
+  host: 127.0.0.1         # 只监听本机（安全默认；画面/交互/会话均无鉴权）
+                          # Docker 部署由 compose 覆盖为 0.0.0.0 + 宿主端口只绑 127.0.0.1
   port: 8000
   # 会话绑定（thread_id）：空闲回收 TTL（秒）/ 同时活跃上限 / 是否并行
   thread_ttl: 900

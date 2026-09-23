@@ -298,6 +298,9 @@ stream.mjpg  HTTP 200 multipart/x-mixed-replace  3 秒 13 帧（≈4.3fps，目�
 - 观众全部离开 → `stop()` 释放 CDP 订阅（避免泄漏）；
 - 生成中帧率上限改为可配 **`server.live_busy_fps`（默认 2）**——原先写死 1fps 太顿。
 
+> **暴露面**：服务默认只监听 `127.0.0.1`；Docker 的宿主端口也只绑回环（`127.0.0.1:8000:8000`）。
+> 需要外部访问时：`WEB2API_HOST=0.0.0.0` + 改端口绑定，并**自行加反代鉴权**。
+
 ## 要不要上 WebSocket 转发层？——**不需要**（现阶段）
 
 现状：传输是 **MJPEG multipart → `<img src>`**（零 JS、天然背压、多观众扇出、纯 HTTP），

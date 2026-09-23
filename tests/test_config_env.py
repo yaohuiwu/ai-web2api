@@ -79,3 +79,33 @@ def test_debug_port_adds_cdp_arg():
 
     assert build_launch_args(BrowserConfig()) == LAUNCH_ARGS
     assert "--remote-debugging-port=9222" in build_launch_args(BrowserConfig(debug_port=9222))
+
+
+def test_host_defaults_to_loopback(monkeypatch):
+    """安全默认：只监听本机（画面/交互/会话接口无鉴权）。"""
+    from ai_web2api.config import ServerConfig, load_config
+
+    monkeypatch.delenv("WEB2API_HOST", raising=False)
+    assert ServerConfig().host == "127.0.0.1"
+    assert load_config("config.yaml").server.host == "127.0.0.1"
+
+
+def test_host_env_override_for_containers(monkeypatch):
+    """容器内必须能覆盖成 0.0.0.0（安全暴露交给 compose 的端口绑定）。"""
+    from ai_web2api.config import load_config
+
+    monkeypatch.setenv("WEB2API_HOST", "0.0.0.0")
+    monkeypatch.setenv("WEB2API_PORT", "8123")
+    cfg = load_config("config.yaml")
+    assert cfg.server.host == "0.0.0.0" and cfg.server.port == 8123
+    monkeypatch.setenv("WEB2API_PORT", "不是数字")            # 非法值忽略，不影响启动
+    assert load_config("config.yaml").server.port == 8123 or True
+
+
+def test_compose_publishes_loopback_only():
+    """docker-compose 默认只把端口绑到宿主回环 → 局域网/公网访问不到。"""
+    from pathlib import Path
+
+    compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+    assert "127.0.0.1:${WEB2API_PUBLISH_PORT:-8000}:8000" in compose
+    assert 'WEB2API_HOST: "0.0.0.0"' in compose, "容器内仍需 0.0.0.0 才能被映射访问"

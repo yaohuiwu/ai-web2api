@@ -252,7 +252,9 @@ class BrowserConfig(BaseModel):
 
 
 class ServerConfig(BaseModel):
-    host: str = "0.0.0.0"
+    # 默认只监听本机（安全默认：实时画面/画面交互/会话管理都无鉴权）。
+    # 局域网/容器发布时才改成 "0.0.0.0"（优先用 docker-compose 的 127.0.0.1:8000:8000 绑定）。
+    host: str = "127.0.0.1"
     port: int = 8000
     api_keys: list[str] = Field(default_factory=list)  # 空 = 不鉴权（本地使用）
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
@@ -334,15 +336,34 @@ def apply_env_overrides(cfg: AppConfig) -> AppConfig:
     - ``WEB2API_HEADLESS`` > ``<PROVIDER>_HEADLESS``（如 ``DEEPSEEK_HEADLESS``）
       → ``browser.headless``
     - ``WEB2API_API_KEY`` → ``server.api_keys``（支持逗号分隔多个 key）
+    - ``WEB2API_HOST`` / ``WEB2API_PORT`` → ``server.host`` / ``server.port``
+      （**刻意例外**：``config.yaml`` 默认只监听 ``127.0.0.1``（安全默认），
+      而容器里必须监听 ``0.0.0.0`` 才能被端口映射访问 → 由 compose 注入 ``WEB2API_HOST=0.0.0.0``；
+      局域网暴露与否由 compose 的端口绑定控制，见 docker-compose.yml）
 
-    host/port/profiles_dir 等其余项以 ``config.yaml`` 为准：``.env`` 会被自动加载，
+    profiles_dir 等其余项以 ``config.yaml`` 为准：``.env`` 会被自动加载，
     若 env 也参与覆盖，则“换个 config 文件启动”（如 ``AI_WEB2API_CONFIG=config.fake.yaml``）
-    仍会被 ``.env`` 里的端口霸占，反而失去可预测性。Docker 部署直接挂 config.yaml。
+    仍会被 ``.env`` 里的端口霸占，反而失去可预测性。
 
     背景：``.env.example`` 一直文档化这些变量，但配置加载只读 YAML，
     导致设了无头仍弹窗口。
     """
     cfg = _apply_headless_override(cfg)
+
+    # host/port 的刻意例外：容器内需要 0.0.0.0（安全暴露交给 compose 的端口绑定）
+    host = os.environ.get("WEB2API_HOST", "").strip()
+    port_raw = os.environ.get("WEB2API_PORT", "").strip()
+    updates: dict = {}
+    if host:
+        updates["host"] = host
+    if port_raw:
+        try:
+            updates["port"] = int(port_raw)
+        except ValueError:
+            logger.warning("WEB2API_PORT 不是数字，忽略：%r", port_raw)
+    if updates:
+        logger.info("server 监听被环境变量覆盖：%s", updates)
+        cfg = cfg.model_copy(update={"server": cfg.server.model_copy(update=updates)})
 
     key = os.environ.get("WEB2API_API_KEY", "").strip()
     if key:

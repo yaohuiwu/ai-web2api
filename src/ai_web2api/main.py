@@ -118,6 +118,12 @@ def serve(cfg) -> None:  # type: ignore[no-untyped-def]
             f"启动失败：{cfg.server.host}:{cfg.server.port} 无法监听（{exc.strerror}），"
             f"端口可能已被占用"
         ) from exc
+    if cfg.server.host in {"0.0.0.0", "::", "*", ""}:
+        logger.warning(
+            "监听 %s：本机之外也能访问。实时画面/画面交互/会话管理**均无鉴权**，"
+            "如非必要请用 127.0.0.1（默认）或加反代鉴权（见 docs/LIVE_CONTROL.md）",
+            cfg.server.host,
+        )
     log_ui_urls(cfg.server.host, cfg.server.port)
     uvicorn.Server(
         uvicorn.Config(app, host=cfg.server.host, port=cfg.server.port)

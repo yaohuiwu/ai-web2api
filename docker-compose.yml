@@ -21,14 +21,18 @@ services:
       - path: .env
         required: true
     environment:
-      # 让容器里打印/使用 0.0.0.0 监听，宿主才能访问 8000
+      # 容器内必须监听 0.0.0.0，宿主才能通过端口映射访问
       AI_WEB2API_CONFIG: /app/config.yaml
+      # config.yaml 的 host 是 127.0.0.1（安全默认）→ 容器里显式覆盖成 0.0.0.0
+      WEB2API_HOST: "0.0.0.0"
       # 设 false → 用 Xvfb 跑 headful（ChatGPT 的 Sentinel 反爬会拦 headless；headful 可通过）
       WEB2API_HEADLESS: "${WEB2API_HEADLESS:-true}"
       # 可选：设置后 /v1/* 需带 Authorization: Bearer <key>（逗号分隔多 key）
       # WEB2API_API_KEY: "your-secret-key"
     ports:
-      - "${WEB2API_PUBLISH_PORT:-8000}:8000"
+      # ⚠️ 只绑宿主回环：局域网/公网访问不到（画面与交互接口无鉴权）。
+      # 需要别的机器访问：改成 "${WEB2API_PUBLISH_PORT:-8000}:8000" 并自行加鉴权/反代。
+      - "127.0.0.1:${WEB2API_PUBLISH_PORT:-8000}:8000"
     volumes:
       # 登录态 (state.json) 与 thread 持久化 (threads.json)
       - web2api-profiles:/app/profiles
