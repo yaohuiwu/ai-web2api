@@ -15,6 +15,27 @@
   #chat {
     flex: 1; overflow-y: auto; padding: 20px; max-width: 860px; width: 100%; margin: 0 auto;
   }
+  /* 消息区左右分栏：左=对话（原样），右=实时画面（便于与回复实时对比） */
+  #split { flex: 1; display: flex; min-height: 0; min-width: 0; }
+  #livePane {
+    width: 38%; min-width: 300px; max-width: 640px;
+    border-left: 1px solid var(--border); background: var(--card);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  #livePane[hidden] { display: none; }
+  .live-head {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted);
+    white-space: nowrap; overflow: hidden;
+  }
+  .live-head .live-title { color: var(--text); font-weight: 600; }
+  .live-head .live-meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+  .live-body {
+    flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+    background: var(--live-bg); overflow: hidden;
+  }
+  .live-body img { max-width: 100%; max-height: 100%; display: block; }
+  .live-off { color: var(--muted); font-size: 12px; padding: 12px; text-align: center; }
   .msg { display: flex; margin-bottom: 16px; }
   .msg.user { justify-content: flex-end; }
   .bubble {
@@ -249,3 +270,12 @@ footer.compact { margin-top: 0; padding: 6px var(--sp-5); border-top: 1px solid 
 .widget-bar .btn.sm { padding: 2px 8px; font-size: 11.5px; text-decoration: none; display: inline-flex; align-items: center; }
 .widget-frame { display: block; width: 100%; min-height: 420px; border: 0; background: var(--card); }
 .widget-shot { display: block; max-width: 100%; }
+
+/* 窄屏：上下分栏（对话在上，画面在下） */
+@media (max-width: 900px) {
+  #split { flex-direction: column; }
+  #livePane {
+    width: 100%; max-width: none; min-width: 0; height: 42%;
+    border-left: none; border-top: 1px solid var(--border);
+  }
+}

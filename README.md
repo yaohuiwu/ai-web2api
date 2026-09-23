@@ -40,6 +40,9 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 > **DeepSeek, ChatGPT, Kimi and Doubao scored 1.00 sentence coverage with zero thinking contamination (12/12 cases)**;
 > GLM was skipped because its Aliyun WAF ticket (~30 min TTL) had expired. Method, raw results, the regression
 > threshold and the two pitfalls found while running it: [`docs/TEXT_FIDELITY.md`](docs/TEXT_FIDELITY.md) (`./scripts/text_fidelity.sh`).
+> The Playground splits the message area: chat on the left, a **read-only live view** of the
+> provider's page on the right — so you can compare the reply with the site side by side
+> ([`docs/LIVE_VIEW.md`](docs/LIVE_VIEW.md)).
 > Per-request latency breakdown (send / first token / settled / done / final, with `ttft`,
 > `settle_lag`, `tail`): [`docs/TIMELINE.md`](docs/TIMELINE.md) — one parseable `[timeline]`
 > log line per request, also queryable at `GET /admin/timeline`.

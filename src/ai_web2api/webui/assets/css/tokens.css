@@ -22,6 +22,7 @@
   --code-bg: #f0f2f5;
   --code-border: #e3e6ea;
   --code-block-bg: #1c2733;
+  --live-bg: #0b0d12;          /* 实时画面底色（视频区），两套主题都用深底 */
   --code-block-fg: #d6e2f0;
 
   /* 语义色 */
@@ -73,6 +74,7 @@
   --code-bg: #1f2733;
   --code-border: #2b3441;
   --code-block-bg: #0b0f14;
+  --live-bg: #05070a;
   --code-block-fg: #cbd5e1;
 
   --blue: #2563eb;   --blue-hover: #1d4ed8;  --blue-bg: rgba(59, 130, 246, .18);

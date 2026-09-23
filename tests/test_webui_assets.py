@@ -270,3 +270,23 @@ def test_playground_widget_panel():
     assert "widget-frame" in js and "widget-shot" in js and "看截图" in js
     assert "m.widgets" in js and "obj.widgets" in js, "历史/流式都要回填组件"
     assert ".widget-box" in css
+
+
+def test_playground_has_split_live_pane():
+    """Playground 左右分栏：左侧原消息区 + 右侧实时画面（便于边聊边对）。"""
+    html = (WEBUI / "playground.html").read_text(encoding="utf-8")
+    css = (WEBUI / "assets/css/playground.css").read_text(encoding="utf-8")
+    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+
+    assert 'id="split"' in html and '<aside id="livePane"' in html, "缺少分栏容器/画面面板"
+    assert 'id="live"' in html and 'id="liveToggle"' in html
+    # 画面面板必须在 #chat 之后（左对话、右画面）
+    assert html.index('id="chat"') < html.index('id="livePane"')
+    assert "#split { display: flex" in css or "#split { flex: 1; display: flex" in css
+    assert "@media (max-width: 900px)" in css, "窄屏应上下分栏"
+    # 复用画面页的直播接口；thread_id 固定 + 只在可见时开流
+    assert "/stream.mjpg" in js and "screen/state" in js
+    assert "thread_id=" in js and "visibilitychange" in js
+    assert "/dismiss" in js, "应能关闭站点遮挡弹窗"
+    # 模型 → provider 映射（画面要跟着所选模型切）
+    assert "/admin/status" in js and "PROVIDER_MAP" in js

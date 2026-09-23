@@ -392,6 +392,7 @@ async function sendNonStream(body) {
   if (data.thread_id) {
     addMeta(`thread_id: ${data.thread_id}`);
     rememberThreadId(data.thread_id);
+    syncLive();                       // 页面已就绪 → 右侧画面立刻跟上这次会话
   }
   return { content: msg.content || "", thinking: msg.reasoning_content || "", toolCalls: msg.tool_calls || [] };
 }
@@ -847,3 +848,163 @@ if (qsThread) {
     switchThread(qsThread, t ? t.loaded !== false : true, t ? t.model : null);
   })();
 }
+
+// ---------- 实时画面（右栏，只读直播）：边聊边对，便于定位"是不是站点侧慢" ----------
+// 设计复用"画面"页（docs/LIVE_VIEW.md）：MJPEG <img> + 状态轮询；只在面板可见时才开流。
+let PROVIDER_MAP = {};        // 模型名 → provider（来自 /admin/status）
+let liveStateTimer = null;
+let liveProviderShown = null;
+let liveThreadShown = null;
+
+const liveOn = () => localStorage.getItem("aiw2api_live") !== "0";
+const liveThread = () => $("#threadId").value.trim();
+const liveProvider = () => PROVIDER_MAP[$("#model").value] || null;
+
+function liveStreamUrl(p, tid) {
+  const t = tid ? `thread_id=${encodeURIComponent(tid)}&` : "";
+  return `/admin/${encodeURIComponent(p)}/stream.mjpg?${t}t=${Date.now()}`;
+}
+function liveStateUrl(p, tid) {
+  return `/admin/${encodeURIComponent(p)}/screen/state${tid ? `?thread_id=${encodeURIComponent(tid)}` : ""}`;
+}
+
+async function loadProviderMap() {
+  try {
+    const st = await (await fetch("/admin/status")).json();
+    PROVIDER_MAP = {};
+    for (const p of st.providers || []) {
+      for (const m of p.models || []) PROVIDER_MAP[m] = p.name;
+    }
+  } catch (e) {
+    console.warn("loadProviderMap failed:", e);
+    PROVIDER_MAP = {};
+  }
+  syncLive();
+}
+
+let liveAvailable = null;          // 该 provider 当前是否有打开的页面（无页面 → 503）
+let liveRetryTimer = null;
+
+function showLiveHint(msg) {
+  const body = document.querySelector(".live-body");
+  if (!body) return;
+  body.innerHTML = `<div class="live-off">${esc(msg)}</div>`;
+  liveAvailable = false;
+}
+
+function openLiveStream(p, tid) {
+  const body = document.querySelector(".live-body");
+  if (!body) return;
+  if (!$("#live")) body.innerHTML = '<img id="live" alt="实时画面（只读）" hidden>';
+  const img = $("#live");
+  img.hidden = false;
+  img.onerror = () => {                 // 流被拒（多为"没有打开的页面"）→ 提示 + 稍后重试
+    showLiveHint("画面暂不可用（该 provider 当前没有打开的页面）—— 发一条消息后会自动出现");
+    scheduleLiveRetry();
+  };
+  img.src = liveStreamUrl(p, tid);
+  liveProviderShown = p;
+  liveThreadShown = tid;
+}
+
+function stopLive() {
+  const img = $("#live");
+  if (img) { img.removeAttribute("src"); img.hidden = true; img.onerror = null; }
+  if (liveStateTimer) { clearInterval(liveStateTimer); liveStateTimer = null; }
+  if (liveRetryTimer) { clearTimeout(liveRetryTimer); liveRetryTimer = null; }
+  liveProviderShown = liveThreadShown = null;
+}
+
+function scheduleLiveRetry() {
+  if (liveRetryTimer) return;
+  liveRetryTimer = setTimeout(() => {
+    liveRetryTimer = null;
+    liveProviderShown = null;           // 强制重开流
+    syncLive();
+  }, 3000);
+}
+
+async function pollLiveState(p, tid) {
+  try {
+    const st = await (await fetch(liveStateUrl(p, tid))).json();
+    const bits = [];
+    if (st.shown_thread_id) bits.push(`会话 ${st.shown_thread_id}`);
+    if (st.viewers != null) bits.push(`观众 ${st.viewers}`);
+    if (st.busy) bits.push("生成中");
+    if (st.fps) bits.push(`${st.fps}fps`);
+    if (st.page_url) bits.push(String(st.page_url).replace(/^https?:\/\/[^/]+/, ""));
+    $("#liveMeta").textContent = bits.join(" · ") || "—";
+    liveAvailable = !!st.available;
+    if (!st.available) {
+      // 没有打开的页面：不发流（省资源），给出可行动提示；页面一出现（发消息后）自动恢复
+      if ($("#live")) { const img = $("#live"); img.removeAttribute("src"); img.hidden = true; }
+      showLiveHint("暂无打开的页面 —— 在该 provider 上发一条消息，画面会自动出现");
+    } else if (!$("#live") || !liveProviderShown) {
+      openLiveStream(p, tid);
+    }
+  } catch (e) {
+    $("#liveMeta").textContent = "状态不可用";
+  }
+}
+
+// 同步画面：模型/thread_id/开关/可见性变化时重开流
+function syncLive() {
+  const pane = $("#livePane");
+  if (!pane) return;
+  const p = liveProvider();
+  $("#liveToggle").classList.toggle("primary", liveOn() && !!p);
+  if (!liveOn() || !p || document.hidden) {
+    pane.hidden = true;
+    stopLive();
+    return;
+  }
+  pane.hidden = false;
+  const tid = liveThread();
+  if (liveProviderShown !== p || liveThreadShown !== tid) {
+    $("#liveTitle").textContent = `实时画面 · ${p}`;
+    openLiveStream(p, tid);             // 可能 503 → onerror 会给提示并自动重试
+  }
+  if (!liveStateTimer) {
+    pollLiveState(p, tid);
+    liveStateTimer = setInterval(() => {
+      if (document.hidden || !liveProvider()) return;
+      pollLiveState(liveProvider(), liveThread());
+    }, 2500);
+  }
+}
+
+function initLivePane() {
+  const toggle = $("#liveToggle");
+  if (!toggle) return;
+  toggle.onclick = () => {
+    localStorage.setItem("aiw2api_live", liveOn() ? "0" : "1");
+    const pane = $("#livePane");
+    if (!liveOn()) { pane.hidden = true; stopLive(); }
+    syncLive();
+  };
+  $("#liveClose").onclick = () => {
+    localStorage.setItem("aiw2api_live", "0");
+    $("#livePane").hidden = true;
+    stopLive();
+    syncLive();
+  };
+  $("#liveDismiss").onclick = async () => {
+    const p = liveProvider();
+    if (!p) return;
+    try {
+      await fetch(`/admin/${encodeURIComponent(p)}/dismiss`, { method: "POST" });
+      toast("已尝试关闭页面遮挡");
+    } catch (e) {
+      toast("关闭失败：" + e.message);
+    }
+  };
+  // 模型/会话变化 → 画面跟着切（会话变化时钉到该会话页面）
+  $("#model").addEventListener("change", () => syncLive());
+  $("#threadId").addEventListener("input", () => {
+    liveThreadShown = null;          // 强制重开流（?thread_id= 变化）
+    syncLive();
+  });
+  document.addEventListener("visibilitychange", () => syncLive());
+  loadProviderMap();
+}
+initLivePane();

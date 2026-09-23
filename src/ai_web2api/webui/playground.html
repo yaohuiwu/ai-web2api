@@ -58,6 +58,7 @@
     </label>
     <button class="btn sm toolbar-toggle" id="advToggle" title="显示/隐藏高级选项">⚙ 更多</button>
     <button class="btn sm" id="rawBtn" title="查看最近请求/响应原始报文">原始报文</button>
+    <button class="btn sm" id="liveToggle" title="左右分栏：右侧显示该 provider 的实时画面（便于边聊边对）">▥ 画面</button>
   </div>
 </div>
 
@@ -76,8 +77,20 @@
   <div id="threadList"></div>
 </aside>
 <main id="main">
+<div id="split">
 <div id="chat">
   <div class="msg meta"><div class="bubble">输入消息开始测试本地 OpenAI 兼容接口（POST /v1/chat/completions）</div></div>
+</div>
+<aside id="livePane" hidden>
+  <div class="live-head">
+    <span class="live-title" id="liveTitle">实时画面</span>
+    <span class="live-meta mono" id="liveMeta"></span>
+    <span class="spacer"></span>
+    <button class="btn sm" id="liveDismiss" title="关闭页面上的遮挡弹窗（如繁忙提示/协议确认）">关遮挡</button>
+    <button class="btn sm" id="liveClose" title="收起画面（也可用顶部「▥ 画面」）">✕</button>
+  </div>
+  <div class="live-body"><img id="live" alt="实时画面（只读）" hidden></div>
+</aside>
 </div>
 
 <div class="tool-panel" id="toolPanel" hidden>

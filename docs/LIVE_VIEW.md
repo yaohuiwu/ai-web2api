@@ -231,3 +231,21 @@ screen/state {"available":true,"page_url":"https://chat.deepseek.com/a/chat/s/�
 stream.mjpg  HTTP 200 multipart/x-mixed-replace  3 秒 13 帧（≈4.3fps，目标 5）451KB
 /ui/browser.html?provider=deepseek  naturalWidth=1440 正常成帧；暂停 → viewers=0 且 streaming=false（自动停采集）
 ```
+
+## Playground 左右分栏（左侧对话 + 右侧实时画面）
+
+便于"边聊边对"：回复与站点页面同时可见，一眼看出是站点侧慢还是我们慢（配合 `[timeline]` 日志）。
+
+![Playground 分栏](assets/playground-live.png)
+
+| 行为 | 说明 |
+|---|---|
+| 开关 | 工具栏「▥ 画面」；记忆在 `localStorage.aiw2api_live`（默认开） |
+| 跟随模型 | 模型 → provider 由 `/admin/status` 映射，切模型自动切画面 |
+| 跟随会话 | `#threadId` 有值时传 `?thread_id=`（画面钉到同一会话）；接口支持"跟随最近使用" |
+| 省资源 | 只在面板可见**且**标签页可见时才开流（`visibilitychange` + 收起即停） |
+| 无页面时 | 显示"暂无打开的页面 —— 发一条消息后会自动出现"，并**每 3s 自动重试** |
+| 关遮挡 | 「关遮挡」按钮 → `POST /admin/{p}/dismiss`（繁忙提示/协议弹窗挡住输入时很有用） |
+| 窄屏 | ≤900px 自动上下分栏（对话在上、画面在下） |
+
+> 注：画面是**只读直播**（P1 设计）；`server.live_control` 仍为预留，未开启。
