@@ -236,6 +236,9 @@ class BrowserConfig(BaseModel):
     # 登录页"密码登录"等）全是中文 → 必须固定 zh-CN，否则 Playwright 默认 en-US 时全部失配。
     locale: str = "zh-CN"
     viewport: dict = Field(default_factory=lambda: {"width": 1440, "height": 900})
+    # 设备像素比：截图（实时画面/登录验证码）按更高分辨率渲染 → 缩小展示时**字迹明显更锐利**。
+    # CSS 像素不变（选择器/点击都不受影响），只是像素更多。带宽/CPU 随之上浮（2x ≈ 2-3 倍字节）。
+    device_scale_factor: float = 1.0
     default_timeout: float = 30.0
     login_check_interval: float = 300.0  # 后台刷新登录态间隔（秒）
     state_expiry_margin: float = 86400.0  # 登录态剩余有效期低于该值才落盘 state.json（秒）；未过期不重复写
@@ -263,7 +266,8 @@ class ServerConfig(BaseModel):
     live_view: bool = True       # 总开关；false = /admin/{p}/screen* 一律 403
     live_control: bool = False   # 预留：输入注入（P2），默认关
     live_fps: float = 5.0        # 默认帧率（可被 ?fps= 覆盖；生成中自动降到 1）
-    live_quality: int = 50       # 默认 JPEG 质量（可被 ?quality= 覆盖）
+    live_quality: int = 75       # 默认 JPEG 质量（可被 ?quality= 覆盖；50 时文字边缘糊，75 明显更清楚）
+    live_crop: str = ""          # 默认裁剪："" = 整页；"last" = 只裁最后一条回复（原生像素，窄栏里字更清楚）
     # 会话绑定（thread_id）：空闲回收 TTL / 上限 / 是否并行 / 是否持久化
     thread_ttl: float = 900.0      # 秒，thread 空闲多久回收（关页面）
     max_threads: int = 8           # 同时活跃 thread 上限，超出 429

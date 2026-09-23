@@ -34,9 +34,16 @@ class FrameOptions:
     quality: int = 50
     fps: float = 5.0
     clip: dict | None = None
+    # 裁剪模式："" / "full" = 整页；"last" = **只裁最后一条回复**（原生像素 → 窄栏里也看得清字）
+    crop: str = ""
+    crop_selector: str | None = None      # "last" 用它定位（provider 的 response_container）
+    crop_padding: int = 28                # 四周留白（px）
 
     def as_dict(self) -> dict:
-        return {"quality": self.quality, "fps": self.fps, "clip": self.clip}
+        return {
+            "quality": self.quality, "fps": self.fps, "clip": self.clip,
+            "crop": self.crop, "crop_selector": self.crop_selector,
+        }
 
 
 def parse_frame_options(
@@ -44,8 +51,12 @@ def parse_frame_options(
     quality: int | str | None = None,
     fps: float | str | None = None,
     clip: str | None = None,
+    crop: str | None = None,
+    crop_selector: str | None = None,
+    crop_padding: int | str | None = None,
     default_quality: int = 50,
     default_fps: float = 5.0,
+    default_crop: str = "",
 ) -> FrameOptions:
     """解析并夹取请求参数；非法值一律回退默认（不报错，画面优先）。"""
 
@@ -69,10 +80,16 @@ def parse_frame_options(
             else:
                 if x >= 0 and y >= 0 and width > 0 and height > 0:
                     resolved_clip = {"x": x, "y": y, "width": width, "height": height}
+    # crop：last/auto/msg 都表示"只裁最后一条回复"；full/none/off/空 = 整页
+    name = str(crop if crop is not None else default_crop).strip().lower()
+    resolved_crop = "last" if name in {"last", "auto", "msg", "message", "answer"} else ""
     return FrameOptions(
         quality=int(_num(quality, default_quality, MIN_QUALITY, MAX_QUALITY)),
         fps=_num(fps, default_fps, MIN_FPS, MAX_FPS),
         clip=resolved_clip,
+        crop=resolved_crop,
+        crop_selector=crop_selector or None,
+        crop_padding=int(_num(crop_padding, 28, 0, 200)),
     )
 
 
@@ -89,8 +106,30 @@ def mjpeg_part(frame: bytes, boundary: str = MJPEG_BOUNDARY) -> bytes:
     return head + frame + b"\r\n"
 
 
+async def crop_box_for_last(page: Page, selector: str, padding: int) -> dict | None:
+    """算出"最后一条回复"的可截区域（含留白，夹到视口内）；拿不到 → None（回退整页）。"""
+    try:
+        box = await page.locator(selector).last.bounding_box()
+    except Exception:  # noqa: BLE001  元素不在/页面在动 → 这帧先整页，下帧再试
+        return None
+    if not box or box.get("width", 0) < 40 or box.get("height", 0) < 40:
+        return None
+    vp = page.viewport_size or {"width": 1440, "height": 900}
+    # 宽度：夹到视口内（左对齐框的左边缘）
+    x = max(0.0, float(box["x"]) - padding)
+    width = min(float(vp["width"]) - x, float(box["width"]) + padding * 2)
+    # 高度：允许超出视口（Playwright 支持 captureBeyondViewport），但**底部对齐**——
+    # 长回答时优先看到"最新写出来的部分"（跟随生成）。
+    height = max(160.0, float(box["height"]) + padding * 2)
+    bottom = float(box["y"]) + float(box["height"]) + padding
+    y = max(0.0, bottom - height)
+    if width < 40 or height < 40:
+        return None
+    return {"x": x, "y": y, "width": width, "height": height}
+
+
 async def capture(page: Page, opts: FrameOptions, *, timeout_ms: float = 10_000) -> bytes:
-    """截一帧 JPEG。**不做服务端缩放**（无图像库；带宽靠 quality/clip 控制）。"""
+    """截一帧 JPEG。**不做服务端缩放**（无图像库；清晰度靠 crop（原生像素）+ quality 控制）。"""
     kwargs: dict = {
         "type": "jpeg",
         "quality": opts.quality,
@@ -98,8 +137,11 @@ async def capture(page: Page, opts: FrameOptions, *, timeout_ms: float = 10_000)
         "animations": "disabled",
         "timeout": timeout_ms,
     }
-    if opts.clip:
-        kwargs["clip"] = opts.clip
+    clip = opts.clip
+    if clip is None and opts.crop == "last" and opts.crop_selector:
+        clip = await crop_box_for_last(page, opts.crop_selector, opts.crop_padding)
+    if clip:
+        kwargs["clip"] = clip
     return await page.screenshot(**kwargs)
 
 

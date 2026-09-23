@@ -193,6 +193,9 @@ class BrowserManager:
                 "Accept-Language": self._accept_language(loc)
             },
         }
+        dsf = float(getattr(self._cfg, "device_scale_factor", 1.0) or 1.0)
+        if dsf and dsf != 1.0:
+            kwargs["device_scale_factor"] = dsf      # 截图超采样（字迹锐利）
         if state.exists():
             kwargs["storage_state"] = str(state)
         ctx = await self._browser.new_context(**kwargs)

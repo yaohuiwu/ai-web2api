@@ -20,7 +20,13 @@ from fastapi.responses import (
 from pydantic import BaseModel
 
 from ..browser import extractor
-from ..browser.live import MJPEG_BOUNDARY, LiveController, capture, mjpeg_part, parse_frame_options
+from ..browser.live import (
+    MJPEG_BOUNDARY,
+    LiveController,
+    capture,
+    mjpeg_part,
+    parse_frame_options,
+)
 from ..core.auth_expiry import compute_for_state_file
 from ..core.repo_info import repo_info
 from ..core.timeline import TIMELINES
@@ -685,21 +691,31 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             )
         return {"provider": name, "shown_thread_id": shown, "dismissed": dismissed}
 
+    def _frame_opts(name: str, *, with_fps: bool = False, **kw):
+        """按 provider 配置组装截帧参数（``crop=last`` 需要知道正文容器选择器）。"""
+        cfg = registry.config
+        p = registry.providers().get(name)
+        sels = list(getattr(getattr(p, "cfg", None), "selectors", None).response_container or []) if p else []
+        kw.setdefault("crop_selector", sels[0] if sels else None)
+        kw.setdefault("default_crop", cfg.server.live_crop)
+        if with_fps:
+            kw.setdefault("default_fps", cfg.server.live_fps)
+        return parse_frame_options(default_quality=cfg.server.live_quality, **kw)
+
     @router.get("/admin/{name}/screen.jpg")
     async def screen_jpg(
         name: str,
         quality: int | None = None,
         clip: str | None = None,
+        crop: str | None = None,
         thread_id: str | None = None,
     ):
-        """单帧 JPEG（只读）。``quality`` 1-95、``clip=x,y,w,h`` 可选。"""
+        """单帧 JPEG（只读）。``quality`` 1-95、``clip=x,y,w,h``、``crop=last``（只裁最后一条回复）。"""
         if not registry.config.server.live_view:
             return _live_disabled()
         if name not in registry.providers():
             return _live_unknown(name)
-        opts = parse_frame_options(
-            quality=quality, clip=clip, default_quality=registry.config.server.live_quality
-        )
+        opts = _frame_opts(name, quality=quality, clip=clip, crop=crop)
         try:
             frame = await live.frame_once(name, opts, thread_id)
         except Exception as exc:  # noqa: BLE001
@@ -719,9 +735,10 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         fps: float | None = None,
         quality: int | None = None,
         clip: str | None = None,
+        crop: str | None = None,
         thread_id: str | None = None,
     ):
-        """MJPEG 直播（只读）：浏览器 `<img src>` 原生渲染。
+        """MJPEG 直播（只读）：浏览器 `<img src>` 原生渲染。``crop=last`` 只裁最后一条回复。
 
         多观众共享同一采集循环（扇出）；页面不存在时不主动创建 → 直接 503。
         """
@@ -731,13 +748,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             return _live_unknown(name)
         if (await _live_page(name, thread_id))[0] is None:
             return _live_no_page(name)
-        opts = parse_frame_options(
-            fps=fps,
-            quality=quality,
-            clip=clip,
-            default_fps=registry.config.server.live_fps,
-            default_quality=registry.config.server.live_quality,
-        )
+        opts = _frame_opts(name, with_fps=True, fps=fps, quality=quality, clip=clip, crop=crop)
 
         async def gen():
             async for frame in live.subscribe(name, opts, thread_id):

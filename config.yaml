@@ -17,8 +17,10 @@ server:
   live_view: true          # 总开关；false = 直播接口一律 403
   live_control: false      # 预留：输入注入（P2），默认关
   live_fps: 5              # 默认帧率（生成中自动降到 1，避免抢占自动化）
-  live_quality: 50         # 默认 JPEG 质量
+  live_crop: ""             # ""=整页；“last”=只裁最后一条回复（Playground 会显式传 crop=last）
+  live_quality: 75         # 默认 JPEG 质量（50 时字迹发糊；75 明显更清楚）
 browser:
+  device_scale_factor: 2   # 截图 2x 超采样（字迹锐利；CSS 像素不变，带宽/CPU 略增）
   debug_port: 9222          # 诊断用（CDP 连接现有页面看 DOM）；0 = 关闭。容器内有效，未对外 publish
   headless: true          # 静默运行（不弹浏览器窗口）；由 .env 覆盖：
                           # 优先级 WEB2API_HEADLESS > DEEPSEEK_HEADLESS(<PROVIDER>_HEADLESS) > 本项

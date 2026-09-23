@@ -86,6 +86,16 @@
     <span class="live-title" id="liveTitle">实时画面</span>
     <span class="live-meta mono" id="liveMeta"></span>
     <span class="spacer"></span>
+    <select class="live-sel" id="liveScope" title="画面范围：消息区=只裁最后一条回复（原生像素，字更清楚）">
+      <option value="last">消息区</option>
+      <option value="full">整页</option>
+    </select>
+    <select class="live-sel" id="liveZoom" title="缩放：适应=整幅可见；100% 以上可滚动查看（字最大最清楚）">
+      <option value="fit">适应</option>
+      <option value="1">100%</option>
+      <option value="1.5">150%</option>
+      <option value="2">200%</option>
+    </select>
     <button class="btn sm" id="liveDismiss" title="关闭页面上的遮挡弹窗（如繁忙提示/协议确认）">关遮挡</button>
     <button class="btn sm" id="liveClose" title="收起画面（也可用顶部「▥ 画面」）">✕</button>
   </div>

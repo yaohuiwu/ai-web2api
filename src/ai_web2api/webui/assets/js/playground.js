@@ -860,9 +860,35 @@ const liveOn = () => localStorage.getItem("aiw2api_live") !== "0";
 const liveThread = () => $("#threadId").value.trim();
 const liveProvider = () => PROVIDER_MAP[$("#model").value] || null;
 
+const liveScope = () => localStorage.getItem("aiw2api_live_scope") || "last";   // 默认只裁消息区
+const liveZoom = () => localStorage.getItem("aiw2api_live_zoom") || "fit";
+
 function liveStreamUrl(p, tid) {
   const t = tid ? `thread_id=${encodeURIComponent(tid)}&` : "";
-  return `/admin/${encodeURIComponent(p)}/stream.mjpg?${t}t=${Date.now()}`;
+  return `/admin/${encodeURIComponent(p)}/stream.mjpg?${t}crop=${encodeURIComponent(liveScope())}&t=${Date.now()}`;
+}
+
+// 缩放：fit = 整幅可见；否则按百分比显示（可滚动）。CSS 像素不变、截图 2x → 放大后字很锐利。
+function applyLiveZoom() {
+  const img = $("#live");
+  if (!img) return false;
+  const z = liveZoom();
+  if (z === "fit") {
+    img.style.maxWidth = "100%"; img.style.maxHeight = "100%";
+    img.style.width = "auto"; img.style.height = "auto";
+  } else {
+    img.style.maxWidth = "none"; img.style.maxHeight = "none";
+    img.style.width = `${parseFloat(z) * 100}%`; img.style.height = "auto";
+  }
+  return z !== "fit";
+}
+
+let liveUserScrolledUp = 0;
+function pinLiveBottom() {
+  const body = document.querySelector(".live-body");
+  if (!body || !applyLiveZoom()) return;
+  if (Date.now() - liveUserScrolledUp < 6000) return;    // 用户刚手动滚动过 → 不抢
+  body.scrollTop = body.scrollHeight;                     // 跟随生成：始终看最新内容
 }
 function liveStateUrl(p, tid) {
   return `/admin/${encodeURIComponent(p)}/screen/state${tid ? `?thread_id=${encodeURIComponent(tid)}` : ""}`;
@@ -903,6 +929,7 @@ function openLiveStream(p, tid) {
     scheduleLiveRetry();
   };
   img.src = liveStreamUrl(p, tid);
+  applyLiveZoom();
   liveProviderShown = p;
   liveThreadShown = tid;
 }
@@ -1000,11 +1027,30 @@ function initLivePane() {
   };
   // 模型/会话变化 → 画面跟着切（会话变化时钉到该会话页面）
   $("#model").addEventListener("change", () => syncLive());
+  $("#liveScope").addEventListener("change", () => {
+    localStorage.setItem("aiw2api_live_scope", $("#liveScope").value);
+    liveProviderShown = null;                 // 强制重开流（crop 变了）
+    syncLive();
+  });
+  $("#liveZoom").addEventListener("change", () => {
+    localStorage.setItem("aiw2api_live_zoom", $("#liveZoom").value);
+    applyLiveZoom();
+    pinLiveBottom();
+  });
+  const liveBody = document.querySelector(".live-body");
+  if (liveBody) liveBody.addEventListener("scroll", () => {
+    const atBottom = liveBody.scrollHeight - liveBody.scrollTop - liveBody.clientHeight < 24;
+    if (!atBottom) liveUserScrolledUp = Date.now();
+  });
+  setInterval(pinLiveBottom, 1000);           // 跟随生成（放大时自动滚到底）
   $("#threadId").addEventListener("input", () => {
     liveThreadShown = null;          // 强制重开流（?thread_id= 变化）
     syncLive();
   });
   document.addEventListener("visibilitychange", () => syncLive());
+  const scopeSel = $("#liveScope"), zoomSel = $("#liveZoom");
+  if (scopeSel) scopeSel.value = liveScope();
+  if (zoomSel) zoomSel.value = liveZoom();
   loadProviderMap();
 }
 initLivePane();
