@@ -107,6 +107,8 @@
 ⚠️ `done_toolbar` **只在"最后一个正文容器所在的消息块"内检查**（工具栏是逐条的，否则历史消息永远命中），
 且**隐藏（仅 hover 显示）不算** —— 否则"元素存在但没显示"会被误判成完成。
 
+**P2 设计**：[`OBSERVER_CAPTURE.md`](OBSERVER_CAPTURE.md)（事件驱动抓取，待 review）。
+
 **P2 参考**：`tests/chatgpt_stream.py`（CDP `Runtime.evaluate` 注入 + `MutationObserver(characterData)` + `expose_function` 推送 + 容器自动重绑）——
 它的"稳定 1.5s ∧ 无停止按钮"就等价于上表 3/4 的合取，差别是事件驱动让 `settled` 精确、窗口可以更短。
 
