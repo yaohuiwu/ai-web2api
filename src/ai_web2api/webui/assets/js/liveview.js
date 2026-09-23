@@ -287,7 +287,7 @@ window.LiveView = (function () {
     }
 
     function flashAt(clientX, clientY) {      // 落点反馈：映射/遮挡问题一眼可见
-      const r = body.getBoundingClientRect();
+      const r = img.getBoundingClientRect();
       const dot = el("div", "lv-dot");
       dot.style.left = `${clientX - r.left}px`;
       dot.style.top = `${clientY - r.top}px`;
@@ -309,13 +309,12 @@ window.LiveView = (function () {
       if (!start || !interactive) return;
       if (Math.abs(e.clientX - start.cx) > DRAG_THRESHOLD_PX || Math.abs(e.clientY - start.cy) > DRAG_THRESHOLD_PX) moved = true;
       if (moved) {
-        const r = img.getBoundingClientRect(), br = body.getBoundingClientRect();
-        guide.style.left = `${Math.min(start.cx, e.clientX) - br.left}px`;
-        guide.style.top = `${Math.min(start.cy, e.clientY) - br.top}px`;
+        const ir = img.getBoundingClientRect();
+        guide.style.left = `${Math.min(start.cx, e.clientX) - ir.left}px`;
+        guide.style.top = `${Math.min(start.cy, e.clientY) - ir.top}px`;
         guide.style.width = `${Math.abs(e.clientX - start.cx)}px`;
         guide.style.height = `${Math.abs(e.clientY - start.cy)}px`;
         guide.hidden = false;
-        void r;
       }
     });
     img.addEventListener("pointerup", async (e) => {
