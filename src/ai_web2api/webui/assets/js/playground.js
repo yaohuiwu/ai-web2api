@@ -739,7 +739,7 @@ function applyThreadModel(tid, model) {
 
 async function switchThread(tid, loaded = true, model = null) {
   applyThreadModel(tid, model);
-  if (streaming) return;
+  if (streaming) { addMeta("⛔ 生成中，请等待当前回复结束再切换会话"); return; }
   const el = $("#threadId");
   el.value = tid;
   el.dispatchEvent(new Event("input"));
