@@ -873,11 +873,14 @@ function applyLiveZoom() {
   if (!img) return false;
   const z = liveZoom();
   if (z === "fit") {
-    img.style.maxWidth = "100%"; img.style.maxHeight = "100%";
-    img.style.width = "auto"; img.style.height = "auto";
+    // 适应 = **按宽度铺满**（消掉左右黑边；纵向超出由面板滚动）
+    img.style.maxWidth = "none"; img.style.maxHeight = "none";
+    img.style.width = "100%"; img.style.height = "auto";
+    img.classList.add("fill");
   } else {
     img.style.maxWidth = "none"; img.style.maxHeight = "none";
     img.style.width = `${parseFloat(z) * 100}%`; img.style.height = "auto";
+    img.classList.remove("fill");
   }
   return z !== "fit";
 }
@@ -981,10 +984,15 @@ function syncLive() {
   $("#liveToggle").classList.toggle("primary", liveOn() && !!p);
   if (!liveOn() || !p || document.hidden) {
     pane.hidden = true;
+    const handle = $("#splitHandle");
+    if (handle) handle.hidden = true;
     stopLive();
     return;
   }
   pane.hidden = false;
+  const handle = $("#splitHandle");
+  if (handle) handle.hidden = false;
+  applyLiveWidth();
   const tid = liveThread();
   if (liveProviderShown !== p || liveThreadShown !== tid) {
     $("#liveTitle").textContent = `实时画面 · ${p}`;
@@ -1024,6 +1032,8 @@ function initLivePane() {
       toast("关闭失败：" + e.message);
     }
   };
+  initSplitHandle();
+
   // 模型/会话变化 → 画面跟着切（会话变化时钉到该会话页面）
   $("#model").addEventListener("change", () => syncLive());
   $("#liveZoom").addEventListener("change", () => {
@@ -1046,4 +1056,83 @@ function initLivePane() {
   if (zoomSel) zoomSel.value = liveZoom();
   loadProviderMap();
 }
+// ---------- 中缝拖拽：左右调整"对话 / 画面"宽度（双击复位，宽度记忆） ----------
+const LIVE_W_KEY = "aiw2api_live_width";
+
+function defaultLiveWidth() {
+  const split = $("#split");
+  return Math.round((split ? split.clientWidth : 1440) * 0.42);
+}
+
+function applyLiveWidth(w) {
+  const pane = $("#livePane"), split = $("#split");
+  if (!pane) return;
+  const saved = w != null ? w : parseInt(localStorage.getItem(LIVE_W_KEY) || "", 10);
+  if (!saved || !split) return;                      // 没设过就用 CSS 默认
+  const max = Math.max(260, split.clientWidth - 320);   // 左边至少留 320px 给对话
+  pane.style.width = `${Math.min(Math.max(260, saved), max)}px`;
+  pane.style.minWidth = "260px";
+  pane.style.maxWidth = "none";
+}
+
+function initSplitHandle() {
+  const handle = $("#splitHandle"), pane = $("#livePane"), split = $("#split");
+  if (!handle || !pane || !split) return;
+
+  let startX = 0, startW = 0, dragging = false;
+
+  const endDrag = (save) => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove("dragging");
+    // ⚠️ 一定要把 window 级监听摘干净：否则"拖拽后普通点击/移动"会被当成继续拖拽
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onCancel);
+    window.removeEventListener("blur", onCancel);
+    if (save) localStorage.setItem(LIVE_W_KEY, String(Math.round(pane.getBoundingClientRect().width)));
+  };
+  const onMove = (e) => {
+    if (!dragging) return;
+    if (e.buttons === 0) { endDrag(true); return; }        // 鼠标已在别处松开 → 立即结束
+    const max = Math.max(260, split.clientWidth - 320);
+    const next = Math.min(Math.max(260, startW - (e.clientX - startX)), max);
+    pane.style.width = `${next}px`;
+    pane.style.minWidth = "260px";
+    pane.style.maxWidth = "none";
+  };
+  const onUp = () => endDrag(true);
+  const onCancel = () => endDrag(true);                   // pointercancel / 窗口失焦
+
+  handle.addEventListener("pointerdown", (e) => {
+    if (pane.hidden) return;
+    dragging = true;
+    startX = e.clientX;
+    startW = pane.getBoundingClientRect().width;
+    handle.classList.add("dragging");
+    try { handle.setPointerCapture(e.pointerId); } catch (_) {}   // 保证一定收到 pointerup
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("blur", onCancel);
+    e.preventDefault();                                   // 拖拽时不要选中文本
+  });
+  handle.addEventListener("dblclick", () => {                 // 双击复位
+    endDrag(false);
+    localStorage.removeItem(LIVE_W_KEY);
+    pane.style.width = "";
+    pane.style.minWidth = "";
+    pane.style.maxWidth = "";
+    applyLiveWidth(defaultLiveWidth());
+  });
+  handle.addEventListener("keydown", (e) => {                 // ←/→ 微调 40px
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const cur = pane.getBoundingClientRect().width;
+    applyLiveWidth(cur + (e.key === "ArrowLeft" ? 40 : -40));
+    e.preventDefault();
+  });
+  applyLiveWidth();
+}
+
 initLivePane();
+

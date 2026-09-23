@@ -301,3 +301,46 @@ def test_live_pane_has_scope_and_zoom():
     assert "crop=full" in js, "画面一律整页"
     assert "applyLiveZoom" in js and "pinLiveBottom" in js
     assert "maxWidth" in js and "applyLiveZoom" in js
+
+
+def test_playground_has_resizable_splitter():
+    """中缝可拖拽：左右调整"对话/画面"宽度（双击复位、宽度记忆、窄屏隐藏）。"""
+    html = (WEBUI / "playground.html").read_text(encoding="utf-8")
+    css = (WEBUI / "assets/css/playground.css").read_text(encoding="utf-8")
+    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+
+    assert 'id="splitHandle"' in html and 'role="separator"' in html
+    assert "col-resize" in css and "#splitHandle" in css
+    assert "touch-action: none" in css, "触屏也要能拖（pointer events 需禁默认手势）"
+    assert "@media (max-width: 900px)" in css and "#splitHandle { display: none !important; }" in css
+    # 拖拽/记忆/复位/键盘
+    for token in ("pointermove", "pointerup", "setPointerCapture", "aiw2api_live_width",
+                  "dblclick", "ArrowLeft", "ArrowRight"):
+        assert token in js, f"缺少 {token}"
+    # 适应 = 按宽度铺满（消掉黑边）
+    assert "fill" in css and ".fill" in css
+    assert 'width = "100%"' in js or "width = '100%'" in js
+
+
+def test_splitter_constants_defined_before_init():
+    """守卫：`initLivePane()` 会同步调用分隔条逻辑，常量必须在它之前定义（否则 TDZ 报错）。
+
+    实测踩过：`const LIVE_W_KEY` 追加在文件末尾 → initLivePane() 里同步调用 applyLiveWidth()
+    → ReferenceError（Cannot access before initialization）→ 整个画面初始化中断（面板/分隔条都不显示）。
+    """
+    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+    init_at = js.index("initLivePane();")
+    for token in ("const LIVE_W_KEY", "function applyLiveWidth", "function initSplitHandle"):
+        at = js.index(token)
+        assert at < init_at, f"{token} 必须在 initLivePane() 之前（避免同步初始化时 TDZ）"
+
+
+def test_splitter_drag_cannot_leak_listeners():
+    """拖拽不能污染后续点击：必须处理 pointercancel/失焦/按键已松开，且用完摘掉 window 监听。
+
+    否则"鼠标在窗口外松开"会留下 window 级 pointermove → 之后的普通点击/移动被当成继续拖拽。
+    """
+    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+    for token in ("pointercancel", '"blur"', "e.buttons === 0", "removeEventListener(\"pointermove\"",
+                  "removeEventListener(\"pointerup\"", "setPointerCapture"):
+        assert token in js, f"缺少拖拽收尾处理：{token}"
