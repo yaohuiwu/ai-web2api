@@ -615,7 +615,9 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         page, _tid = await _live_page(name, focus)
         return page
 
-    live = LiveController(_live_resolve, busy_checker=_live_busy)
+    live = LiveController(
+        _live_resolve, busy_checker=_live_busy, config=getattr(registry, "config", None)
+    )
 
     def _live_disabled():
         return JSONResponse(

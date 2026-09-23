@@ -16,7 +16,8 @@ server:
   # ⚠ 接口无鉴权：同网段可见你已登录的浏览器；对外暴露请自行加反代鉴权（见 docs/LIVE_VIEW.md §5.4）
   live_view: true          # 总开关；false = 直播接口一律 403
   live_control: false      # 预留：输入注入（P2），默认关
-  live_fps: 5              # 默认帧率（生成中自动降到 1，避免抢占自动化）
+  live_fps: 5              # 默认帧率
+  live_busy_fps: 2         # 生成中帧率上限（避免抢占自动化；写死 1 太顿）
   live_crop: ""             # ""=整页；“last”=只裁最后一条回复（Playground 会显式传 crop=last）
   live_quality: 75         # 默认 JPEG 质量（50 时字迹发糊；75 明显更清楚）
 browser:

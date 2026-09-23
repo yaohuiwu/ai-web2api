@@ -272,3 +272,42 @@ stream.mjpg  HTTP 200 multipart/x-mixed-replace  3 秒 13 帧（≈4.3fps，目�
 
 **裁剪实现**：`crop_box_for_last()` → 取最后一个正文容器的 `bounding_box()`，四周留 `crop_padding`(28px)，
 **底部对齐**（长回答优先显示最新写出的部分），失败回退整页（拿不到元素/页面在动的那一帧）。
+
+## 帧来源：改用 Playwright `page.screencast`（CDP 按需推帧）
+
+**当前实现**：优先用 Playwright 1.59+ 的 `page.screencast.start(on_frame=…)`（CDP `Page.startScreencast`）
+作为帧来源——**页面重绘才推帧**；不可用/启动失败 → 自动回退原有"定时 `page.screenshot()`"循环。
+
+| | 定时截图（旧） | **screencast（现）** |
+|---|---|---|
+| 帧节奏 | 每 `live_fps` 一次（页面不动也截） | **按需**：页面重绘才推 |
+| 空闲成本 | 每帧 ~38ms → 5fps ≈ **19% 单核**（持续） | **≈0**（实测 5s 内页面安静后不再推帧） |
+| 实测流量 | **1.24 MB/s**（q75/整页/2x） | 活跃+空闲混合 **≈0.13 MB/s**；空闲≈0 |
+| 帧元数据 | 无 | `timestamp` / `viewportWidth·Height` |
+| 分辨率 | `device_scale_factor` 生效（2x，更锐） | **上限 1x CSS 像素**（实测请求 5760×3600 仍给 1440×900） |
+| 代码 | 自建循环 + 忙时降帧 | 官方封装（~40 行接入） |
+
+⚠️ **清晰度取舍**：screencast 帧是 1x（比之前的 2x 略软）。**先用这套看效果**；
+若觉得不够锐，可改成"**screencast 当变化信号 + 变化时用 2x 截图出帧**"的混合模式（帧数受 `live_fps` 限制）。
+
+实测观感（200% 缩放，deepseek）：![screencast 200%](assets/live-screencast-200.png)
+
+**其它细节**
+- CDP 默认只给 **800×500** → 必须显式传 `size=视口`（已做），否则画面会变小；
+- 遇到 `Screencast is already started`（多为上次采集异常结束的残留）→ **先 `stop()` 再重试一次**；
+- 观众全部离开 → `stop()` 释放 CDP 订阅（避免泄漏）；
+- 生成中帧率上限改为可配 **`server.live_busy_fps`（默认 2）**——原先写死 1fps 太顿。
+
+## 要不要上 WebSocket 转发层？——**不需要**（现阶段）
+
+现状：传输是 **MJPEG multipart → `<img src>`**（零 JS、天然背压、多观众扇出、纯 HTTP），
+输入走**独立 POST**（`drag` 是一次请求内插值，不需要高频双向通道）。以下情形才值得引入 WS：
+
+| 触发条件 | 说明 |
+|---|---|
+| 需要**同通道双向**高频交互 | 例如每 `mousemove` 都发（画板式标注）、或输入延迟要求 <100ms 的场景 |
+| 需要**逐帧 ack / 自适应码率** | MJPEG 无法回传"我收到第几帧了" |
+| 单连接**多路复用** | HTTP/1.1 每域 6 连接；我们每位观众只占 2 条（画面 + 状态轮询），远未触顶 |
+| 移动端 / 反代兼容性 | 某些代理会切断 multipart 长连接时 |
+
+结论：**保留 MJPEG**；真要上 WS，优先用于"输入事件通道"，而不是为了传帧。

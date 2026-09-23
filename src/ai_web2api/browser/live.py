@@ -4,7 +4,12 @@
 要点：
 - 不主动创建 context/page —— 没在用的 provider 不会被"看一眼"把浏览器拉起来；
 - 每 provider 一个采集循环，多观众共享同一帧（扇出），无人观看自动停；
-- 有请求在跑时自动降帧，避免抢占自动化的 CPU。
+- 有请求在跑时自动降帧（``live_busy_fps``），避免抢占自动化的 CPU。
+
+**帧来源**：直接用 Playwright 的 ``page.screencast``（CDP ``Page.startScreencast``）——
+页面重绘才推帧，空闲几乎零成本（对照：定时截图 5fps ≈ 19% 单核，页面不动也烧）。
+screencast 不可用/启动失败 → 自动回退原有定时截图循环。
+注意：CDP 默认只给 800×500，必须显式传 ``size=视口``，否则画面会变小。
 """
 
 from __future__ import annotations
@@ -157,6 +162,8 @@ class _Stream:
         self.last_frame: float | None = None
         self.error: str | None = None
         self.frames = 0
+        self.source: str = "timer"          # timer | screencast（诊断用，state 里可见）
+        self.cast_q: asyncio.Queue = asyncio.Queue(maxsize=1)   # screencast 推来的帧（只留最新）
 
     @property
     def running(self) -> bool:
@@ -191,10 +198,12 @@ class LiveController:
         *,
         busy_checker: BusyChecker | None = None,
         grace: float = 5.0,
+        config=None,
     ) -> None:
         self._resolve = page_resolver
         self._busy = busy_checker or (lambda _p: False)
         self._grace = grace
+        self._cfg = config
         self._streams: dict[str, _Stream] = {}
 
     # ---------- 单帧 ----------
@@ -252,30 +261,106 @@ class LiveController:
             st.stop()
             logger.info("live: 停止采集 provider=%s（宽限 %.0fs 内无观众）", st.provider, self._grace)
 
+    def _fps_for(self, st: _Stream) -> float:
+        """忙时降帧（避免抢占自动化）。"""
+        busy_fps = getattr(self._cfg, "live_busy_fps", 2.0) if self._cfg is not None else 2.0
+        return min(st.opts.fps, busy_fps) if self._busy(st.provider) else st.opts.fps
+
+    async def _start_cast(self, page: Page, st: _Stream) -> bool:
+        """启动 screencast（帧直接进队列）；失败 → False（回退定时截图）。"""
+        try:
+            vp = page.viewport_size or {}
+            size = {"width": int(vp.get("width", 1440)), "height": int(vp.get("height", 900))}
+
+            def on_frame(frame) -> None:
+                data = frame.get("data") if isinstance(frame, dict) else getattr(frame, "data", None)
+                if not data:
+                    return
+                if st.cast_q.full():                    # 只留最新帧（慢消费者不堆积）
+                    try:
+                        st.cast_q.get_nowait()
+                    except asyncio.QueueEmpty:  # pragma: no cover
+                        pass
+                try:
+                    st.cast_q.put_nowait(data)
+                except asyncio.QueueFull:  # pragma: no cover
+                    pass
+
+            try:
+                await page.screencast.start(on_frame=on_frame, quality=st.opts.quality, size=size)
+            except Exception as exc:  # noqa: BLE001
+                # "Screencast is already started"：多为上一次采集异常结束留下的残留
+                # → 先 stop() 再重试一次（否则只能回退到定时截帧）
+                if "already started" not in str(exc).lower():
+                    raise
+                logger.info("live: 清理残留 screencast 后重试 provider=%s", st.provider)
+                try:
+                    await page.screencast.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+                await page.screencast.start(on_frame=on_frame, quality=st.opts.quality, size=size)
+            st.source = "screencast"
+            st.last_frame = time.monotonic()
+            st.frames += 1
+            logger.info("live: 改用 screencast provider=%s（按需推帧）", st.provider)
+            return True
+        except Exception as exc:  # noqa: BLE001  旧版 Playwright / CDP 不支持 → 回退
+            logger.info("live: screencast 不可用（%s），回退定时截图 provider=%s", exc, st.provider)
+            return False
+
     async def _run(self, st: _Stream) -> None:
+        page: Page | None = None
+        use_cast = False
         try:
             while st.queues:
-                fps = min(st.opts.fps, 1.0) if self._busy(st.provider) else st.opts.fps
-                try:
-                    page = await self._resolve(st.provider, st.focus)
-                    if page is None:
-                        st.error = "没有可截图的页面"
-                        break
-                    frame = await capture(page, st.opts)
+                page = await self._resolve(st.provider, st.focus)
+                if page is None:
+                    st.error = "没有可截图的页面"
+                    break
+                if not use_cast:
+                    use_cast = await self._start_cast(page, st)
+                    if use_cast:
+                        # 先推一帧（CDP 首帧可能还没来；保证 <img> 立刻有画面）
+                        try:
+                            st.push(await capture(page, st.opts))
+                        except Exception:  # noqa: BLE001
+                            pass
+
+                if use_cast:
+                    try:
+                        frame = await asyncio.wait_for(st.cast_q.get(), timeout=3.0)
+                    except asyncio.TimeoutError:
+                        continue                          # 空闲：等下一次重绘（不截帧，几乎零成本）
+                    fps = self._fps_for(st)
+                    gap = time.monotonic() - (st.last_frame or 0.0)
+                    if gap < 1.0 / fps:                   # 重绘太密 → 按 fps 节流
+                        await asyncio.sleep(1.0 / fps - gap)
                     st.last_frame = time.monotonic()
                     st.frames += 1
                     st.error = None
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:  # noqa: BLE001
-                    st.error = str(exc)[:200]
-                    logger.info("live: 截帧失败 provider=%s: %s", st.provider, exc)
-                    break
-                st.push(frame)
-                await asyncio.sleep(1.0 / fps)
+                    st.push(frame)
+                else:
+                    # 回退：与旧实现一致的定时截帧
+                    try:
+                        st.push(await capture(page, st.opts))
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001
+                        st.error = str(exc)[:200]
+                        logger.info("live: 截帧失败 provider=%s: %s", st.provider, exc)
+                        break
+                    st.last_frame = time.monotonic()
+                    st.frames += 1
+                    st.error = None
+                    await asyncio.sleep(1.0 / self._fps_for(st))
         except asyncio.CancelledError:
             pass
         finally:
+            if use_cast and page is not None:
+                try:
+                    await page.screencast.stop()
+                except Exception:  # noqa: BLE001
+                    pass
             st.push(None)  # 通知观众结束
             st.task = None
 
@@ -293,6 +378,7 @@ class LiveController:
             "fps": st.opts.fps,
             "quality": st.opts.quality,
             "last_frame_ago": None if st.last_frame is None else round(time.monotonic() - st.last_frame, 2),
+            "source": st.source,
             "error": st.error,
         }
 
