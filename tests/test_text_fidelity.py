@@ -132,8 +132,13 @@ async def _read_page(provider: str, url: str) -> tuple[str, str]:
             opts["storage_state"] = str(state)
         ctx = await browser.new_context(**opts)
         page = await ctx.new_page()
-        await page.goto(url, wait_until="domcontentloaded", timeout=40000)
-        await page.wait_for_timeout(10000)
+        try:
+            # 站点偶尔很慢/被限流：读参考页面失败属于"环境不可用"，跳过而不是判失败
+            await page.goto(url, wait_until="domcontentloaded", timeout=40000)
+            await page.wait_for_timeout(10000)
+        except Exception as e:  # noqa: BLE001
+            await browser.close()
+            pytest.skip(f"{provider} 参考页面读取失败（站点慢/限流）：{type(e).__name__}")
         ref = await page.evaluate(
             "(sel) => { const n = document.querySelectorAll(sel); const el = n[n.length-1];"
             " return el ? (el.innerText || el.textContent || '') : ''; }",

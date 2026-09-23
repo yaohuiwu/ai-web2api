@@ -201,6 +201,8 @@ providers:
   chatgpt:
     driver: chatgpt
     url: https://chatgpt.com/
+    # 事件驱动抓取（试点）：DOM 一变化就唤醒提取；注入失败/无事件自动回退轮询
+    capture_mode: observer
     locale: en-US               # ChatGPT 默认英文 UI，选择器用英文 aria-label
     session_url: "{base}/c/{id}"  # 会话 URL: chatgpt.com/c/<uuid>
     models:

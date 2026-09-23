@@ -215,6 +215,12 @@ class ProviderConfig(BaseModel):
     # 重发一次并快速失败（0 = 关闭）。避免被静默丢弃时死等满 response_timeout。
     send_confirm_timeout: float = 20.0
     poll_interval: float = 0.2
+    # 抓取模式：poll（默认，定时轮询）| observer（**事件驱动**：页面 DOM 一变化就唤醒提取，
+    # 并自动重绑到最新的回复容器；任何异常/超时都回退 poll，行为与今天一致）
+    capture_mode: str = "poll"
+    observer_debounce_ms: int = 100      # 页面侧节流：同一帧内的多次变化合并成一次唤醒
+    observer_min_interval_ms: int = 150  # 最小提取间隔：重渲染风暴时也不至于疯狂提取
+    observer_grace_seconds: float = 8.0  # 这么久无事件且无正文 → 判定注入失效 → 回退 poll
     stable_polls: int = 12          # 连续多少次轮询无变化判定"结束"（稳定兜底）
     min_wait_before_stable: float = 8.0  # 稳定判定生效前的最短等待（防思考→正文间隙误判）
     thread_busy_timeout: float = 20.0  # resume 时发送后无新容器即判定页面忙（上一请求未完成）

@@ -100,6 +100,14 @@ class WebChatProvider(BaseProvider):
     NET_GLOBAL = "__aiw2a_sse"
     NET_GLOBAL_DONE = "__aiw2a_sse_done"
 
+    # 事件驱动抓取（capture_mode=observer）状态：类级默认 + 每轮在 generate() 里复位。
+    # 世代号**只增不减**（跨请求不复位）→ 上一轮的残留事件一定被过滤掉。
+    _obs_gen = 0
+    _obs_wake = None            # None = 未启用/已回退（此时按 poll 定时等待）
+    _obs_last_tick = 0.0
+    _obs_started_at = 0.0       # 启用时刻（用于判定"一直没事件"）
+    _obs_reinjected = False     # 静默失效时只重注入一次
+
     # mode → 开关组合（页面无模式选择区时的翻译表；子类按需覆盖）
     MODE_PRESETS: dict[str, dict[str, bool]] = {}
 
@@ -134,6 +142,7 @@ class WebChatProvider(BaseProvider):
         # 通用时间线：定位"慢在哪"（页面就绪/已送达/思考首字/正文首字/正文不再变/我们判定结束/收尾）
         tl = RequestTimeline(provider=self.name, model=model, thread=thread_mode or "stateless")
         self._tl = tl
+        self._reset_request_state()   # 本轮复位（组件/事件驱动）→ 之后 _start_observer 再打开
         resume = thread_mode == "resume"
         # resume 专属：页面可能仍在生成上一请求（生成中输入=排队），
         # 发送后若迟迟无新容器 → 判定页面忙，抛 ThreadBusyError 销毁重建
@@ -204,8 +213,8 @@ class WebChatProvider(BaseProvider):
                     )
             logger.info("[%s] prompt sent, polling", self.name)
             tl.mark("send", overwrite=False)
+            await self._start_observer(page)   # 仅 capture_mode=observer 时生效；失败自动回退
 
-            self._widgets = []                                    # 每轮重置组件捕获
             frames_before = {f.url for f in page.frames if f.url}
             async for chunk in self._poll_response(
                 page, md_before, th_before, busy_timeout,
@@ -221,6 +230,7 @@ class WebChatProvider(BaseProvider):
                 yield chunk
         finally:
             tl.mark("final")
+            self._obs_wake = None              # 本轮结束：不再接受唤醒（世代号也会兜底）
             if self.net_observe:
                 tl.note("net", self._net_summary())
             tl.log()
@@ -1180,7 +1190,11 @@ XMLHttpRequest.prototype.send = function (body) {{
             th_sel = await self._find_new(page, th_before)
             if md_sel or th_sel:
                 break
-            await page.wait_for_timeout(poll_ms)
+            # 事件驱动：这么久还没事件也没回复容器 → 注入可能失效 → 回退轮询（行为与今天一致）
+            grace = float(getattr(self.cfg, "observer_grace_seconds", 8.0) or 0)
+            if self._obs_wake is not None and grace and elapsed > grace:
+                self._stop_observer(reason=f"{grace:.0f}s 内无事件、无回复容器")
+            await self._wait_tick(page, poll_ms)
         md_idx = md_before.get(md_sel) if md_sel else None
         th_idx = th_before.get(th_sel) if th_sel else None
 
@@ -1338,7 +1352,145 @@ XMLHttpRequest.prototype.send = function (body) {{
                             sent[kind] = last[kind]
                             yield StreamChunk(kind, inc)  # type: ignore[arg-type]
 
+            await self._wait_tick(page, poll_ms)
+
+    # ---------- 事件驱动抓取（capture_mode=observer） ----------
+    #
+    # 只替换"等待下一拍"这一件事：poll 模式定时等，observer 模式等页面推送的变化事件
+    # （超时仍按 poll_interval 兜底，因为结束判定/稳定性计数需要周期性检查）。
+    # 提取 / diff / 预览流 / 结束判定 / 收尾 **全部复用原逻辑**。
+
+    OBSERVER_JS = """
+    (args) => {
+      const [respSels, debounceMs, gen] = args;
+      if (window.__aiw2aObs) { try { window.__aiw2aObs.disconnect(); } catch (e) {} }
+      window.__aiw2aGen = gen;
+      const findLatest = () => {
+        for (const s of respSels) {
+          try { const n = document.querySelectorAll(s); if (n.length) return n[n.length - 1]; } catch (e) {}
+        }
+        return null;
+      };
+      let container = null, last = 0;
+      const ping = () => {
+        if (typeof window.__aiw2aPush === 'function') {
+          try { window.__aiw2aPush({ gen: window.__aiw2aGen }); } catch (e) {}
+        }
+      };
+      const obs = new MutationObserver((mutations) => {
+        const c = findLatest();
+        if (c && c !== container) container = c;      // ← 容器自动重绑
+        if (!container) return;
+        let relevant = false;
+        for (const m of mutations) {
+          const t = m.target;
+          if (t && (t === container || container.contains(t))) { relevant = true; break; }
+        }
+        if (!relevant) return;                        // 只关心"当前回复容器"内的变化
+        const now = performance.now();
+        if (now - last < debounceMs) return;          // 首帧立即唤醒，之后最快每 debounce 一次
+        last = now;
+        ping();
+      });
+      obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+      window.__aiw2aObs = obs;
+      return 'ok';
+    }
+    """
+
+    def _reset_request_state(self) -> None:
+        """每轮开始时复位请求级状态。
+
+        ⚠️ 顺序很关键：必须在 :meth:`_start_observer` **之前**调用，
+        否则会把刚装好的事件驱动唤醒器清掉（实测踩过：capture=observer 但一个事件都没到）。
+        """
+        self._widgets = []          # 组件捕获
+        self._obs_wake = None       # 事件驱动唤醒（由 _start_observer 打开）
+        self._obs_reinjected = False
+
+    async def _start_observer(self, page: Page) -> bool:
+        """安装事件驱动观察器；成功返回 True（任何失败都自动回退轮询）。"""
+        if self.cfg.capture_mode != "observer":
+            return False
+        type(self)._obs_gen += 1
+        self._obs_gen = type(self)._obs_gen
+        self._obs_wake = asyncio.Event()
+        self._obs_last_tick = time.monotonic()
+        self._obs_started_at = time.monotonic()
+        self._tl_note("capture", "observer")
+        try:
+            try:
+                await page.expose_function("__aiw2aPush", self._on_obs_event)
+            except Exception:  # noqa: BLE001  同名只能注册一次 → 已注册就继续
+                pass
+            await page.evaluate(
+                self.OBSERVER_JS,
+                [list(self.cfg.selectors.response_container or []),
+                 int(self.cfg.observer_debounce_ms), self._obs_gen],
+            )
+        except Exception as e:  # noqa: BLE001
+            self._stop_observer(reason=f"注入失败：{e}")
+            return False
+        logger.info("[%s] 事件驱动抓取已启用（gen=%d）", self.name, self._obs_gen)
+        return True
+
+    def _on_obs_event(self, data: dict | None) -> None:
+        """页面 → Python 唤醒回调（只接受当前世代的事件）。"""
+        wake = getattr(self, "_obs_wake", None)
+        if wake is None:
+            return
+        if data and data.get("gen") not in (None, self._obs_gen):
+            return                                        # 上一轮残留事件
+        self._tl_count("events")
+        wake.set()
+
+    def _tl_events(self) -> int:
+        tl = self._tl_get()
+        return int(tl.counts.get("events", 0)) if tl is not None else 0
+
+    def _stop_observer(self, reason: str = "") -> None:
+        """关闭事件驱动 → 回退定时轮询（``_wait_tick`` 自动改行为）。"""
+        if getattr(self, "_obs_wake", None) is not None:
+            self._tl_note("observer_fallback", 1)
+            self._tl_note("capture", "observer→poll")
+            logger.warning("[%s] 事件驱动不可用，回退轮询：%s", self.name, reason or "未说明")
+        self._obs_wake = None
+
+    async def _wait_tick(self, page: Page, poll_ms: int) -> None:
+        """等"下一拍"：poll 模式定时等；observer 模式等页面事件（超时兜底）。"""
+        wake = getattr(self, "_obs_wake", None)
+        if wake is None:
             await page.wait_for_timeout(poll_ms)
+            return
+        woken = True
+        try:
+            await asyncio.wait_for(wake.wait(), timeout=poll_ms / 1000)
+        except asyncio.TimeoutError:
+            woken = False
+        finally:
+            wake.clear()
+        # 度量：这一拍是"页面变化唤醒的"还是"定时兜底的"（比"提取次数"更能说明 observer 做了什么）
+        self._tl_count("wakes" if woken else "idle_ticks")
+        # 静默失效检测：启用后一直没有任何事件（注入失效/容器选择器不匹配/页面被替换）
+        # → 先重注入一次（gen 递增），仍无事件则回退轮询并把 capture 标成 observer→poll。
+        grace = float(getattr(self.cfg, "observer_grace_seconds", 8.0) or 0)
+        if (
+            getattr(self, "_obs_wake", None) is not None
+            and grace
+            and self._tl_events() == 0
+            and time.monotonic() - self._obs_started_at > grace
+        ):
+            if not getattr(self, "_obs_reinjected", False):
+                self._obs_reinjected = True
+                logger.warning("[%s] 事件驱动启用 %.0fs 无任何事件 → 重新注入一次", self.name, grace)
+                await self._start_observer(page)
+            else:
+                self._stop_observer(reason=f"启用后始终无事件（>{grace:.0f}s）")
+        gap = time.monotonic() - self._obs_last_tick
+        min_gap = (getattr(self.cfg, "observer_min_interval_ms", 150) or 0) / 1000
+        if min_gap > gap:
+            await asyncio.sleep(min_gap - gap)            # 重渲染风暴也要限速
+        self._obs_last_tick = time.monotonic()
 
     # ---------- 时间线打点（无时间线时全部 no-op，单元测试可直接调轮询） ----------
 
