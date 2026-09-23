@@ -879,52 +879,14 @@ if (qsThread) {
   })();
 }
 
-// ---------- 实时画面（右栏，只读直播）：边聊边对，便于定位"是不是站点侧慢" ----------
-// 设计复用"画面"页（docs/LIVE_VIEW.md）：MJPEG <img> + 状态轮询；只在面板可见时才开流。
-let PROVIDER_MAP = {};        // 模型名 → provider（来自 /admin/status）
-let liveStateTimer = null;
-let liveProviderShown = null;
-let liveThreadShown = null;
+// ---------- 实时画面（右栏）：共用组件 assets/js/liveview.js ----------
+// 组件负责：MJPEG + 状态轮询 + 缩放 + 交互（点击/拖拽/输入）+ 关遮挡 + 断线退避。
+// 这里只做"接线"：模型 → provider 映射、开关记忆、与中缝拖拽的联动。
+let PROVIDER_MAP = {};          // 模型名 → provider（来自 /admin/status）
+let liveControlAllowed = null;  // 服务端是否允许画面交互（false → 组件隐藏交互入口）
+let liveView = null;
 
 const liveOn = () => localStorage.getItem("aiw2api_live") !== "0";
-const liveThread = () => $("#threadId").value.trim();
-const liveProvider = () => PROVIDER_MAP[$("#model").value] || null;
-
-const liveZoom = () => localStorage.getItem("aiw2api_live_zoom") || "fit";   // 画面一律**整页**
-
-function liveStreamUrl(p, tid) {
-  const t = tid ? `thread_id=${encodeURIComponent(tid)}&` : "";
-  return `/admin/${encodeURIComponent(p)}/stream.mjpg?${t}crop=full&t=${Date.now()}`;
-}
-
-// 缩放：fit = 整幅可见；否则按百分比显示（可滚动）。CSS 像素不变、截图 2x → 放大后字很锐利。
-function applyLiveZoom() {
-  const img = $("#live");
-  if (!img) return false;
-  const z = liveZoom();
-  if (z === "fit") {
-    // 适应 = **按宽度铺满**（消掉左右黑边；纵向超出由面板滚动）
-    img.style.maxWidth = "none"; img.style.maxHeight = "none";
-    img.style.width = "100%"; img.style.height = "auto";
-    img.classList.add("fill");
-  } else {
-    img.style.maxWidth = "none"; img.style.maxHeight = "none";
-    img.style.width = `${parseFloat(z) * 100}%`; img.style.height = "auto";
-    img.classList.remove("fill");
-  }
-  return z !== "fit";
-}
-
-let liveUserScrolledUp = 0;
-function pinLiveBottom() {
-  const body = document.querySelector(".live-body");
-  if (!body || !applyLiveZoom()) return;
-  if (Date.now() - liveUserScrolledUp < 6000) return;    // 用户刚手动滚动过 → 不抢
-  body.scrollTop = body.scrollHeight;                     // 跟随生成：始终看最新内容
-}
-function liveStateUrl(p, tid) {
-  return `/admin/${encodeURIComponent(p)}/screen/state${tid ? `?thread_id=${encodeURIComponent(tid)}` : ""}`;
-}
 
 async function loadProviderMap() {
   try {
@@ -938,347 +900,37 @@ async function loadProviderMap() {
     console.warn("loadProviderMap failed:", e);
     PROVIDER_MAP = {};
   }
-  syncLive();
-}
-
-let liveAvailable = null;          // 该 provider 当前是否有打开的页面（无页面 → 503）
-let liveViewport = null;           // 页面 CSS 视口（来自 /screen/state）→ 坐标换算
-let liveInteractive = false;       // 交互模式（默认关；需 server.live_control: true）
-let liveControlAllowed = null;     // 服务端是否允许交互（/admin/status）
-let liveRetryTimer = null;
-
-function showLiveHint(msg) {
-  // ⚠️ 不删 <img>：删了会在下次状态轮询时重建 → 断开/重连循环（实测把画面刷断）
-  const body = document.querySelector(".live-body");
-  if (!body) return;
-  let hint = body.querySelector(".live-off");
-  if (!hint) {
-    hint = document.createElement("div");
-    hint.className = "live-off";
-    body.appendChild(hint);
-  }
-  hint.textContent = msg;
-  const img = $("#live");
-  if (img) { img.removeAttribute("src"); img.hidden = true; }
-  liveAvailable = false;
-}
-
-function openLiveStream(p, tid) {
-  const body = document.querySelector(".live-body");
-  if (!body) return;
-  const hint = body.querySelector(".live-off");
-  if (hint) hint.remove();                 // 有画面了就把提示去掉（img 元素始终保留）
-  if (!$("#live")) body.insertAdjacentHTML("afterbegin", '<img id="live" alt="实时画面（只读）" hidden>');
-  const img = $("#live");
-  img.hidden = false;
-  img.onerror = () => {                 // 流被拒（多为"没有打开的页面"）→ 提示 + 稍后重试
-    showLiveHint("画面暂不可用（该 provider 当前没有打开的页面）—— 发一条消息后会自动出现");
-    scheduleLiveRetry();
-  };
-  img.src = liveStreamUrl(p, tid);
-  applyLiveZoom();
-  liveProviderShown = p;
-  liveThreadShown = tid;
-}
-
-function stopLive() {
-  const img = $("#live");
-  if (img) { img.removeAttribute("src"); img.hidden = true; img.onerror = null; }
-  if (liveStateTimer) { clearInterval(liveStateTimer); liveStateTimer = null; }
-  if (liveRetryTimer) { clearTimeout(liveRetryTimer); liveRetryTimer = null; }
-  liveProviderShown = liveThreadShown = null;
-}
-
-let liveFailStreak = 0;
-function scheduleLiveRetry() {
-  if (liveRetryTimer) return;
-  liveFailStreak = Math.min(liveFailStreak + 1, 5);
-  const delay = Math.min(3000 * liveFailStreak, 15000);   // 3s→6s→9s…最多 15s（退避，别疯狂重开）
-  liveRetryTimer = setTimeout(() => {
-    liveRetryTimer = null;
-    liveProviderShown = null;
-    syncLive();
-  }, delay);
-  $("#liveMeta").textContent = `画面重建中…（${Math.round(delay / 1000)}s 后重试）`;
-}
-
-async function pollLiveState(p, tid) {
-  try {
-    const st = await (await fetch(liveStateUrl(p, tid))).json();
-    const bits = [];
-    if (st.shown_thread_id) bits.push(`会话 ${st.shown_thread_id}`);
-    if (st.viewers != null) bits.push(`观众 ${st.viewers}`);
-    if (st.busy) bits.push("生成中");
-    if (st.fps) bits.push(`${st.fps}fps`);
-    if (st.last_frame_ago != null) bits.push(`帧龄 ${Number(st.last_frame_ago).toFixed(1)}s`);
-    if (st.page_url) bits.push(String(st.page_url).replace(/^https?:\/\/[^/]+/, ""));
-    $("#liveMeta").textContent = bits.join(" · ") || "—";
-    liveAvailable = !!st.available;
-    liveViewport = st.viewport || liveViewport;
-    if (!st.available) {
-      // 没有打开的页面：不发流（省资源），给出可行动提示；页面一出现（发消息后）自动恢复
-      if ($("#live")) { const img = $("#live"); img.removeAttribute("src"); img.hidden = true; }
-      showLiveHint("暂无打开的页面 —— 在该 provider 上发一条消息，画面会自动出现");
-    } else if ($("#live")?.hidden || liveFailStreak > 0) {
-      if (liveRetryTimer) { clearTimeout(liveRetryTimer); liveRetryTimer = null; }
-      liveFailStreak = 0;
-      openLiveStream(p, tid);
-    }
-  } catch (e) {
-    $("#liveMeta").textContent = "状态不可用";
+  if (liveView) {
+    liveView.setControlAllowed(liveControlAllowed);
+    liveView.refresh();
   }
 }
 
-// 同步画面：模型/thread_id/开关/可见性变化时重开流
-function syncLive() {
-  const pane = $("#livePane");
-  if (!pane) return;
-  const p = liveProvider();
-  $("#liveToggle").classList.toggle("primary", liveOn() && !!p);
-  if (!liveOn() || !p || document.hidden) {
-    pane.hidden = true;
-    const handle = $("#splitHandle");
-    if (handle) handle.hidden = true;
-    stopLive();
-    return;
-  }
-  pane.hidden = false;
-  const ctrlBtn = $("#liveCtrl");
-  if (ctrlBtn) {
-    ctrlBtn.classList.toggle("active", ctrlOn());
-    ctrlBtn.hidden = liveControlAllowed === false;      // 服务端 live_control=false → 直接藏起来
-  }
-  const handle = $("#splitHandle");
-  if (handle) handle.hidden = false;
-  applyLiveWidth();
-  const tid = liveThread();
-  if (liveProviderShown !== p || liveThreadShown !== tid) {
-    $("#liveTitle").textContent = `实时画面 · ${p}`;
-    openLiveStream(p, tid);             // 可能 503 → onerror 会给提示并自动重试
-  }
-  if (!liveStateTimer) {
-    pollLiveState(p, tid);
-    liveStateTimer = setInterval(() => {
-      if (document.hidden || !liveProvider()) return;
-      pollLiveState(liveProvider(), liveThread());
-    }, 2500);
-  }
+function setLiveOn(on) {
+  localStorage.setItem("aiw2api_live", on ? "1" : "0");
+  $("#liveToggle").classList.toggle("primary", on);
+  if (liveView) liveView.setEnabled(on);
+  syncSplitHandle(on);
 }
 
 function initLivePane() {
-  const toggle = $("#liveToggle");
-  if (!toggle) return;
-  toggle.onclick = () => {
-    localStorage.setItem("aiw2api_live", liveOn() ? "0" : "1");
-    const pane = $("#livePane");
-    if (!liveOn()) { pane.hidden = true; stopLive(); }
-    syncLive();
-  };
-  $("#liveClose").onclick = () => {
-    localStorage.setItem("aiw2api_live", "0");
-    $("#livePane").hidden = true;
-    stopLive();
-    syncLive();
-  };
-  $("#liveDismiss").onclick = async () => {
-    const p = liveProvider();
-    if (!p) return;
-    try {
-      await fetch(`/admin/${encodeURIComponent(p)}/dismiss`, { method: "POST" });
-      toast("已尝试关闭页面遮挡");
-    } catch (e) {
-      toast("关闭失败：" + e.message);
-    }
-  };
-  initSplitHandle();
-
-  // 模型/会话变化 → 画面跟着切（会话变化时钉到该会话页面）
-  $("#model").addEventListener("change", () => syncLive());
-  $("#liveZoom").addEventListener("change", () => {
-    localStorage.setItem("aiw2api_live_zoom", $("#liveZoom").value);
-    applyLiveZoom();
-    pinLiveBottom();
+  const pane = $("#livePane");
+  if (!pane || !window.LiveView) return;
+  liveView = window.LiveView.create({
+    pane: pane,
+    getProvider: () => PROVIDER_MAP[$("#model").value] || null,
+    getThreadId: () => $("#threadId").value.trim(),
+    onClose: () => setLiveOn(false),          // ✕ 收起（等价于顶部「▥ 画面」）
   });
-  const liveBody = document.querySelector(".live-body");
-  if (liveBody) liveBody.addEventListener("scroll", () => {
-    const atBottom = liveBody.scrollHeight - liveBody.scrollTop - liveBody.clientHeight < 24;
-    if (!atBottom) liveUserScrolledUp = Date.now();
+  $("#liveToggle").onclick = () => setLiveOn(!liveOn());
+  $("#model").addEventListener("change", () => liveView && liveView.refresh());
+  $("#threadId").addEventListener("input", () => liveView && liveView.refresh());
+  loadProviderMap().then(() => {
+    liveView.setEnabled(liveOn());
+    $("#liveToggle").classList.toggle("primary", liveOn());
+    syncSplitHandle(liveOn());
   });
-  setInterval(pinLiveBottom, 1000);           // 跟随生成（放大时自动滚到底）
-  $("#threadId").addEventListener("input", () => {
-    liveThreadShown = null;          // 强制重开流（?thread_id= 变化）
-    syncLive();
-  });
-  document.addEventListener("visibilitychange", () => syncLive());
-  const zoomSel = $("#liveZoom");
-  if (zoomSel) zoomSel.value = liveZoom();
-  loadProviderMap();
 }
-// ---------- 画面交互（control）：点击 / 拖拽 / 输入 / 滚轮（默认关） ----------
-// 坐标换算：只认**图片像素 → 页面 CSS 像素**（比例换算，与 device_scale_factor 无关）。
-// 反复强调的两条防护：① 位移 >4px 才算拖拽（否则手抖会把"点击"变成拖拽）；
-// ② 「重置输入」发 up + Esc（万一某次拖拽没松开，避免后续点击全乱）。
-const CTRL_KEY = "aiw2api_live_ctrl";
-const DRAG_THRESHOLD_PX = 4;
-
-function ctrlOn() { return localStorage.getItem(CTRL_KEY) === "1"; }
-
-function livePagePoint(ev) {
-  const img = $("#live");
-  if (!img || !img.clientWidth) return null;
-  const r = img.getBoundingClientRect();
-  const vw = (liveViewport && liveViewport.width) || img.naturalWidth || 1440;
-  const vh = (liveViewport && liveViewport.height) || img.naturalHeight || 900;
-  return {
-    x: Math.round(((ev.clientX - r.left) / r.width) * vw),
-    y: Math.round(((ev.clientY - r.top) / r.height) * vh),
-  };
-}
-
-async function postInput(payload) {
-  const p = liveProvider();
-  if (!p) return null;
-  const tid = liveThread();
-  const q = tid ? `?thread_id=${encodeURIComponent(tid)}` : "";
-  try {
-    const res = await fetch(`/admin/${encodeURIComponent(p)}/input${q}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (res.status === 403) {
-      setCtrl(false);
-      toast("画面交互未开启（server.live_control: false）");
-      return null;
-    }
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      toast((j.error && j.error.message) || `输入失败（HTTP ${res.status}）`);
-      return null;
-    }
-    return await res.json();
-  } catch (e) {
-    toast("输入请求失败：" + e.message);
-    return null;
-  }
-}
-
-function setCtrl(on) {
-  liveInteractive = !!on;
-  localStorage.setItem(CTRL_KEY, on ? "1" : "0");
-  const bar = $("#liveCtrlBar"), img = $("#live"), btn = $("#liveCtrl");
-  if (bar) bar.hidden = !on;
-  if (btn) btn.classList.toggle("active", !!on);
-  if (img) img.classList.toggle("ctrl", !!on);
-  if (!on && img) img.style.cursor = "";
-}
-
-function showGuide(x1, y1, x2, y2) {
-  const g = $("#liveGuide"), img = $("#live");
-  if (!g || !img) return;
-  const r = img.getBoundingClientRect(), body = img.parentElement.getBoundingClientRect();
-  const l = Math.min(x1, x2), t = Math.min(y1, y2);
-  g.style.left = `${l - body.left}px`;
-  g.style.top = `${t - body.top}px`;
-  g.style.width = `${Math.abs(x2 - x1)}px`;
-  g.style.height = `${Math.abs(y2 - y1)}px`;
-  g.style.display = "block";
-  void r;
-}
-
-function hideGuide() { const g = $("#liveGuide"); if (g) g.style.display = "none"; }
-
-// 动作反馈：在画面上闪一个小标记（落点/映射有问题一眼可见）
-function flashAt(clientX, clientY) {
-  const body = document.querySelector(".live-body");
-  if (!body) return;
-  const r = body.getBoundingClientRect();
-  const dot = document.createElement("div");
-  dot.className = "live-dot";
-  dot.style.left = `${clientX - r.left}px`;
-  dot.style.top = `${clientY - r.top}px`;
-  body.appendChild(dot);
-  setTimeout(() => dot.remove(), 700);
-}
-
-function initLiveControl() {
-  const img = $("#live"), bar = $("#liveCtrlBar");
-  if (!img || !bar) return;
-  setCtrl(ctrlOn());
-
-  $("#liveCtrl").onclick = () => setCtrl(!ctrlOn());
-
-  let start = null, moved = false;
-
-  img.addEventListener("pointerdown", (e) => {
-    if (!liveInteractive) return;                       // 只读模式：完全不拦截
-    const p = livePagePoint(e);
-    if (!p) return;
-    start = { ...p, cx: e.clientX, cy: e.clientY };
-    moved = false;
-    try { img.setPointerCapture(e.pointerId); } catch (_) {}
-    e.preventDefault();
-  });
-
-  img.addEventListener("pointermove", (e) => {
-    if (!start || !liveInteractive) return;
-    const dx = Math.abs(e.clientX - start.cx), dy = Math.abs(e.clientY - start.cy);
-    if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) moved = true;
-    if (moved) showGuide(start.cx, start.cy, e.clientX, e.clientY);
-  });
-
-  img.addEventListener("pointerup", async (e) => {
-    if (!start || !liveInteractive) return;
-    const end = livePagePoint(e);
-    const wasMoved = moved;
-    const s = start;
-    start = null; moved = false;
-    hideGuide();
-    if (!end) return;
-    flashAt(e.clientX, e.clientY);
-    if (wasMoved) {
-      await postInput({ action: "drag", x: s.x, y: s.y, x2: end.x, y2: end.y });
-    } else {
-      await postInput({ action: "click", x: end.x, y: end.y });
-    }
-  });
-
-  // 滚轮：默认滚**面板**；Shift+滚轮才发给页面（避免误操作站点）
-  img.addEventListener("wheel", (e) => {
-    if (!liveInteractive) return;
-    const body = document.querySelector(".live-body");
-    const canScrollPane = body && body.scrollHeight > body.clientHeight + 4;
-    // 默认滚面板；面板没得滚（或按住 Shift）→ 发给页面（否则用户会觉得"上下滚动没反应"）
-    if (!e.shiftKey && canScrollPane) return;
-    e.preventDefault();
-    const pt = livePagePoint(e);
-    postInput({ action: "wheel", x: pt ? pt.x : 0, y: pt ? pt.y : 0, dx: e.deltaX, dy: e.deltaY });
-  }, { passive: false });
-
-  // 输入框 + 快捷键
-  const typeBox = $("#liveType");
-  const sendType = () => {
-    const text = typeBox.value;
-    if (!text) return;
-    typeBox.value = "";
-    postInput({ action: "type", text });
-  };
-  $("#liveTypeSend").onclick = sendType;
-  typeBox.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendType(); }
-  });
-  bar.querySelectorAll("[data-key]").forEach((b) => {
-    b.onclick = () => postInput({ action: "key", key: b.getAttribute("data-key") });
-  });
-  $("#liveReload").onclick = () => postInput({ action: "reload" });
-  $("#liveBottom").onclick = () => postInput({ action: "to_bottom" });
-  $("#liveResetInput").onclick = async () => {           // 解卡：发 up + Esc
-    await postInput({ action: "up", x: 0, y: 0 });
-    await postInput({ action: "key", key: "Escape" });
-    toast("已重置输入状态");
-  };
-}
-initLiveControl();
 
 // ---------- 中缝拖拽：左右调整"对话 / 画面"宽度（双击复位，宽度记忆） ----------
 const LIVE_W_KEY = "aiw2api_live_width";
@@ -1297,6 +949,13 @@ function applyLiveWidth(w) {
   pane.style.width = `${Math.min(Math.max(260, saved), max)}px`;
   pane.style.minWidth = "260px";
   pane.style.maxWidth = "none";
+}
+
+// 画面面板显隐时同步中缝拖拽条（组件只负责 pane 本身）
+function syncSplitHandle(visible) {
+  const handle = $("#splitHandle");
+  if (handle) handle.hidden = !visible;
+  if (visible) applyLiveWidth();
 }
 
 function initSplitHandle() {
@@ -1356,6 +1015,7 @@ function initSplitHandle() {
     e.preventDefault();
   });
   applyLiveWidth();
+  syncSplitHandle(!pane.hidden);
 }
 
 initLivePane();

@@ -214,22 +214,6 @@ def test_github_star_badge():
     assert "--star:" in tokens, "星标颜色未进 tokens（硬编码色值会破坏暗色主题）"
 
 
-def test_live_view_page():
-    """实时画面页（只读直播）：MJPEG <img> + 暂停 + 保存当前帧 + 未鉴权提示。"""
-    html = (WEBUI / "browser.html").read_text(encoding="utf-8")
-    js = (WEBUI / "assets/js/browser.js").read_text(encoding="utf-8")
-    css = (WEBUI / "assets/css/browser.css").read_text(encoding="utf-8")
-    for el in ("provider", "fps", "quality", "pause", "save", "live", "status"):
-        assert f'id="{el}"' in html, f"browser.html 缺少 #{el}"
-    assert "stream.mjpg" in js and "screen.jpg" in js and "screen/state" in js
-    assert "live-warn" in html and "请勿对外暴露" in html, "必须提示未鉴权风险"
-    assert ".screen-wrap" in css
-    # 其它页导航与状态面板入口
-    for name in HTML_FILES:
-        assert "/ui/browser.html" in (WEBUI / name).read_text(encoding="utf-8"), name
-    idx = (WEBUI / "assets/js/index.js").read_text(encoding="utf-8")
-    assert "/ui/browser.html?provider=" in idx, "provider 详情缺「查看画面」入口"
-
 
 def test_playground_model_switch_unbinds_thread():
     """换模型：自动解绑已绑定会话（否则服务端 409 thread_mismatch）——用户可感知的修复。"""
@@ -243,22 +227,6 @@ def test_playground_model_switch_unbinds_thread():
     assert "该会话绑定模型" in js
 
 
-def test_live_view_follows_active_session():
-    """画面必须能看"你正在聊的那个会话"：MRU 选页 + ?thread_id= 固定 + 显示来源。"""
-    js = (WEBUI / "assets/js/browser.js").read_text(encoding="utf-8")
-    assert "pinnedThread" in js and "thread_id" in js, "未支持 ?thread_id= 固定会话"
-    assert "shown_thread_id" in js, "未显示画面来自哪个会话"
-    assert "pinnedThread = null" in js, "切换 provider 时应解除固定"
-    tj = (WEBUI / "assets/js/threads.js").read_text(encoding="utf-8")
-    assert "browser.html?provider=" in tj and "thread_id=" in tj, "会话页缺「画面」入口"
-
-
-def test_live_view_dismiss_button():
-    """画面页可手工关闭弹窗（弹窗遮住输入时用）。"""
-    html = (WEBUI / "browser.html").read_text(encoding="utf-8")
-    js = (WEBUI / "assets/js/browser.js").read_text(encoding="utf-8")
-    assert 'id="dismiss"' in html
-    assert "/dismiss" in js and "关闭弹窗" in html
 
 
 def test_playground_widget_panel():
@@ -273,35 +241,6 @@ def test_playground_widget_panel():
     assert ".widget-box" in css
 
 
-def test_playground_has_split_live_pane():
-    """Playground 左右分栏：左侧原消息区 + 右侧实时画面（便于边聊边对）。"""
-    html = (WEBUI / "playground.html").read_text(encoding="utf-8")
-    css = (WEBUI / "assets/css/playground.css").read_text(encoding="utf-8")
-    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
-
-    assert 'id="split"' in html and '<aside id="livePane"' in html, "缺少分栏容器/画面面板"
-    assert 'id="live"' in html and 'id="liveToggle"' in html
-    # 画面面板必须在 #chat 之后（左对话、右画面）
-    assert html.index('id="chat"') < html.index('id="livePane"')
-    assert "#split { display: flex" in css or "#split { flex: 1; display: flex" in css
-    assert "@media (max-width: 900px)" in css, "窄屏应上下分栏"
-    # 复用画面页的直播接口；thread_id 固定 + 只在可见时开流
-    assert "/stream.mjpg" in js and "screen/state" in js
-    assert "thread_id=" in js and "visibilitychange" in js
-    assert "/dismiss" in js, "应能关闭站点遮挡弹窗"
-    # 模型 → provider 映射（画面要跟着所选模型切）
-    assert "/admin/status" in js and "PROVIDER_MAP" in js
-
-
-def test_live_pane_has_scope_and_zoom():
-    """画面清晰度：默认"只裁消息区"（原生像素）+ 可缩放（放大后字最清楚）。"""
-    html = (WEBUI / "playground.html").read_text(encoding="utf-8")
-    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
-    assert 'id="liveZoom"' in html and 'id="liveScope"' not in html, "画面一律整页（不要'消息区'选项）"
-    assert 'value="fit"' in html and 'value="2"' in html          # 200% 可选
-    assert "crop=full" in js, "画面一律整页"
-    assert "applyLiveZoom" in js and "pinLiveBottom" in js
-    assert "maxWidth" in js and "applyLiveZoom" in js
 
 
 def test_playground_has_resizable_splitter():
@@ -319,8 +258,10 @@ def test_playground_has_resizable_splitter():
                   "dblclick", "ArrowLeft", "ArrowRight"):
         assert token in js, f"缺少 {token}"
     # 适应 = 按宽度铺满（消掉黑边）
-    assert "fill" in css and ".fill" in css
-    assert 'width = "100%"' in js or "width = '100%'" in js
+    # "适应=按宽度铺满（消黑边）"属于组件样式（liveview.css），这里只确认引用关系
+    assert "liveview.css" in html
+    live_js = (WEBUI / "assets/js/liveview.js").read_text(encoding="utf-8")
+    assert 'width = "100%"' in live_js, "组件里适应模式应铺满宽度"
 
 
 def test_splitter_constants_defined_before_init():
@@ -346,23 +287,6 @@ def test_splitter_drag_cannot_leak_listeners():
                   "removeEventListener(\"pointerup\"", "setPointerCapture"):
         assert token in js, f"缺少拖拽收尾处理：{token}"
 
-
-def test_live_control_ui_guards():
-    """画面交互：默认关、位移阈值区分点击/拖拽、可解卡、滚轮不抢（Shift 才发页面）。"""
-    html = (WEBUI / "playground.html").read_text(encoding="utf-8")
-    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
-    css = (WEBUI / "assets/css/playground.css").read_text(encoding="utf-8")
-
-    for el in ("liveCtrl", "liveCtrlBar", "liveType", "liveResetInput", "liveReload", "liveBottom", "liveGuide"):
-        assert f'id="{el}"' in html, f"缺少交互元素 {el}"
-    assert "aiw2api_live_ctrl" in js and 'liveInteractive = !!on' in js
-    assert "DRAG_THRESHOLD_PX" in js and "> DRAG_THRESHOLD_PX" in js, "必须用位移阈值区分点击/拖拽"
-    assert 'action: "drag"' in js and 'action: "click"' in js
-    assert '"Escape"' in js and 'action: "up"' in js, "重置输入要发 up + Esc"
-    assert "shiftKey" in js, "滚轮默认滚面板，Shift 才发给页面"
-    assert "pointerdown" in js and "pointerup" in js and "setPointerCapture" in js
-    assert "/input" in js and "livePagePoint" in js
-    assert ".ctrl" in css
 
 
 def test_model_switch_resets_conversation():

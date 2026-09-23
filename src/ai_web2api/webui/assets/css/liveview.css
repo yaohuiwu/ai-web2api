@@ -1,0 +1,51 @@
+/* 可复用「实时画面」组件（Playground 右栏 / 画面页共用）。DOM 由 assets/js/liveview.js 生成。 */
+
+.lv-head {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; flex-wrap: wrap;
+}
+.lv-head .lv-title { color: var(--text); font-weight: 600; }
+.lv-head .lv-meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.lv-head .btn.active { background: var(--blue); color: var(--blue-fg); }
+.lv-sel {
+  background: var(--card); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; font-size: 11px; padding: 2px 4px; max-width: 92px;
+}
+
+/* 画面区：可滚动（放大后）+ 相对定位（引导线/落点标记） */
+.lv-body {
+  position: relative; flex: 1; min-height: 0; display: block;
+  background: var(--live-bg); overflow: auto;
+}
+.lv-img { display: block; margin: 0 auto; }
+.lv-img.fill { width: 100%; height: auto; max-width: none; max-height: none; }
+.lv-img.ctrl { cursor: crosshair; }
+.lv-guide {
+  position: absolute; border: 1px dashed var(--blue);
+  background: color-mix(in srgb, var(--blue) 12%, transparent); pointer-events: none;
+}
+.lv-dot {
+  position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+  border: 2px solid var(--blue); background: color-mix(in srgb, var(--blue) 30%, transparent);
+  pointer-events: none; animation: lv-dot-fade .7s ease-out;
+}
+@keyframes lv-dot-fade { from { transform: scale(1); opacity: 1; } to { transform: scale(1.8); opacity: 0; } }
+.lv-off {
+  color: var(--muted); font-size: 12px; padding: 14px; text-align: center; line-height: 1.6;
+}
+
+/* 交互控制条（仅交互模式显示） */
+.lv-ctrlbar {
+  display: flex; align-items: center; gap: 4px; padding: 6px 8px;
+  border-top: 1px solid var(--border); flex-wrap: wrap;
+}
+.lv-ctrlbar[hidden] { display: none; }
+.lv-ctrlbar .lv-type {
+  flex: 1; min-width: 120px; font-size: 12px; padding: 3px 6px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text);
+}
+.lv-ctrlbar .btn.sm { padding: 2px 6px; font-size: 11px; }
+
+/* 画面页：整页容器 */
+.lv-page { display: flex; flex-direction: column; min-height: 0; flex: 1; }

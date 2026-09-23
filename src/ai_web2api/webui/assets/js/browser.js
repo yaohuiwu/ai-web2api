@@ -1,68 +1,73 @@
-// 实时画面（只读直播）：MJPEG <img> + 状态轮询。设计见 docs/LIVE_VIEW.md（P1）
+// 画面页：复用共享组件 assets/js/liveview.js（直播 + 缩放 + 交互 + 关遮挡），
+// 这里只保留页面特有的工具：provider 选择、fps/quality、暂停、保存当前帧、状态行。
 let provider = null;
 let paused = false;
-let stateTimer = null;
+let lv = null;
 // ?thread_id=xxx → 固定看这个会话的页面；不传则跟随"最近使用"的会话
 let pinnedThread = new URLSearchParams(location.search).get("thread_id");
 
-function streamUrl(p) {
-  const q = new URLSearchParams({ fps: $("#fps").value, quality: $("#quality").value });
-  if (pinnedThread) q.set("thread_id", pinnedThread);
-  return `/admin/${encodeURIComponent(p)}/stream.mjpg?${q}`;
+function showStatus(html) {
+  const el = document.querySelector("#status");
+  if (el) el.innerHTML = html;
 }
 
-function stateUrl(p) {
-  const q = pinnedThread ? `?thread_id=${encodeURIComponent(pinnedThread)}` : "";
-  return `/admin/${encodeURIComponent(p)}/screen/state${q}`;
+function makeHeaderExtra() {
+  // 页面特有控件放进组件的头部（暂停/保存帧仍在工具栏里，这里只放"状态")
+  const span = document.createElement("span");
+  span.className = "lv-extra muted";
+  return span;
 }
 
-function showPlaceholder(text, spinner = false) {
-  const ph = $("#placeholder");
-  ph.hidden = false;
-  ph.textContent = text;
-  if (spinner) ph.textContent = "正在连接直播流… " + text;
+function initLive() {
+  const pane = document.querySelector("#livePane");
+  if (!pane || !window.LiveView) {
+    showStatus("<span class='err'>组件加载失败（liveview.js）</span>");
+    return;
+  }
+  lv = window.LiveView.create({
+    pane: pane,
+    getProvider: () => provider,
+    getThreadId: () => pinnedThread || "",
+    extraQuery: () => ({ fps: document.querySelector("#fps").value, quality: document.querySelector("#quality").value }),
+    headerExtra: makeHeaderExtra(),
+  });
+  lv.setEnabled(true);
+  refreshStatusLoop();
 }
 
-function start() {
+// 状态行（页面级的额外信息，组件头部已有 会话/观众/帧龄）
+async function refreshStatus() {
   if (!provider) return;
-  paused = false;
-  $("#pause").textContent = "暂停";
-  $("#placeholder").hidden = true;
-  const img = $("#live");
-  img.hidden = false;
-  img.src = `${streamUrl(provider)}&t=${Date.now()}`;
-  refreshState();
-}
-
-function stop(reason) {
-  paused = true;
-  $("#live").src = "";
-  $("#pause").textContent = "继续";
-  showPlaceholder(reason || "已暂停");
-}
-
-async function refreshState() {
+  const q = pinnedThread ? `?thread_id=${encodeURIComponent(pinnedThread)}` : "";
   try {
-    const st = await api(stateUrl(provider));
+    const res = await fetch(`/admin/${encodeURIComponent(provider)}/screen/state${q}`);
+    const st = await res.json();
     const vp = st.viewport ? `${st.viewport.width}×${st.viewport.height}` : "—";
-    const from = st.shown_thread_id
-      ? `会话 <b class="mono">${esc(st.shown_thread_id)}</b>`
-      : "非会话页（登录页等）";
-    $("#status").innerHTML =
-      `${from} · 视口 ${vp} · 观众 ${st.viewers} · <span class="mono">${esc(st.page_url || "—")}</span>` +
-      (st.busy ? ' · <b>⏳ 生成中（自动降帧 1fps）</b>' : "") +
-      (st.error ? ` · <span class="err">${esc(st.error)}</span>` : "");
+    showStatus(
+      `${st.available ? "✅ 可用" : "⏸ 没有打开的页面"} · 视口 ${vp}` +
+      (st.source ? ` · 帧来源 <b>${esc(st.source)}</b>` : "") +
+      (st.busy ? ' · <b>⏳ 生成中（自动降帧）</b>' : "") +
+      (st.error ? ` · <span class="err">${esc(st.error)}</span>` : "")
+    );
     if (!st.available && !paused) {
-      stop("该 provider 当前没有打开的页面 —— 先去 Playground 发一条消息，或点「开始登录」后再回来看");
+      // 组件自己会显示"暂无打开的页面"提示；这里只更新状态行
+      showStatus("⏸ 该 provider 当前没有打开的页面 —— 去 Playground 发一条消息后回来看");
     }
   } catch (e) {
-    $("#status").innerHTML = `<span class="err">状态获取失败：${esc(e.message)}</span>`;
+    showStatus(`<span class="err">状态获取失败：${esc(e.message)}</span>`);
   }
 }
 
+let statusTimer = null;
+function refreshStatusLoop() {
+  if (statusTimer) clearInterval(statusTimer);
+  refreshStatus();
+  statusTimer = setInterval(refreshStatus, 2500);
+}
+
 async function loadProviders() {
-  const data = await api("/admin/status");
-  const sel = $("#provider");
+  const data = await (await fetch("/admin/status")).json();
+  const sel = document.querySelector("#provider");
   sel.innerHTML = "";
   const list = data.providers || [];
   for (const p of list) {
@@ -75,49 +80,35 @@ async function loadProviders() {
   const want = new URLSearchParams(location.search).get("provider");
   provider = want && names.includes(want) ? want : names[0];
   if (!provider) {
-    showPlaceholder("没有启用的 provider");
+    showStatus("<span class='err'>没有启用的 provider</span>");
     return;
   }
   sel.value = provider;
-  start();
-  clearInterval(stateTimer);
-  stateTimer = setInterval(refreshState, 2000);
+  initLive();
 }
 
 // ---- 事件 ----
-$("#live").addEventListener("error", () => {
-  if (!paused) stop("无法连接直播流（可能：没有打开的页面 / live_view=false / 服务已停止）");
-});
-$("#live").addEventListener("load", () => {
-  $("#placeholder").hidden = true;
-});
-$("#provider").addEventListener("change", (e) => {
+document.querySelector("#provider").addEventListener("change", (e) => {
   provider = e.target.value;
-  pinnedThread = null;   // 固定的 thread 可能不属于新 provider → 回到"跟随最近使用"
-  start();
+  pinnedThread = null;               // 固定的 thread 可能不属于新 provider → 回到"跟随最近使用"
+  lv && lv.refresh();
+  refreshStatus();
 });
 for (const id of ["#fps", "#quality"]) {
-  $(id).addEventListener("change", () => {
-    if (!paused) start();
-  });
+  document.querySelector(id).addEventListener("change", () => lv && lv.refresh());
 }
-$("#pause").onclick = () => (paused ? start() : stop("已暂停（服务端会在宽限期后停止采集）"));
-$("#dismiss").onclick = async () => {
-  if (!provider) return;
-  try {
-    const q = pinnedThread ? `?thread_id=${encodeURIComponent(pinnedThread)}` : "";
-    const r = await api(`/admin/${encodeURIComponent(provider)}/dismiss${q}`, { method: "POST" });
-    toast(r.dismissed && r.dismissed.length ? `已关闭 ${r.dismissed.length} 个弹窗` : "没有发现可关闭的弹窗");
-  } catch (e) {
-    toast(`失败: ${e.message}`);
-  }
+document.querySelector("#pause").onclick = () => {
+  paused = !paused;
+  document.querySelector("#pause").textContent = paused ? "继续" : "暂停";
+  lv.setEnabled(!paused);
+  refreshStatus();
 };
-$("#save").onclick = async () => {
+document.querySelector("#save").onclick = async () => {
   if (!provider) return;
   try {
-    const r = await fetch(`/admin/${encodeURIComponent(provider)}/screen.jpg?quality=${$("#quality").value}`);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const blob = await r.blob();
+    const res = await fetch(`/admin/${encodeURIComponent(provider)}/screen.jpg?quality=${document.querySelector("#quality").value}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `${provider}-${Date.now()}.jpg`;
@@ -129,4 +120,4 @@ $("#save").onclick = async () => {
   }
 };
 
-loadProviders().catch((e) => showPlaceholder(`初始化失败：${e.message}`));
+loadProviders().catch((e) => showStatus(`<span class="err">初始化失败：${esc(e.message)}</span>`));
