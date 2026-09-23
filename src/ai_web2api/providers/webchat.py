@@ -34,6 +34,7 @@ from ..core.errors import (
     ThreadExpiredError,
     UnsupportedModeError,
 )
+from ..core.timeline import TIMELINES, RequestTimeline
 from .base import BaseProvider, StreamChunk, build_prompt, last_user_message
 
 logger = logging.getLogger(__name__)
@@ -130,6 +131,9 @@ class WebChatProvider(BaseProvider):
         prompt_override: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
         cfg = self.cfg
+        # 通用时间线：定位"慢在哪"（页面就绪/已送达/思考首字/正文首字/正文不再变/我们判定结束/收尾）
+        tl = RequestTimeline(provider=self.name, model=model, thread=thread_mode or "stateless")
+        self._tl = tl
         resume = thread_mode == "resume"
         # resume 专属：页面可能仍在生成上一请求（生成中输入=排队），
         # 发送后若迟迟无新容器 → 判定页面忙，抛 ThreadBusyError 销毁重建
@@ -151,6 +155,7 @@ class WebChatProvider(BaseProvider):
             # 发送前上传附件（图片等）：写入输入框，发送时随消息带上
             await self._upload_attachments(page, attachments)
 
+            tl.mark("setup", overwrite=False)
             # 发送前记录各候选容器的数量，之后只取"新增"的那个
             md_before = {
                 s: await extractor.count_matches(page, s)
@@ -198,6 +203,7 @@ class WebChatProvider(BaseProvider):
                         provider=self.name,
                     )
             logger.info("[%s] prompt sent, polling", self.name)
+            tl.mark("send", overwrite=False)
 
             self._widgets = []                                    # 每轮重置组件捕获
             frames_before = {f.url for f in page.frames if f.url}
@@ -205,8 +211,22 @@ class WebChatProvider(BaseProvider):
                 page, md_before, th_before, busy_timeout,
                 input_sel=input_sel, prompt=prompt, frames_before=frames_before,
             ):
+                if chunk.kind == "thinking":
+                    tl.mark("first_think", overwrite=False)
+                    tl.bump("think_chars", len(chunk.text or ""))
+                else:
+                    tl.mark("first_content", overwrite=False)
+                    tl.bump("chars", len(chunk.text or ""))
+                tl.bump("deltas")
                 yield chunk
         finally:
+            tl.mark("final")
+            if self.net_observe:
+                tl.note("net", self._net_summary())
+            tl.log()
+            TIMELINES.record(tl)
+            self.last_timeline = tl
+            self._tl = None
             self._stop_observe(page)             # 摘掉旁听监听，避免跨请求累积
             # 无状态请求：用完即关；thread 模式：页面留给 ThreadManager 管理
             if thread_mode is None and thread_page is None:
@@ -938,6 +958,8 @@ XMLHttpRequest.prototype.send = function (body) {{
         - 通道失效（宽限期内无事件 / 注入丢失 / 页面导航）→ _NetFallback 降级 DOM
         """
         cfg = self.cfg
+        if getattr(self, "_tl", None) is not None:
+            self._tl.path = "net"
         timeout = cfg.response_timeout
         poll_ms = int(cfg.poll_interval * 1000)
         net_grace = (
@@ -1014,11 +1036,15 @@ XMLHttpRequest.prototype.send = function (body) {{
                 old = last[kind]
                 if new == old:
                     continue
+                if kind == "content":
+                    self._tl_mark("settled")
                 inc = _diff_increment(old, new)
                 if inc:
                     yield StreamChunk(kind, inc)
                 last[kind] = new
             if "event: close" in sse:
+                self._tl_mark("done")
+                self._tl_note("finalize", "net_close")
                 # close 后可能还有最后一帧：再读一次最新快照 flush 残留增量
                 sse2 = await self._net_read(page)
                 if sse2:
@@ -1066,6 +1092,8 @@ XMLHttpRequest.prototype.send = function (body) {{
         容器选择器动态发现：先等任一"新增"标记出现，正文容器出现后即自动接管提取。
         """
         cfg = self.cfg
+        if getattr(self, "_tl", None) is not None:
+            self._tl.path = self._tl.path or "dom"
         stop_sels = cfg.selectors.stop_button
         timeout = cfg.response_timeout
         poll_ms = int(cfg.poll_interval * 1000)
@@ -1187,8 +1215,11 @@ XMLHttpRequest.prototype.send = function (body) {{
                 if found:
                     th_sel, th_idx = found, th_before[found]
 
+            t_extract = time.monotonic()
             th_text = await self._extract_thinking(page, th_sel, th_idx) if th_sel else ""
             md_text = await self._extract_content(page, md_sel, md_idx, th_text)
+            self._tl_count("polls")
+            self._tl_count("extract_ms_total", (time.monotonic() - t_extract) * 1000)
 
             # ⚠ content 与 thinking 分别算稳定：
             # 思考区常有"正在思考中 Ns"这类**持续跳动**的文本，若共用一个计数器，
@@ -1212,6 +1243,8 @@ XMLHttpRequest.prototype.send = function (body) {{
                     yield StreamChunk(kind, inc)
                 # DOM 重渲染导致文本被改写（非子串非前缀）：丢弃本次增量，避免重复输出
                 last[key] = new
+            if changed["content"]:
+                self._tl_mark("settled")   # 覆盖：最终值 = 正文最后一次变化的时刻
             stable = 0 if changed["content"] else stable + 1
             if changed["thinking"]:
                 thinking_changed_recently = time.monotonic()
@@ -1226,6 +1259,7 @@ XMLHttpRequest.prototype.send = function (body) {{
                 elif stop_seen and stable >= stop_settle:
                     # 出现过停止按钮且已消失 = 生成结束；但**再等 N 拍无变化**才定稿（双确认）：
                     # 站点常在按钮消失后才把最后一拍渲染完 → 立刻取会截断长回答/表格（实测）
+                    self._tl_note("finalize", "stop_button")
                     done = True
             if not done and stable >= stable_polls and elapsed > min_wait:
                 if last["content"]:
@@ -1239,6 +1273,8 @@ XMLHttpRequest.prototype.send = function (body) {{
                         done = True
                 # 否则（正文容器尚未出现）→ 继续等，避免空正文提前结束（Qwen 实测）
             if done:
+                self._tl_mark("done")
+                self._tl_note("finalize", self._tl_notes().get("finalize") or "stability")
                 logger.info(
                     "[%s] done content=%d chars thinking=%d chars elapsed=%.1fs%s",
                     self.name, len(last["content"]), len(last["thinking"]), elapsed,
@@ -1291,6 +1327,30 @@ XMLHttpRequest.prototype.send = function (body) {{
                             yield StreamChunk(kind, inc)  # type: ignore[arg-type]
 
             await page.wait_for_timeout(poll_ms)
+
+    # ---------- 时间线打点（无时间线时全部 no-op，单元测试可直接调轮询） ----------
+
+    def _tl_get(self):
+        return getattr(self, "_tl", None)
+
+    def _tl_mark(self, name: str, *, overwrite: bool = True) -> None:
+        tl = self._tl_get()
+        if tl is not None:
+            tl.mark(name, overwrite=overwrite)
+
+    def _tl_count(self, name: str, value: float = 1.0) -> None:
+        tl = self._tl_get()
+        if tl is not None:
+            tl.bump(name, value)
+
+    def _tl_note(self, key: str, value: str) -> None:
+        tl = self._tl_get()
+        if tl is not None:
+            tl.note(key, value)
+
+    def _tl_notes(self) -> dict:
+        tl = self._tl_get()
+        return tl.notes if tl is not None else {}
 
     @staticmethod
     def _looks_like_thinking(part: str, thinking: str) -> bool:

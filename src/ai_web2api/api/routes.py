@@ -23,6 +23,7 @@ from ..browser import extractor
 from ..browser.live import MJPEG_BOUNDARY, LiveController, capture, mjpeg_part, parse_frame_options
 from ..core.auth_expiry import compute_for_state_file
 from ..core.repo_info import repo_info
+from ..core.timeline import TIMELINES
 from ..core.widgets import WidgetStore
 from ..core.errors import (
     ProviderError,
@@ -491,6 +492,18 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         未配置 ``server.repo_url`` 时全部为 null（UI 自动隐藏）。
         """
         return await asyncio.to_thread(repo_info, registry.config.server.repo_url)
+
+    @router.get("/admin/timeline")
+    async def timeline_endpoint(provider: str | None = None, limit: int = 50):
+        """最近若干次请求的时间线（"慢在哪"的诊断窗口；后续可改为入库）。
+
+        每条包含：setup/send/first_think/first_content/settled/done/final 各时间点，
+        以及 ttft（首字延迟）、settle_lag（我们比站点慢多少）、tail（收尾开销）、
+        polls / extract_ms_total / deltas / chars 等计数。
+        """
+        limit = max(1, min(int(limit), 200))
+        items = TIMELINES.recent(provider=provider, limit=limit)
+        return {"count": len(items), "provider": provider, "items": items}
 
     @router.get("/admin/status")
     async def system_status(request: Request):
