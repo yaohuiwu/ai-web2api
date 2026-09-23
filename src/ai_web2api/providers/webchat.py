@@ -1100,6 +1100,9 @@ XMLHttpRequest.prototype.send = function (body) {{
         stable_polls = cfg.stable_polls
         min_wait = cfg.min_wait_before_stable
         stop_settle = getattr(cfg.selectors, "stop_settle_polls", 2) or 0
+        toolbar_sels = getattr(cfg.selectors, "done_toolbar", None) or []
+        resp_sels = cfg.selectors.response_container or []
+        done_toolbar_settle = max(1, stop_settle)     # 工具栏出现后仍需几拍稳定（等最后一帧渲染完）
         preview = bool(getattr(cfg.selectors, "preview_stream", False))
         preview_min = max(1, int(getattr(cfg.selectors, "preview_min_chars", 12) or 12))
         # 正文重渲染严重的站点（如 ChatGPT）逐字 diff 会丢内容 → 改“缓冲、结束一次性发”
@@ -1185,6 +1188,7 @@ XMLHttpRequest.prototype.send = function (body) {{
         stable = 0
         thinking_changed_recently = 0.0
         stop_seen = False
+        toolbar_seen = False
         # 预览流状态：sent = 已经发给客户端的文本（缓冲模式下用来算"还差多少没发"）
         preview_active = False
         sent = {"thinking": "", "content": ""}
@@ -1251,7 +1255,15 @@ XMLHttpRequest.prototype.send = function (body) {{
 
             # 结束判定
             done = False
-            if stop_sels:
+            # ① 首选"该条消息的工具栏已出现"（站点自己的完成信号；对无停止按钮的站点尤其重要）
+            #    工具栏是**逐条**的，所以只看最后一个正文容器所在的消息块 → 不会命中历史消息。
+            if toolbar_sels and not done:
+                if await extractor.has_done_toolbar(page, resp_sels, toolbar_sels):
+                    toolbar_seen = True
+                    if stable >= done_toolbar_settle:
+                        self._tl_note("finalize", "done_toolbar")
+                        done = True
+            if not done and stop_sels:
                 vis = [await self._is_visible(page, s) for s in stop_sels]
                 stop_visible = any(vis)
                 if stop_visible:

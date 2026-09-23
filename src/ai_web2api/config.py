@@ -93,6 +93,11 @@ class SelectorsConfig(BaseModel):
     response_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = [".ds-markdown"]
     thinking_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
     stop_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
+    # 「消息已完成」工具栏（复制/点赞/朗读…）选择器：**该条回复的工具栏出现**即视为
+    # 站点认为这条消息写完了（实测 ChatGPT：工具栏出现 == 停止按钮消失 == 本轮结束）。
+    # 只在"最后一个正文容器所在的消息块"里检查，不会命中历史消息；隐藏（仅 hover）不算。
+    # 适合**没有可用停止按钮**的站点（如豆包）作为结束信号。
+    done_toolbar: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
     # 「预览流」：缓冲模式（stream_content: false）下**边生成边把新追加的文字发出去**（实时感）。
     # 与 true 的流式模式区别：只发**前缀追加**的增量（非前缀的 DOM 重渲染改写一律丢弃，防脏数据），
     # 定稿时再按最长公共前缀补发尾巴 → 既不脏也不丢。**定稿条件完全不受影响**（防截断安全网照旧）。

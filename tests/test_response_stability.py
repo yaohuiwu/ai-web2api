@@ -293,3 +293,67 @@ def test_suffix_after_handles_divergence():
     assert _suffix_after("", "全部") == "全部"
     assert _suffix_after("ab", "abcdef") == "cdef"
     assert _suffix_after("abc", "abdXYZ") == "dXYZ"       # 公共前缀 "ab" 之后全部补发
+
+
+@pytest.mark.asyncio
+async def test_done_toolbar_finalizes_early_without_stop_button(monkeypatch):
+    """「消息工具栏出现」= 站点自己的完成信号 → 不必再等 stable_polls*3 拍。
+
+    场景：站点**没有可用停止按钮**（如豆包），此前只能靠长稳定窗口（豆包实测 12.7s 白等）。
+    """
+    from ai_web2api.browser import extractor as ex
+
+    prov = _prov(response_container=[".md"], thinking_container=[], stream_content=False,
+                 done_toolbar=["[data-testid=copy]"])
+    page = _FakePage()
+    state = {"n": 0}
+    text = "第一段。" * 3
+
+    async def fake_count(_p, _sel):
+        return 1
+
+    async def fake_extract(_p, _sel, index=-1):
+        state["n"] += 1
+        return text if state["n"] > 1 else text[:3]
+
+    async def fake_toolbar(_p, _resp, _tool, max_depth=5):
+        # 第 5 拍起工具栏出现（正文此时已稳定 2 拍）
+        return state["n"] >= 5
+
+    monkeypatch.setattr(ex, "count_matches", fake_count)
+    monkeypatch.setattr(ex, "extract_markdown", fake_extract)
+    monkeypatch.setattr(ex, "has_done_toolbar", fake_toolbar)
+
+    chunks = [(c.kind, c.text) async for c in prov._poll_response_dom(page, {".md": 0}, {})]
+    assert "".join(t for k, t in chunks if k == "content") == text, "定稿内容必须完整"
+    # 工具栏在第 5 拍出现 + 2 拍稳定 → 远早于稳定兜底（stable_polls*3 = 9 拍）
+    assert state["n"] <= 9, f"应在工具栏出现后很快定稿，实际取了 {state['n']} 次文本"
+
+
+@pytest.mark.asyncio
+async def test_done_toolbar_absent_falls_back_to_stability(monkeypatch):
+    """工具栏一直不出现（站点不显示/被隐藏）→ 仍走稳定性兜底，不能提前结束。"""
+    from ai_web2api.browser import extractor as ex
+
+    prov = _prov(response_container=[".md"], thinking_container=[], stream_content=False,
+                 done_toolbar=["[data-testid=copy]"])
+    page = _FakePage()
+    state = {"n": 0}
+
+    async def fake_count(_p, _sel):
+        return 1
+
+    async def fake_extract(_p, _sel, index=-1):
+        state["n"] += 1
+        return "完整正文"
+
+    async def fake_toolbar(*_a, **_kw):
+        return False
+
+    monkeypatch.setattr(ex, "count_matches", fake_count)
+    monkeypatch.setattr(ex, "extract_markdown", fake_extract)
+    monkeypatch.setattr(ex, "has_done_toolbar", fake_toolbar)
+
+    chunks = [(c.kind, c.text) async for c in prov._poll_response_dom(page, {".md": 0}, {})]
+    assert "".join(t for k, t in chunks if k == "content") == "完整正文"
+    assert state["n"] >= 3, "没有工具栏信号时必须继续轮询（不能一出现正文就结束）"

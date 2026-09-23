@@ -220,6 +220,9 @@ providers:
       send_button:
         - 'button[data-testid="send-button"]'
         - 'button[aria-label="Send prompt"]'
+      done_toolbar:             # 「本条消息已完成」工具栏（实测：出现 == 停止按钮消失 == 本轮结束）
+        - '[data-testid="copy-turn-action-button"]'
+        - '[aria-label="Response actions"]'
       stop_button:              # 生成中用停止按钮判定结束（可靠）
         - 'button[data-testid="stop-button"]'
       response_container:

@@ -66,3 +66,19 @@ def test_preview_stream_requires_buffering(p):
         assert p.selectors.stream_content is False, (
             f"{p.name}: preview_stream 需配合 stream_content: false"
         )
+
+
+@pytest.mark.parametrize("p", ENABLED + DISABLED, ids=lambda p: p.name)
+def test_done_toolbar_needs_response_container(p):
+    """「消息工具栏」只在"最后一个正文容器所在的消息块"里检查 → 必须配 response_container。"""
+    if p.selectors.done_toolbar:
+        assert p.selectors.response_container, (
+            f"{p.name}: 配了 done_toolbar 但没有 response_container（无法界定『当前这条消息』）"
+        )
+
+
+def test_chatgpt_has_validated_done_toolbar():
+    """ChatGPT 的工具栏选择器是实测过的（出现 == 停止按钮消失 == 本轮结束）。"""
+    provs = {p.name: p for p in load_config(ROOT / "config.yaml").providers}
+    sels = provs["chatgpt"].selectors
+    assert any("copy-turn-action-button" in s for s in sels.done_toolbar), sels.done_toolbar

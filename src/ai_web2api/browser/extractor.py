@@ -218,3 +218,62 @@ async def extract_markdown_from(page: Page, selector: str | None, start: int) ->
         if not parts or parts[-1] != text:      # 去重（容器重渲染兜底）
             parts.append(text)
     return "\n\n".join(parts)
+
+
+# 「消息已完成」工具栏检测用的 JS：
+#   - 只认**当前这条**回复（最后一个匹配 response_container 的元素）所在的消息块，
+#     否则第一条消息的工具栏会一直命中（误判"已完成"）；
+#   - 工具栏存在但**被隐藏**（仅 hover 才显示）不算 → 最多向上 5 层检查 display/visibility/opacity。
+_DONE_TOOLBAR_JS = """
+(args) => {
+  const [respSels, toolSels, maxDepth] = args;
+  let el = null;
+  for (const s of respSels) {
+    try { const n = document.querySelectorAll(s); if (n.length) { el = n[n.length - 1]; break; } }
+    catch (e) { /* 非法选择器忽略 */ }
+  }
+  if (!el) return false;
+  const visible = (e) => {
+    for (let n = e, i = 0; n && i < 4; n = n.parentElement, i++) {
+      const st = getComputedStyle(n);
+      if (st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0') return false;
+    }
+    const r = e.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  for (let node = el, i = 0; node && i <= maxDepth; node = node.parentElement, i++) {
+    for (const t of toolSels) {
+      let hits = [];
+      try { hits = node.querySelectorAll(t); } catch (e) { continue; }
+      for (const h of hits) if (visible(h)) return true;
+    }
+  }
+  return false;
+}
+"""
+
+
+async def has_done_toolbar(
+    page: Page,
+    response_selectors: list[str],
+    toolbar_selectors: list[str],
+    max_depth: int = 5,
+) -> bool:
+    """**当前这条**回复所在的消息块里，是否已出现"消息工具栏"（复制/点赞/朗读…）。
+
+    这是站点自己给出的"该条消息已完成"信号（实测 ChatGPT：工具栏出现 == 停止按钮消失
+    == 站点认为本轮结束）。用于没有停止按钮的站点（如豆包）作为结束判据。
+
+    - 只在**最后一个** ``response_container`` 所在的祖先子树里找 → 不会命中历史消息；
+    - 工具栏存在但被隐藏（仅 hover 显示）不算完成。
+    """
+    if not response_selectors or not toolbar_selectors:
+        return False
+    try:
+        return bool(
+            await page.evaluate(
+                _DONE_TOOLBAR_JS, [list(response_selectors), list(toolbar_selectors), max_depth]
+            )
+        )
+    except Exception:  # noqa: BLE001  页面导航/元素失效等 → 当作"没有信号"，由稳定性兜底
+        return False
