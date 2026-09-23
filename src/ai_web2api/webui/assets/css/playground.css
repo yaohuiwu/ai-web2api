@@ -18,7 +18,7 @@
   /* 消息区左右分栏：左=对话（原样），右=实时画面（便于与回复实时对比） */
   #split { flex: 1; display: flex; min-height: 0; min-width: 0; }
   #livePane {
-    width: 38%; min-width: 300px; max-width: 640px;
+    width: 42%; min-width: 320px; max-width: 760px;
     border-left: 1px solid var(--border); background: var(--card);
     display: flex; flex-direction: column; min-height: 0;
   }

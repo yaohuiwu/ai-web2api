@@ -248,7 +248,7 @@ stream.mjpg  HTTP 200 multipart/x-mixed-replace  3 秒 13 帧（≈4.3fps，目�
 | 关遮挡 | 「关遮挡」按钮 → `POST /admin/{p}/dismiss`（繁忙提示/协议弹窗挡住输入时很有用） |
 | 窄屏 | ≤900px 自动上下分栏（对话在上、画面在下） |
 
-> 注：画面是**只读直播**（P1 设计）；`server.live_control` 仍为预留，未开启。
+> 注：画面是**只读直播**（P1 设计）；**交互（点击/拖拽/输入）设计见 [`LIVE_CONTROL.md`](LIVE_CONTROL.md)**，由 `server.live_control` 开关控制（默认 false）。
 
 ## 画面清晰度：三个手段（v0.1.x）
 
@@ -256,7 +256,7 @@ stream.mjpg  HTTP 200 multipart/x-mixed-replace  3 秒 13 帧（≈4.3fps，目�
 
 | 手段 | 参数 | 效果（实测 deepseek） |
 |---|---|---|
-| **① 只裁消息区**（原生像素） | `?crop=last`（Playground 默认；配置 `server.live_crop`） | 1440×900/370KB → **1616×676/132KB**（2x 设备像素下）；窄栏里字放大 2–3 倍 |
+| ~~① 只裁消息区~~（**已改为一律整页**，`crop` 仅作接口能力保留） | `?crop=last`（API 可选） | 1440×900/370KB → **1616×676/132KB**（2x 设备像素下）；窄栏里字放大 2–3 倍 |
 | **② 截图 2x 超采样** | `browser.device_scale_factor: 2` | 缩小展示时**字迹锐利**（CSS 像素不变，选择器/点击不受影响；字节 ≈2–3 倍） |
 | **③ 缩放 + 滚动** | Playground 头部「缩放：适应/100%/150%/200%」 | 200% 时**原生大小以上**，字完全清晰（自动跟随到底部看最新内容） |
 

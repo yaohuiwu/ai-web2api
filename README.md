@@ -40,6 +40,7 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 > **DeepSeek, ChatGPT, Kimi and Doubao scored 1.00 sentence coverage with zero thinking contamination (12/12 cases)**;
 > GLM was skipped because its Aliyun WAF ticket (~30 min TTL) had expired. Method, raw results, the regression
 > threshold and the two pitfalls found while running it: [`docs/TEXT_FIDELITY.md`](docs/TEXT_FIDELITY.md) (`./scripts/text_fidelity.sh`).
+> Interaction design (click / drag / type on the live view): [`docs/LIVE_CONTROL.md`](docs/LIVE_CONTROL.md) — proposed, gated by `server.live_control`.
 > The Playground splits the message area: chat on the left, a **read-only live view** of the
 > provider's page on the right — so you can compare the reply with the site side by side
 > ([`docs/LIVE_VIEW.md`](docs/LIVE_VIEW.md)).

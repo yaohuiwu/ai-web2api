@@ -296,9 +296,8 @@ def test_live_pane_has_scope_and_zoom():
     """画面清晰度：默认"只裁消息区"（原生像素）+ 可缩放（放大后字最清楚）。"""
     html = (WEBUI / "playground.html").read_text(encoding="utf-8")
     js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
-    assert 'id="liveScope"' in html and 'id="liveZoom"' in html
-    assert 'value="last"' in html and 'value="full"' in html
+    assert 'id="liveZoom"' in html and 'id="liveScope"' not in html, "画面一律整页（不要'消息区'选项）"
     assert 'value="fit"' in html and 'value="2"' in html          # 200% 可选
-    assert 'crop=' in js and '"last"' in js, "默认应请求 crop=last（消息区）"
+    assert "crop=full" in js, "画面一律整页"
     assert "applyLiveZoom" in js and "pinLiveBottom" in js
     assert "maxWidth" in js and "applyLiveZoom" in js

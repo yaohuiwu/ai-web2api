@@ -860,12 +860,11 @@ const liveOn = () => localStorage.getItem("aiw2api_live") !== "0";
 const liveThread = () => $("#threadId").value.trim();
 const liveProvider = () => PROVIDER_MAP[$("#model").value] || null;
 
-const liveScope = () => localStorage.getItem("aiw2api_live_scope") || "last";   // 默认只裁消息区
-const liveZoom = () => localStorage.getItem("aiw2api_live_zoom") || "fit";
+const liveZoom = () => localStorage.getItem("aiw2api_live_zoom") || "fit";   // 画面一律**整页**
 
 function liveStreamUrl(p, tid) {
   const t = tid ? `thread_id=${encodeURIComponent(tid)}&` : "";
-  return `/admin/${encodeURIComponent(p)}/stream.mjpg?${t}crop=${encodeURIComponent(liveScope())}&t=${Date.now()}`;
+  return `/admin/${encodeURIComponent(p)}/stream.mjpg?${t}crop=full&t=${Date.now()}`;
 }
 
 // 缩放：fit = 整幅可见；否则按百分比显示（可滚动）。CSS 像素不变、截图 2x → 放大后字很锐利。
@@ -1027,11 +1026,6 @@ function initLivePane() {
   };
   // 模型/会话变化 → 画面跟着切（会话变化时钉到该会话页面）
   $("#model").addEventListener("change", () => syncLive());
-  $("#liveScope").addEventListener("change", () => {
-    localStorage.setItem("aiw2api_live_scope", $("#liveScope").value);
-    liveProviderShown = null;                 // 强制重开流（crop 变了）
-    syncLive();
-  });
   $("#liveZoom").addEventListener("change", () => {
     localStorage.setItem("aiw2api_live_zoom", $("#liveZoom").value);
     applyLiveZoom();
@@ -1048,8 +1042,7 @@ function initLivePane() {
     syncLive();
   });
   document.addEventListener("visibilitychange", () => syncLive());
-  const scopeSel = $("#liveScope"), zoomSel = $("#liveZoom");
-  if (scopeSel) scopeSel.value = liveScope();
+  const zoomSel = $("#liveZoom");
   if (zoomSel) zoomSel.value = liveZoom();
   loadProviderMap();
 }
