@@ -66,7 +66,7 @@ docker compose logs -f        # watch the logs; clickable UI/API URLs are printe
 Open `http://127.0.0.1:8000/ui/`. Notes:
 
 - Login state / threads and message history persist in the named volume `web2api-profiles` (login state `state.json`, threads+messages in SQLite `threads.db`) — **rebuilding the container keeps you logged in and keeps history**; only `docker compose down -v` wipes it
-- Inside the container you must listen on `0.0.0.0` (already the default in `config.yaml`); the host maps `${WEB2API_PUBLISH_PORT:-8000}`
+- Inside the container it listens on `0.0.0.0` (compose injects `WEB2API_HOST=0.0.0.0`; `config.yaml` itself defaults to `127.0.0.1`); the host maps `${WEB2API_PUBLISH_PORT:-8000}`
 - Changing selectors/config: edit `config.yaml` and run `docker compose restart` (the repo's `config.yaml` is bind-mounted into the container, so **no rebuild is needed**)
 - There is no visible window inside the container, so manual login uses state import:
   `curl -X POST http://127.0.0.1:8000/admin/deepseek/login/cookies -H 'Content-Type: application/json' -d '{"cookies":[...]}'`
@@ -91,7 +91,7 @@ uv sync                      # install dependencies (creates .venv)
 .venv/bin/python -m ai_web2api.main
 ```
 
-On startup it prints **clickable URLs**, one per line (`0.0.0.0` just means "listen on all interfaces" — it is not a reachable hostname):
+On startup it prints **clickable URLs**, one per line (`0.0.0.0` just means "listen on all interfaces" — it is not a reachable hostname; the default is `127.0.0.1`):
 
 ```
 INFO ai_web2api: 管理界面（本机）：http://127.0.0.1:8000/ui/
@@ -333,7 +333,7 @@ Coverage: non-streaming/streaming chat, multi-turn history, `/v1/models`, model 
 
 ```yaml
 server:
-  host: 0.0.0.0
+  host: 127.0.0.1   # 默认只监听本机（画面/交互/会话接口无鉴权）；容器由 compose 覆盖为 0.0.0.0
   port: 8000
   default_provider: deepseek   # which provider gets fallback aliases for common OpenAI model names (gpt-4 etc.); empty = first enabled
   function_calling: true       # master switch for tool calling; false = ignore tools entirely (avoids risk control from injected tool prompts)
