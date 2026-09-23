@@ -937,16 +937,19 @@ const LIVE_W_KEY = "aiw2api_live_width";
 
 function defaultLiveWidth() {
   const split = $("#split");
-  return Math.round((split ? split.clientWidth : 1440) * 0.42);
+  const w = split ? split.clientWidth : 1440;
+  // 窄屏（笔记本）缩小画面区占比，保证对话区不太窄；宽屏保持 42%
+  const ratio = w < 1200 ? 0.35 : 0.42;
+  return Math.round(w * ratio);
 }
 
 function applyLiveWidth(w) {
   const pane = $("#livePane"), split = $("#split");
-  if (!pane) return;
+  if (!pane || !split) return;
   const saved = w != null ? w : parseInt(localStorage.getItem(LIVE_W_KEY) || "", 10);
-  if (!saved || !split) return;                      // 没设过就用 CSS 默认
+  const width = saved || defaultLiveWidth();
   const max = Math.max(260, split.clientWidth - 320);   // 左边至少留 320px 给对话
-  pane.style.width = `${Math.min(Math.max(260, saved), max)}px`;
+  pane.style.width = `${Math.min(Math.max(260, width), max)}px`;
   pane.style.minWidth = "260px";
   pane.style.maxWidth = "none";
 }
@@ -1019,4 +1022,5 @@ function initSplitHandle() {
 }
 
 initLivePane();
+initSplitHandle();
 
