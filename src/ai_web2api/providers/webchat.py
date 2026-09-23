@@ -39,6 +39,38 @@ from .base import BaseProvider, StreamChunk, build_prompt, last_user_message
 logger = logging.getLogger(__name__)
 
 
+def _pending_increment(sent: str, new: str) -> str:
+    """从"已发出的文本"到"当前文本"的增量；**只在纯前缀追加时给出**。
+
+    非前缀（DOM 重渲染改写）或文本变短 → 返回空，宁可少发也不发脏数据；
+    缺失的部分由定稿时的 :func:`_suffix_after` 兜底补上。
+    """
+    if not new or new == sent:
+        return ""
+    if new.startswith(sent):
+        return new[len(sent):]
+    return ""
+
+
+def _suffix_after(sent: str, final: str) -> str:
+    """定稿时：返回 ``final`` 中**尚未发出**的部分（按最长公共前缀算）。
+
+    预览流正常工作时等价于"纯追加的尾巴"；若中途发生过重渲染改写，
+    则返回从分歧点开始的全部内容（尽量保证不丢字；协议不支持"撤回重发"）。
+    """
+    if not sent:
+        return final
+    if final.startswith(sent):
+        return final[len(sent):]
+    n = 0
+    for a, b in zip(sent, final):
+        if a != b:
+            break
+        n += 1
+    logger.debug("预览流与定稿文本在前 %d 字后分歧（重渲染），按分歧点补发尾部", n)
+    return final[n:]
+
+
 def _diff_increment(old: str, new: str) -> str:
     """计算增量文本：从 old 到 new 应产出的新内容。
 
@@ -1039,6 +1071,8 @@ XMLHttpRequest.prototype.send = function (body) {{
         poll_ms = int(cfg.poll_interval * 1000)
         stable_polls = cfg.stable_polls
         min_wait = cfg.min_wait_before_stable
+        stop_settle = getattr(cfg.selectors, "stop_settle_polls", 2) or 0
+        soft_polls = getattr(cfg.selectors, "soft_stable_polls", 0) or 0
         # 正文重渲染严重的站点（如 ChatGPT）逐字 diff 会丢内容 → 改“缓冲、结束一次性发”
         buffer_content = not cfg.selectors.stream_content
 
@@ -1122,6 +1156,9 @@ XMLHttpRequest.prototype.send = function (body) {{
         stable = 0
         thinking_changed_recently = 0.0
         stop_seen = False
+        # 预览流状态：sent = 已经发给客户端的文本（缓冲模式下用来算"还差多少没发"）
+        preview_active = False
+        sent = {"thinking": "", "content": ""}
 
         while True:
             elapsed = time.monotonic() - start
@@ -1185,7 +1222,7 @@ XMLHttpRequest.prototype.send = function (body) {{
                 stop_visible = any(vis)
                 if stop_visible:
                     stop_seen = True
-                elif stop_seen and stable >= getattr(cfg, "stop_settle_polls", 2):
+                elif stop_seen and stable >= stop_settle:
                     # 出现过停止按钮且已消失 = 生成结束；但**再等 N 拍无变化**才定稿（双确认）：
                     # 站点常在按钮消失后才把最后一拍渲染完 → 立刻取会截断长回答/表格（实测）
                     done = True
@@ -1224,7 +1261,9 @@ XMLHttpRequest.prototype.send = function (body) {{
                     if extra:
                         last["content"] = (last["content"] + "\n\n" + extra).strip()
                     if last["content"]:
-                        yield StreamChunk("content", last["content"])
+                        rest = _suffix_after(sent["content"], last["content"])
+                        if rest:
+                            yield StreamChunk("content", rest)
                     elif not last["thinking"]:
                         # 零内容：与其返回 200 + 空正文（客户端看起来像"响应丢了"），不如明确报错
                         raise ResponseTimeoutError(
@@ -1233,6 +1272,21 @@ XMLHttpRequest.prototype.send = function (body) {{
                             provider=self.name,
                         )
                 return
+
+            # 预览流：缓冲模式下，正文稳定 soft_polls 拍后开始把已有内容发出去（不必等定稿）
+            if buffer_content and soft_polls and not done:
+                if not preview_active and stable >= soft_polls:
+                    preview_active = True
+                    logger.info(
+                        "[%s] 预览流开始（正文稳定 %d 拍，已生成 %d 字）",
+                        self.name, stable, len(last["content"]),
+                    )
+                if preview_active:
+                    for kind in ("thinking", "content"):
+                        inc = _pending_increment(sent[kind], last[kind])
+                        if inc:
+                            sent[kind] = last[kind]
+                            yield StreamChunk(kind, inc)  # type: ignore[arg-type]
 
             await page.wait_for_timeout(poll_ms)
 

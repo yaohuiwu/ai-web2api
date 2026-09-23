@@ -93,6 +93,10 @@ class SelectorsConfig(BaseModel):
     response_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = [".ds-markdown"]
     thinking_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
     stop_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
+    # 「预览流」：缓冲模式（stream_content: false）下，正文**稳定 N 拍后**就开始把已生成的内容
+    # 发给客户端（用户不必等到定稿才看到字）；之后只发**前缀追加**的增量，非前缀改写丢弃（防脏数据）。
+    # 0 = 关闭（回到"定稿时一次性发"的旧行为）。定稿条件不受影响（防截断的安全网照旧）。
+    soft_stable_polls: int = 0
     # 停止按钮**消失后**，再要求 N 拍无变化才定稿（双确认）：
     # 否则可能在最后一拍渲染完成前就取文本 → 长回答/表格被截断（实测 Kimi/豆包/GLM）
     stop_settle_polls: int = 2  # 填了可加快"生成结束"判定

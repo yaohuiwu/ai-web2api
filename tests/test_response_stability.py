@@ -185,7 +185,7 @@ async def test_stop_button_requires_settle_before_done(monkeypatch):
     from ai_web2api.providers.webchat import WebChatProvider
 
     prov = _prov(response_container=[".md"], thinking_container=[], stop_button=["button.stop"],
-                 stop_settle_polls=3)
+                 stop_settle_polls=4)
     page = _FakePage()
     polls = {"n": 0}
     stop_vis = {"n": 0}
@@ -208,4 +208,86 @@ async def test_stop_button_requires_settle_before_done(monkeypatch):
     chunks = [c async for c in prov._poll_response_dom(page, {".md": 0}, {})]
     assert any("答案" in (c.text or "") for c in chunks)
     # 停止按钮消失后还要稳定 3 拍 → 至少多轮询几次（不是一消失就返回）
-    assert stop_vis["n"] >= 3, f"应在按钮消失后继续确认稳定（_is_visible 只调了 {stop_vis['n']} 次）"
+    assert stop_vis["n"] >= 4, (
+        f"停止按钮消失后应按配置(stop_settle_polls=4)继续确认稳定，"
+        f"实际只调了 {stop_vis['n']} 次（配置没被读到？）"
+    )
+
+
+@pytest.mark.asyncio
+async def test_preview_stream_emits_before_finalize(monkeypatch):
+    """预览流：缓冲模式下正文稳定 N 拍就开始发增量，用户不必等定稿。
+
+    实测定稿要等 `stable_polls*3` 拍（豆包 ≈8s），而正文早就生成完了 → Playground 一直空白。
+    """
+    from ai_web2api.browser import extractor as ex
+
+    prov = _prov(response_container=[".md"], thinking_container=[], stream_content=False,
+                 soft_stable_polls=2)
+    page = _FakePage()
+    seq = ["第一段。", "第一段。第二段。", "第一段。第二段。第三段。"]
+    polls = {"n": 0}
+
+    async def fake_count(_p, _sel):
+        return 1
+
+    async def fake_extract(_p, _sel, index=-1):
+        i = min(polls["n"], len(seq) - 1)
+        polls["n"] += 1
+        return seq[i]
+
+    monkeypatch.setattr(ex, "count_matches", fake_count)
+    monkeypatch.setattr(ex, "extract_markdown", fake_extract)
+
+    chunks: list[tuple[str, str]] = []
+    first_at: int | None = None
+    async for c in prov._poll_response_dom(page, {".md": 0}, {}):
+        if first_at is None and c.kind == "content":
+            first_at = polls["n"]          # 第几次取文本时发出了第一个增量
+        chunks.append((c.kind, c.text))
+    text = "".join(t for k, t in chunks if k == "content")
+    assert text == seq[-1], f"拼接后必须与定稿完全一致（无重复无丢失），实际：{text!r}"
+    assert first_at is not None
+    assert first_at < polls["n"] - 2, (
+        f"预览流必须**在定稿前**发出（首次 t=第{first_at}拍 / 定稿在第{polls['n']}拍）"
+    )
+    assert first_at <= 7, f"应稳定 soft_stable_polls(2) 拍左右就发，实际第 {first_at} 拍"
+
+
+@pytest.mark.asyncio
+async def test_buffered_without_preview_keeps_old_behavior(monkeypatch):
+    """soft_stable_polls=0（默认）→ 与旧行为一致：定稿时一次性发完整正文。"""
+    from ai_web2api.browser import extractor as ex
+
+    prov = _prov(response_container=[".md"], thinking_container=[], stream_content=False)
+    page = _FakePage()
+    state = {"n": 0}
+
+    async def fake_count(_p, _sel):
+        return 1
+
+    async def fake_extract(_p, _sel, index=-1):
+        state["n"] += 1
+        return "完整正文" if state["n"] > 1 else "完"
+
+    monkeypatch.setattr(ex, "count_matches", fake_count)
+    monkeypatch.setattr(ex, "extract_markdown", fake_extract)
+
+    chunks = [(c.kind, c.text) async for c in prov._poll_response_dom(page, {".md": 0}, {})]
+    contents = [t for k, t in chunks if k == "content"]
+    assert contents == ["完整正文"], f"应只发一次完整正文，实际 {contents}"
+
+
+def test_suffix_after_handles_divergence():
+    """预览流与定稿分歧（重渲染改写）时，从分歧点补发，尽量不丢字。"""
+    from ai_web2api.providers.webchat import _pending_increment, _suffix_after
+
+    assert _pending_increment("", "abc") == "abc"
+    assert _pending_increment("abc", "abcdef") == "def"
+    assert _pending_increment("abc", "abcd") == "d"
+    assert _pending_increment("abc", "abc") == ""
+    assert _pending_increment("abc", "ax") == ""          # 非前缀 → 不发脏数据
+    assert _pending_increment("abcdef", "abc") == ""      # 变短 → 不发
+    assert _suffix_after("", "全部") == "全部"
+    assert _suffix_after("ab", "abcdef") == "cdef"
+    assert _suffix_after("abc", "abdXYZ") == "dXYZ"       # 公共前缀 "ab" 之后全部补发

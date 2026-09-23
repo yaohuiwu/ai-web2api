@@ -321,6 +321,8 @@ providers:
       type_prompt: true
       stream_content: false     # 表格/代码类回答重渲染多 → 缓冲后一次发，避免拿到残片
       response_all_new: true    # 一次回答可能被拆成多个 .md-box-root → 新容器全部拼接
+      # 预览流：正文稳定 6 拍（≈1.3s）就开始发增量，用户不用等到定稿（实测定稿要再等 ~8s）
+      soft_stable_polls: 6
       send_button:              # 实测：发送控件是 DIV（不是 button），输入后出现
         - ".send-btn-wrapper"
       response_container:       # 实测：助手回答（`.md-box-root` 同时匹配用户提问，必须排除右侧对齐的那侧）

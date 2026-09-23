@@ -57,3 +57,12 @@ def test_disabled_providers_keep_calibration():
         assert p.selectors.input or p.login.detect or p.selectors.logged_out, (
             f"{p.name}: 禁用但配置完全空白（校准成果丢失？）"
         )
+
+
+@pytest.mark.parametrize("p", ENABLED + DISABLED, ids=lambda p: p.name)
+def test_preview_stream_requires_buffering(p):
+    """预览流只对"缓冲模式"有意义（流式模式本来就在实时发）。"""
+    if p.selectors.soft_stable_polls > 0:
+        assert p.selectors.stream_content is False, (
+            f"{p.name}: soft_stable_polls>0 需配合 stream_content: false"
+        )
