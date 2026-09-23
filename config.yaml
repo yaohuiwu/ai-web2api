@@ -336,7 +336,9 @@ providers:
       response_container:       # 实测：助手回答（`.md-box-root` 同时匹配用户提问，必须排除右侧对齐的那侧）
         - '[data-container-type="block-v2"] > div:not([class*="justify-end"]) .md-box-root'
       thinking_container: []    # ⚠ 待实测（本轮回复无深度思考折叠区）
-      stop_button: []           # ⚠ 待实测
+      stop_button: []           # 实测：**不存在**停止按钮
+      done_toolbar: []          # 实测：助手消息**没有工具栏**（hover 前后 DOM 无变化）→ 只能靠稳定性兜底
+                                #       （详见 docs/PROVIDER_DOUBAO.md「结束信号」）
       login_check: []           # 空 = 用 input 判定
       logged_out:               # 反向标记：游客态也有输入框 → 右上角「登录」按钮可见即未登录
         - '[class*="login-btn"]'          # 实测 class 带哈希：login-btn-header-CTKsn1

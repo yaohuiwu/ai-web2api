@@ -93,6 +93,23 @@
 `ttft`（首字延迟）大＝站点侧；**`settle_lag`（白等）大＝我们的结束判定太保守**；`tail` 大＝收尾开销。
 实测豆包 `settle_lag=12.72s`（正文 3.6s 就不再变）→ 这是它『感觉慢』的主要来源。
 
+## 3.7 结束信号：优先级与实测（P1 已落地）
+
+结束判定按**信号强度**降级，越靠前越准越快：
+
+| 优先级 | 信号 | 配置 | 实测 |
+|---|---|---|---|
+| 1 | 网络流结束（SSE `close`） | 网络通道（DeepSeek） | `settle_lag=0.00s` ✅ |
+| 2 | **本条消息的工具栏出现** | `selectors.done_toolbar` | ChatGPT：`finalize=done_toolbar`，**早于**稳定性兜底（60 拍 vs 需 90 拍）✅ |
+| 3 | 停止按钮消失（+ N 拍稳定） | `selectors.stop_button` | ChatGPT 短问答 `settle_lag=1.28s` ✅ |
+| 4 | 文本稳定（兜底） | `stable_polls` / `min_wait_before_stable` | 豆包 `settle_lag=12.70s` ❌（实测无任何可用站点信号） |
+
+⚠️ `done_toolbar` **只在"最后一个正文容器所在的消息块"内检查**（工具栏是逐条的，否则历史消息永远命中），
+且**隐藏（仅 hover 显示）不算** —— 否则"元素存在但没显示"会被误判成完成。
+
+**P2 参考**：`tests/chatgpt_stream.py`（CDP `Runtime.evaluate` 注入 + `MutationObserver(characterData)` + `expose_function` 推送 + 容器自动重绑）——
+它的"稳定 1.5s ∧ 无停止按钮"就等价于上表 3/4 的合取，差别是事件驱动让 `settled` 精确、窗口可以更短。
+
 ## 4. 我建议的路线（供你选）
 
 **路线 1（保守，先做小改）**：继续 DOM，但把今天的经验固化：
