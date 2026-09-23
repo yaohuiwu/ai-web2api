@@ -236,7 +236,8 @@ def test_playground_model_switch_unbinds_thread():
     js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
     assert "let boundThreadModel" in js
     assert "function applyThreadModel" in js
-    assert 'boundThreadModel' in js and '已自动改为新会话' in js
+    assert "boundThreadModel" in js
+    assert "已改为新对话" in js, "换模型时的提示应说明已改为新对话（并清空上下文）"
     # 切换会话时同步模型 + 提示绑定关系
     assert "switchThread(t.thread_id, t.loaded !== false, t.model)" in js
     assert "该会话绑定模型" in js
@@ -362,3 +363,46 @@ def test_live_control_ui_guards():
     assert "pointerdown" in js and "pointerup" in js and "setPointerCapture" in js
     assert "/input" in js and "livePagePoint" in js
     assert ".ctrl" in css
+
+
+def test_model_switch_resets_conversation():
+    """换模型必须换对话：清空消息区 + 内存历史（否则上一家的消息会被带给新 provider）。
+
+    实测事故：在 DeepSeek 界面里出现了 ChatGPT 的报错文本 —— 因为切模型只解绑了 thread_id，
+    屏幕上的旧消息（以及内存里的 messages）被继续当作上下文发送。
+    """
+    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+    assert "function resetConversation(" in js
+    assert "currentModel" in js
+    seg = js[js.index('$("#model").addEventListener("change"'):]
+    seg = seg[:seg.index("});") + 3]
+    assert "resetConversation(" in seg, "换模型时必须清空当前对话"
+    body = js[js.index("function resetConversation("):]
+    body = body[:body.index("\n}")]
+    assert "messages = []" in body and '#chat").innerHTML' in body
+
+
+def test_current_model_initialized_on_load_and_thread_switch():
+    """currentModel 必须在"模型列表加载完"和"切换会话"时初始化。
+
+    否则初值 null → 用户第一次换模型时检测不到变化 → 旧 provider 的消息留在屏幕上
+    （实测：DeepSeek 界面里出现 ChatGPT 的报错文本）。
+    """
+    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+    load = js[js.index("async function loadModels"):]
+    load = load[:load.index("\n}\n")]
+    assert "currentModel = sel.value" in load, "loadModels 结束前要记住当前模型"
+    apply_fn = js[js.index("function applyThreadModel"):]
+    apply_fn = apply_fn[:apply_fn.index("\n}\n")]
+    assert "currentModel = model" in apply_fn, "切会话要同步 currentModel"
+
+
+def test_pending_reset_on_model_switch_during_stream():
+    """生成中换模型：不能半途清屏（会把正在写的回复擦掉）→ 挂起，流结束后再清。"""
+    js = (WEBUI / "assets/js/playground.js").read_text(encoding="utf-8")
+    assert "pendingReset" in js
+    seg = js[js.index('$("#model").addEventListener("change"'):]
+    seg = seg[:seg.index("});") + 3]
+    assert "if (streaming)" in seg and "pendingReset" in seg
+    tail = js[js.index("    streaming = false;"):]
+    assert "pendingReset" in tail[:220], "流结束处要执行挂起的 reset"

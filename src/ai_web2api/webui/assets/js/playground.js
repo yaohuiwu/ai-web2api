@@ -285,6 +285,7 @@ async function loadModels() {
     const stored = localStorage.getItem("aiw2api_model");
     if (stored && [...sel.options].some((o) => o.value === stored)) sel.value = stored;
     if (!sel.value && sel.options.length) sel.value = sel.options[0].value;
+    currentModel = sel.value;      // 记住"屏幕上这段对话用的模型"，之后换模型必须换对话
   } catch (e) {
     $("#model").innerHTML = `<option>模型列表加载失败: ${esc(e.message)}</option>`;
   }
@@ -560,6 +561,11 @@ async function dispatchLoop(firstAttachments = null) {
     $("#hint").textContent = "提示：503 = 未登录；429 = 队列满/thread 超限；409 = thread 冲突或失效";
   } finally {
     streaming = false;
+    if (pendingReset) {               // 生成中换过模型 → 现在才清
+      const n = pendingReset;
+      pendingReset = null;
+      resetConversation(n);
+    }
     $("#send").disabled = false;
     $("#input").focus();
     refreshThreads();
@@ -567,6 +573,7 @@ async function dispatchLoop(firstAttachments = null) {
 }
 
 async function send() {
+  currentModel = $("#model").value;        // 记录这段对话用的模型
   const text = $("#input").value.trim();
   if ((!text && !pendingAttachments.length) || streaming) return;
   const atts = pendingAttachments.slice();
@@ -717,12 +724,15 @@ function renderHistory(msgs) {
 
 // 当前会话绑定的模型（同一 thread 不能换模型；换了就自动解绑成新会话）
 let boundThreadModel = null;
+let currentModel = null;   // 当前屏幕对话所用的模型（换模型必须换对话）
+let pendingReset = null;   // 生成中换模型 → 等这轮流完再清（避免半途清屏）
 
 function applyThreadModel(tid, model) {
   boundThreadModel = model || null;
   if (!model) return;
   const sel = $("#model");
   if ([...sel.options].some((o) => o.value === model) && sel.value !== model) sel.value = model;
+  currentModel = model;          // 会话自带模型 → 同步为"当前对话模型"，避免误判成"用户换模型"
   addMeta(`该会话绑定模型 ${model} · 续用只发最后一条；换模型会自动改为新会话`);
 }
 
@@ -732,8 +742,7 @@ async function switchThread(tid, loaded = true, model = null) {
   const el = $("#threadId");
   el.value = tid;
   el.dispatchEvent(new Event("input"));
-  messages = [];
-  $("#chat").innerHTML = "";
+  resetConversation();
   addMeta(`已切换到会话 ${tid}`);
   try {
     const r = await fetch(`/admin/threads/${encodeURIComponent(tid)}/messages`);
@@ -755,25 +764,45 @@ function newChat() {
   if (streaming) return;
   $("#threadId").value = "";
   $("#threadId").dispatchEvent(new Event("input"));
-  messages = [];
-  $("#chat").innerHTML =
-    '<div class="msg meta"><div class="bubble">已开始新会话（无 thread_id = 无状态，每次请求独立）</div></div>';
+  resetConversation("已开始新会话（无 thread_id = 无状态，每次请求独立）");
   refreshThreads();
 }
 
 $("#newChat").onclick = newChat;
 $("#refreshThreads").onclick = refreshThreads;
 
-// 换模型：若当前挂着绑定会话，自动解绑（否则服务端会 409 thread_mismatch）
+// 换模型：**必须换新对话**——清空消息区与内存里的 messages。
+// 否则上一家的对话会留在屏幕上、并被当作历史带给新 provider（实测："ChatGPT 的报错跑到了 DeepSeek"）。
 $("#model").addEventListener("change", () => {
   const tid = $("#threadId").value.trim();
   const picked = $("#model").value;
-  if (!tid || !boundThreadModel || picked === boundThreadModel) return;
-  $("#threadId").value = "";
-  $("#threadId").dispatchEvent(new Event("input"));
-  addMeta(`已切换到 ${picked}：会话 ${tid} 绑定的是 ${boundThreadModel}，已自动改为新会话（同一会话不能换模型）`);
-  boundThreadModel = null;
+  const changed = currentModel && currentModel !== picked;
+  let why = "";
+  if (tid && boundThreadModel && picked !== boundThreadModel) {
+    $("#threadId").value = "";
+    $("#threadId").dispatchEvent(new Event("input"));
+    boundThreadModel = null;
+    why = `会话 ${tid} 绑定的是 ${boundThreadModel || "另一模型"}；`;
+  }
+  currentModel = picked;
+  if (changed || why) {
+    const notice = `已切换到 ${picked}：${why}已改为新对话（不同模型/会话的上下文不能混用）`;
+    if (streaming) {
+      pendingReset = notice;          // 正在生成：等这轮流结束再清，别半途把回复擦掉
+      toast("正在生成中，回复结束后会自动切换为新对话");
+    } else {
+      resetConversation(notice);
+    }
+  }
 });
+
+// 清空当前对话（消息区 + 内存历史），用于换模型/换会话等"上下文断层"场景
+function resetConversation(notice) {
+  messages = [];
+  $("#chat").innerHTML = notice
+    ? `<div class="msg meta"><div class="bubble">${esc(notice)}</div></div>`
+    : "";
+}
 
 // ---- 工具条「更多」/ 侧栏搜索 / 原始报文 ----
 $("#advToggle").onclick = () => document.querySelector(".toolbar").classList.toggle("expanded");
