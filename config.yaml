@@ -115,7 +115,7 @@ providers:
         submit:
           - "div.ds-button--primary"
           - "button[type=submit]"
-    queue: {max_size: 10, timeout: 60}
+    queue: {max_size: 3, timeout: 30}   # 短队列：超限/超时立刻 429，客户端自己重试
     response_timeout: 180
     poll_interval: 0.2
     stable_polls: 12
@@ -195,7 +195,7 @@ providers:
         submit:
           - "button:has-text(\"登录\")"
           - "button[type=submit]"
-    queue: {max_size: 10, timeout: 60}
+    queue: {max_size: 3, timeout: 30}   # 短队列：超限/超时立刻 429，客户端自己重试
     response_timeout: 180
     poll_interval: 0.2
     stable_polls: 20
@@ -260,7 +260,7 @@ providers:
       # 认证有效期以 session-token 判定（实测 ~90 天）
       auth_cookies: ["__Secure-next-auth.session-token*"]
       expiry_warn_days: 7   # 手动认证：提前 7 天提醒更新认证信息
-    queue: {max_size: 10, timeout: 60}
+    queue: {max_size: 3, timeout: 30}   # 短队列：超限/超时立刻 429，客户端自己重试
     response_timeout: 180
     send_confirm_timeout: 20  # 发出去但没开始生成 → 重发一次并快速失败（别死等 180s）
     poll_interval: 0.2
@@ -315,7 +315,7 @@ providers:
       # refresh_token 才是真正有效期（JWT exp，实测约 90 天）→ 用它做倒计时/到期提醒
       auth_local_storage: ["refresh_token"]
       hint: "Kimi 仅支持微信扫码 / 手机号+验证码（易盾验证码）→ 用 python -m ai_web2api.cli login kimi 或 /ui 导入 state"
-    queue: {max_size: 10, timeout: 60}
+    queue: {max_size: 3, timeout: 30}   # 短队列：超限/超时立刻 429，客户端自己重试
     response_timeout: 180
     poll_interval: 0.2
     stable_polls: 20
@@ -356,7 +356,7 @@ providers:
     login:
       mode: manual
       hint: "豆包无密码登录（手机号验证码/扫码）→ 宿主执行 ./scripts/login.sh doubao 手动登录一次"
-    queue: {max_size: 10, timeout: 60}
+    queue: {max_size: 3, timeout: 30}   # 短队列：超限/超时立刻 429，客户端自己重试
     response_timeout: 180
     poll_interval: 0.2
     stable_polls: 20
@@ -396,7 +396,7 @@ providers:
     login:
       mode: manual
       hint: "chatglm.cn 前置阿里云 WAF 滑块且无密码登录：请在**有显示器的宿主**执行 ./scripts/login.sh glm 手动过验证并登录，再导入登录态"
-    queue: {max_size: 10, timeout: 60}
+    queue: {max_size: 3, timeout: 30}   # 短队列：超限/超时立刻 429，客户端自己重试
     response_timeout: 180
     poll_interval: 0.2
     stable_polls: 20
@@ -449,7 +449,7 @@ providers:
         - 'a[href*="SignOutOptions"]'
         - 'img[alt*="个人资料"]'
       hint: "Gemini 游客态即可用；如需保存历史/更多能力，用 ./scripts/login.sh gemini 手动登录（Google 账号）"
-    queue: {max_size: 10, timeout: 60}
+    queue: {max_size: 3, timeout: 30}   # 短队列：超限/超时立刻 429，客户端自己重试
     response_timeout: 300     # Google 免费档在密集请求后容易“思考中”很久 → 放宽
     poll_interval: 0.2
     stable_polls: 20

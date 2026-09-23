@@ -172,8 +172,16 @@ class LoginConfig(BaseModel):
 
 
 class QueueConfig(BaseModel):
-    max_size: int = 10
-    timeout: float = 60.0
+    """Provider 闸门：只为**可用性与正确性**（串行 + 短队列 + 快速失败）。
+
+    见 docs/CONCURRENCY.md：不做优先级；队列要短（超限/超时立刻 429，让客户端自己重试）。
+    """
+
+    max_size: int = 3           # 排队人数上限（含正在跑的那个）；超出 → 429
+    timeout: float = 30.0       # 等待上限（秒）→ 429
+    # 同时几个请求在跑：默认 1（最安全、最省 CPU、风控风险最低）；
+    # 需要"不同会话并行"时才调到 2–3，代价是**同站点并发↑ → 被限流/风控风险↑**
+    max_inflight: int = 1
 
 
 class NetworkConfig(BaseModel):

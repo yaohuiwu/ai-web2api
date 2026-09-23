@@ -403,6 +403,7 @@ async function sendStream(body) {
     method: "POST", headers: headers(), body: JSON.stringify(body),
   });
   if (!res.ok) {
+    if (res.status === 429) toast("provider 正忙（队列已满/超时）——稍后重试即可");
     let data = null;
     try { data = await res.json(); } catch {}
     throw new Error(errMsg(data));

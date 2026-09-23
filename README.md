@@ -42,6 +42,8 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 > threshold and the two pitfalls found while running it: [`docs/TEXT_FIDELITY.md`](docs/TEXT_FIDELITY.md) (`./scripts/text_fidelity.sh`).
 > Live view interaction (click / drag / type on the streamed page) is **implemented**: toggle
 > `🖱 交互` in the Playground — gated by `server.live_control`: [`docs/LIVE_CONTROL.md`](docs/LIVE_CONTROL.md).
+> Concurrency: one provider = one page = **one request at a time** (short queue, fast 429);
+> the locking policy is deliberately minimal — see [`docs/CONCURRENCY.md`](docs/CONCURRENCY.md).
 > **Network exposure (default: localhost only).** The server binds `127.0.0.1` by default, and the
 > Docker port mapping is loopback-only (`127.0.0.1:8000:8000`) — the live view, live-view *interaction*
 > and session admin endpoints have **no auth**. To expose it, bind `0.0.0.0` and put auth/reverse-proxy

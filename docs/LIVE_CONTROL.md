@@ -102,6 +102,8 @@ POST /admin/{provider}/input
 - **审计**：每个 `action` 记一条 INFO 日志（含 provider/action/坐标/耗时），沿用 `[timeline]` 的风格便于 grep。
 - **不做**：不提供任意 JS 执行接口（避免变成"远程代码执行"）。
 
+> 与请求闸门的关系（谁先谁后、忙时怎么办）见 [`docs/CONCURRENCY.md`](CONCURRENCY.md)。
+
 ## 7.5 拖拽会不会影响后续点击？（已实现部分的实测 + 后续防护）
 
 **结论：会，但都能防住。** 分两类：

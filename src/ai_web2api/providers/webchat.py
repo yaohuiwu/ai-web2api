@@ -1494,6 +1494,10 @@ XMLHttpRequest.prototype.send = function (body) {{
 
     # ---------- 时间线打点（无时间线时全部 no-op，单元测试可直接调轮询） ----------
 
+    def note_queued(self, waited_ms: float) -> None:
+        """等闸门的时长进时间线（用于区分"排队慢"和"生成慢"）。"""
+        self._tl_count("queued_ms", waited_ms)
+
     def _tl_get(self):
         return getattr(self, "_tl", None)
 

@@ -196,6 +196,9 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         resolved = registry.resolve_model_name(model)  # 驱动用真实模型名
         chat_id = _chat_id()
 
+        # 闸门排队时长记进时间线（区分"排队慢"与"生成慢"）；闸门本身不区分优先级。
+        on_queued = getattr(provider, "note_queued", None)
+
         thread_id = req.thread_id or request.headers.get("x-thread-id")
         if not thread_id and threads is not None:
             # 无 thread_id 请求也保存为可回访会话（playground「新会话」左侧列表需要）：
@@ -240,9 +243,12 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
 
             if req.stream and fc_active:
                 try:
-                    async with session.lock:
+                    async with session.lock:                     # ① 会话锁（页面只有一个输入框）
                         content, thinking = await asyncio.wait_for(
-                            provider.complete(messages, resolved, **kwargs),
+                            provider.gate.run(                        # ② 再拿闸门（锁序固定，防死锁）
+                                provider.complete, messages, resolved,
+                                on_queued=on_queued, **kwargs,
+                            ),
                             timeout=provider.cfg.response_timeout + 60,
                         )
                     await tm.persist(thread_id)
@@ -288,7 +294,11 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                     try:
                         content_parts: list[str] = []
                         thinking_parts: list[str] = []
-                        async for chunk in provider.generate(messages, resolved, **kwargs):
+                        # 会话锁 → 闸门（锁序固定）：thread 模式同样受 provider 级节奏/优先级约束
+                        async for chunk in provider.gate.run_iter(
+                            provider.generate, messages, resolved,
+                            on_queued=on_queued, **kwargs,
+                        ):
                             if chunk.kind == "thinking":
                                 thinking_parts.append(chunk.text)
                             else:
@@ -321,7 +331,10 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             try:
                 async with session.lock:
                     content, thinking = await asyncio.wait_for(
-                        provider.complete(messages, resolved, **kwargs),
+                        provider.gate.run(
+                            provider.complete, messages, resolved,
+                            on_queued=on_queued, **kwargs,
+                        ),
                         timeout=provider.cfg.response_timeout + 60,
                     )
                 await tm.persist(thread_id)  # 正常完成 → 落盘会话 URL id（重启可恢复）
@@ -379,7 +392,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
 
         if req.stream and fc_active:
             content, thinking = await provider.gate.run(
-                provider.complete, messages, resolved, **opts
+                provider.complete, messages, resolved, on_queued=on_queued, **opts
             )
             c, calls, finish = (
                 parse_tool_response(content, req.tools) if req.tools else (content, None, "stop")
@@ -392,12 +405,17 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
 
         if req.stream:
             return StreamingResponse(
-                _stream_completions(provider, messages, resolved, chat_id, **opts),
+                _stream_completions(
+                    provider, messages, resolved, chat_id,
+                    on_queued=on_queued, **opts,
+                ),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
-        content, thinking = await provider.gate.run(provider.complete, messages, resolved, **opts)
+        content, thinking = await provider.gate.run(
+            provider.complete, messages, resolved, on_queued=on_queued, **opts
+        )
         message = ResponseMessage(content=content, reasoning_content=thinking)
         finish = "stop"
         if fc_active and req.tools:
@@ -410,7 +428,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             choices=[ChatCompletionChoice(message=message, finish_reason=finish)],
         )
 
-    async def _stream_completions(provider, messages, model, chat_id, **opts):
+    async def _stream_completions(provider, messages, model, chat_id, on_queued=None, **opts):
         created = int(time.time())
         # 首个 chunk：角色声明
         yield _sse(
@@ -423,7 +441,10 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             }
         )
         try:
-            async for chunk in provider.gate.run_iter(provider.generate, messages, model, **opts):
+            async for chunk in provider.gate.run_iter(
+                provider.generate, messages, model,
+                on_queued=on_queued, **opts,
+            ):
                 delta = (
                     {"reasoning_content": chunk.text}
                     if chunk.kind == "thinking"
@@ -531,6 +552,16 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         page, _focus = await _live_page(name, thread_id)
         if page is None:
             return _live_no_page(name)
+        # 若锁定了某个会话且它正在生成 → 画面交互属于"体验"，直接 409 让路（见 docs/CONCURRENCY.md）
+        session_lock = None
+        if thread_id and threads is not None:
+            sess = threads.get(thread_id)
+            session_lock = getattr(sess, "lock", None)
+        if session_lock is not None and session_lock.locked():
+            return JSONResponse(
+                status_code=409,
+                content={"error": {"message": "该会话正在生成，画面交互请稍后再试（API 优先）"}},
+            )
         lock = _input_locks.setdefault(name, asyncio.Lock())
         async with lock:                     # 同一 provider 串行，避免动作交错成坏序列
             try:
@@ -591,6 +622,9 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                     "has_state_file": state_file.exists(),
                     "login_error_screenshot": p.browser.login_error_path(name).exists(),
                     "login_error_at": p.browser.login_error_mtime(name),
+                    "queue": (lambda g: g.stats() if g is not None else None)(
+                        getattr(p, "gate", None)
+                    ),
                     "models": [m.name for m in pcfg.models],
                     "model_aliases": pcfg.model_aliases,
                     "default_model": p.exposed_models[0] if p.exposed_models else None,
@@ -656,9 +690,12 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         return None, None
 
     def _live_busy(name: str) -> bool:
+        """有请求在跑**或有人在排队** → 实时画面降帧（CPU 让给生成；UI 只做体验）。"""
         provider = registry.providers().get(name)
         gate = getattr(provider, "gate", None) if provider is not None else None
-        return bool(gate is not None and gate.busy)
+        if gate is None:
+            return False
+        return bool(gate.busy or gate.has_waiters)
 
     async def _live_resolve(name: str, focus: str | None = None):
         """给 LiveController 用：只要 page（thread_id 由 _live_page 单独提供）。"""
