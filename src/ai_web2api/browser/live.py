@@ -156,6 +156,7 @@ class _Stream:
     def __init__(self, provider: str, opts: FrameOptions, focus: str | None = None) -> None:
         self.provider = provider
         self.focus = focus
+        self.key = f"{provider}/{focus or '-'}"
         self.opts = opts
         self.queues: set[asyncio.Queue] = set()
         self.task: asyncio.Task | None = None
@@ -163,6 +164,7 @@ class _Stream:
         self.error: str | None = None
         self.frames = 0
         self.source: str = "timer"          # timer | screencast（诊断用，state 里可见）
+        self.cast_disabled = False          # 本轮不再尝试 screencast（失败/被别的流占用）
         self.cast_q: asyncio.Queue = asyncio.Queue(maxsize=1)   # screencast 推来的帧（只留最新）
 
     @property
@@ -205,6 +207,8 @@ class LiveController:
         self._grace = grace
         self._cfg = config
         self._streams: dict[str, _Stream] = {}
+        # screencast 是"每页一份"：记录哪个流持有它（存流对象本身，见 _start_cast）
+        self._cast_owner: dict[int, _Stream] = {}
 
     # ---------- 单帧 ----------
 
@@ -267,7 +271,20 @@ class LiveController:
         return min(st.opts.fps, busy_fps) if self._busy(st.provider) else st.opts.fps
 
     async def _start_cast(self, page: Page, st: _Stream) -> bool:
-        """启动 screencast（帧直接进队列）；失败 → False（回退定时截图）。"""
+        """启动 screencast（帧直接进队列）；失败 → False（回退定时截图）。
+
+        ⚠️ screencast **每页只能有一份**：如果同一个页面已经被另一个**在跑**的流持有
+        （例如你同时开着 Playground 的画面和「画面」页，且锁定不同会话），
+        这里直接回退定时截图，绝不抢——抢会把对方的画面弄断（实测）。
+        """
+        key = id(page)
+        owner = self._cast_owner.get(key)
+        if owner is not None and owner is not st and owner.running:
+            logger.info(
+                "live: 该页面已有 screencast（%s）→ 本流用定时截图 provider=%s",
+                owner.focus or "-", st.provider,
+            )
+            return False
         try:
             vp = page.viewport_size or {}
             size = {"width": int(vp.get("width", 1440)), "height": int(vp.get("height", 900))}
@@ -289,16 +306,23 @@ class LiveController:
             try:
                 await page.screencast.start(on_frame=on_frame, quality=st.opts.quality, size=size)
             except Exception as exc:  # noqa: BLE001
-                # "Screencast is already started"：多为上一次采集异常结束留下的残留
-                # → 先 stop() 再重试一次（否则只能回退到定时截帧）
+                # "already started"：可能是**别的流**在用（已在上方拦掉），也可能是上次异常结束的残留。
+                # 这里只在"没有别的流持有"时清理残留并重试一次；否则回退定时截图。
                 if "already started" not in str(exc).lower():
                     raise
+                if owner is not None and owner is not st:
+                    logger.info(
+                        "live: screencast 归属 %s → 本流回退定时截图 provider=%s",
+                        owner.focus or "-", st.provider,
+                    )
+                    return False
                 logger.info("live: 清理残留 screencast 后重试 provider=%s", st.provider)
                 try:
                     await page.screencast.stop()
                 except Exception:  # noqa: BLE001
                     pass
                 await page.screencast.start(on_frame=on_frame, quality=st.opts.quality, size=size)
+            self._cast_owner[key] = st
             st.source = "screencast"
             st.last_frame = time.monotonic()
             st.frames += 1
@@ -307,6 +331,22 @@ class LiveController:
         except Exception as exc:  # noqa: BLE001  旧版 Playwright / CDP 不支持 → 回退
             logger.info("live: screencast 不可用（%s），回退定时截图 provider=%s", exc, st.provider)
             return False
+
+    async def _capture_into(self, st: _Stream, page: Page) -> bool:
+        """截一帧并推给观众；返回 False = 采集该结束（页没了/出错）。"""
+        try:
+            frame = await capture(page, st.opts)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            st.error = str(exc)[:200]
+            logger.info("live: 截帧失败 provider=%s: %s", st.provider, exc)
+            return False
+        st.last_frame = time.monotonic()
+        st.frames += 1
+        st.error = None
+        st.push(frame)
+        return True
 
     async def _run(self, st: _Stream) -> None:
         page: Page | None = None
@@ -317,8 +357,11 @@ class LiveController:
                 if page is None:
                     st.error = "没有可截图的页面"
                     break
-                if not use_cast:
+                if not use_cast and not st.cast_disabled:
                     use_cast = await self._start_cast(page, st)
+                    if not use_cast:
+                        # 失败或被同页其它流占用：本轮就老老实实定时截帧，别每拍重试（刷日志/白开销）
+                        st.cast_disabled = True
                     if use_cast:
                         # 先推一帧（CDP 首帧可能还没来；保证 <img> 立刻有画面）
                         try:
@@ -327,10 +370,16 @@ class LiveController:
                             pass
 
                 if use_cast:
+                    idle_keepalive = float(getattr(self._cfg, "live_idle_keepalive_seconds", 5.0) or 0)
                     try:
-                        frame = await asyncio.wait_for(st.cast_q.get(), timeout=3.0)
+                        frame = await asyncio.wait_for(st.cast_q.get(), timeout=idle_keepalive or 3.0)
                     except asyncio.TimeoutError:
-                        continue                          # 空闲：等下一次重绘（不截帧，几乎零成本）
+                        # 空闲：等下一次重绘（不截帧，几乎零成本）。但若已经很久没推帧，
+                        # 补一帧让客户端知道"画面还在、内容是最新的"（避免看起来像断了）。
+                        if idle_keepalive and (time.monotonic() - (st.last_frame or 0)) > idle_keepalive:
+                            if not await self._capture_into(st, page):
+                                break
+                        continue
                     fps = self._fps_for(st)
                     gap = time.monotonic() - (st.last_frame or 0.0)
                     if gap < 1.0 / fps:                   # 重绘太密 → 按 fps 节流
@@ -361,6 +410,8 @@ class LiveController:
                     await page.screencast.stop()
                 except Exception:  # noqa: BLE001
                     pass
+                if self._cast_owner.get(id(page)) is st:
+                    self._cast_owner.pop(id(page), None)
             st.push(None)  # 通知观众结束
             st.task = None
 

@@ -56,6 +56,12 @@
     position: absolute; border: 1px dashed var(--blue); background: color-mix(in srgb, var(--blue) 12%, transparent);
     pointer-events: none; display: none;
   }
+  .live-dot {
+    position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+    border: 2px solid var(--blue); background: color-mix(in srgb, var(--blue) 30%, transparent);
+    pointer-events: none; animation: live-dot-fade .7s ease-out;
+  }
+  @keyframes live-dot-fade { from { transform: scale(1); opacity: 1; } to { transform: scale(1.8); opacity: 0; } }
   .live-ctrl {
     display: flex; align-items: center; gap: 4px; padding: 6px 8px;
     border-top: 1px solid var(--border); flex-wrap: wrap;

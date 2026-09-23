@@ -108,9 +108,11 @@ async def test_screencast_frames_are_pushed_to_viewers(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_idle_does_not_periodically_screenshot(monkeypatch):
-    """空闲（无重绘）时不再周期性截帧：0.5s 内除首帧外不该继续截。"""
+    """空闲（无重绘）时不再**按帧率**周期性截帧（只有 keepalive 会补帧）。"""
     page = _FakePage()
-    ctl = LiveController(lambda p, f: _async(page), grace=0.05, config=_Cfg())
+    cfg = _Cfg()
+    cfg.live_idle_keepalive_seconds = 10        # 把 keepalive 关掉，专门验证"不按 fps 截帧"
+    ctl = LiveController(lambda p, f: _async(page), grace=0.05, config=cfg)
     st = ctl.stream("deepseek", FrameOptions(fps=50, quality=75))
 
     monkeypatch.setattr(live_mod, "capture", lambda p, o, **kw: page.screenshot())
@@ -196,4 +198,88 @@ async def test_stale_screencast_is_stopped_and_retried(monkeypatch):
     finally:
         st.queues.clear()
         task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_page_screencast_is_not_stolen_by_second_stream(monkeypatch):
+    """screencast 每页只能一份：第二个流（同页、不同 focus）必须回退定时截图，而不是抢。
+
+    实测事故：同时开着 Playground 画面与「画面」页（锁不同会话）→ 两条流互抢 screencast
+    → 画面被反复打断（日志里 -观众/+观众 交替）。
+    """
+    page = _FakePage()
+    ctl = LiveController(lambda p, f: _async(page), grace=0.05, config=_Cfg())
+    monkeypatch.setattr(live_mod, "capture", lambda p, o, **kw: p.screenshot())
+
+    st1 = ctl.stream("deepseek", FrameOptions(fps=50, quality=75), focus="t1")
+    st2 = ctl.stream("deepseek", FrameOptions(fps=50, quality=75), focus="t2")
+    st1.queues.add(asyncio.Queue(maxsize=1))
+    st2.queues.add(asyncio.Queue(maxsize=1))
+    t1 = asyncio.create_task(ctl._run(st1))
+    st1.task = t1
+    await asyncio.sleep(0.1)
+    assert st1.source == "screencast" and page.screencast.started == 1
+
+    t2 = asyncio.create_task(ctl._run(st2))
+    st2.task = t2
+    await asyncio.sleep(0.1)
+    assert st2.source == "timer", "第二个流不能抢 screencast（否则互相打断）"
+    assert page.screencast.started == 1, "不应再次 start()"
+
+    for st, task in ((st1, t1), (st2, t2)):
+        st.queues.clear()
+        st.stop()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_idle_keepalive_pushes_frame(monkeypatch):
+    """空闲兜底：长时间没有 screencast 帧时补一帧（避免画面看起来"断了"）。"""
+    page = _FakePage()
+    cfg = _Cfg()
+    cfg.live_idle_keepalive_seconds = 0.1
+    ctl = LiveController(lambda p, f: _async(page), grace=0.05, config=cfg)
+    st = ctl.stream("deepseek", FrameOptions(fps=50, quality=75))
+    monkeypatch.setattr(live_mod, "capture", lambda p, o, **kw: p.screenshot())
+    st.queues.add(asyncio.Queue(maxsize=1))
+    task = asyncio.create_task(ctl._run(st))
+    try:
+        await asyncio.sleep(0.05)
+        before = page.screenshots
+        await asyncio.sleep(0.4)                      # 空闲 0.4s，keepalive=0.1s → 应补帧
+        assert page.screenshots > before, "空闲应有 keepalive 补帧"
+    finally:
+        st.queues.clear()
+        st.stop()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_cast_failure_is_not_retried_every_tick(monkeypatch):
+    """screencast 不可用/被占用时只尝试一次（否则每拍都 start() → 刷日志 + 白开销）。"""
+    page = _FakePage(boom=True)
+    ctl = LiveController(lambda p, f: _async(page), grace=0.05, config=_Cfg())
+    st = ctl.stream("deepseek", FrameOptions(fps=50, quality=75))
+    monkeypatch.setattr(live_mod, "capture", lambda p, o, **kw: p.screenshot())
+
+    calls = {"n": 0}
+
+    async def counting_start(**_kw):
+        calls["n"] += 1
+        raise RuntimeError("Screencast is already started")
+
+    page.screencast.start = counting_start  # type: ignore[assignment]
+    st.queues.add(asyncio.Queue(maxsize=1))
+    task = asyncio.create_task(ctl._run(st))
+    try:
+        await asyncio.sleep(0.4)
+        first = calls["n"]
+        assert first <= 2, f"最多一次清理重试，实际 {first} 次"
+        await asyncio.sleep(0.4)                        # 再等一轮：不应继续重试
+        assert calls["n"] == first, f"不该每拍重试（{first} → {calls['n']}）"
+        assert st.cast_disabled is True and st.source == "timer"
+    finally:
+        st.queues.clear()
+        st.stop()
         await asyncio.gather(task, return_exceptions=True)

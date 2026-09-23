@@ -601,6 +601,9 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         return {
             "server": {
                 "version": "0.1.0",
+                # UI 据此决定是否显示"画面交互"入口（避免点了没反应=按钮状态错误）
+                "live_view": cfg.server.live_view,
+                "live_control": cfg.server.live_control,
                 "uptime_seconds": round(time.monotonic() - started_at, 1),
                 "host": cfg.server.host,
                 "port": cfg.server.port,

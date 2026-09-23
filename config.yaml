@@ -21,6 +21,7 @@ server:
                            # 需要更严时：设 WEB2API_API_KEY 并只用内网暴露
   live_fps: 5              # 默认帧率
   live_busy_fps: 2         # 生成中帧率上限（避免抢占自动化；写死 1 太顿）
+  live_idle_keepalive_seconds: 5   # 空闲兜底：这么久没推帧就补一帧
   live_crop: ""             # ""=整页；“last”=只裁最后一条回复（Playground 会显式传 crop=last）
   live_quality: 75         # 默认 JPEG 质量（50 时字迹发糊；75 明显更清楚）
 browser:

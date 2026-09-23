@@ -268,7 +268,9 @@ class ServerConfig(BaseModel):
     live_view: bool = True       # 总开关；false = /admin/{p}/screen* 一律 403
     live_control: bool = False   # 预留：输入注入（P2），默认关
     live_fps: float = 5.0        # 默认帧率（可被 ?fps= 覆盖）
-    live_busy_fps: float = 2.0   # 有请求在跑时的帧率上限（避免抢占自动化；原先写死 1.0 太顿）
+    live_busy_fps: float = 2.0
+    # 空闲兜底：这么久没推帧就补一帧（避免画面长时间不动、看起来像断了）
+    live_idle_keepalive_seconds: float = 5.0   # 有请求在跑时的帧率上限（避免抢占自动化；原先写死 1.0 太顿）
     live_quality: int = 75       # 默认 JPEG 质量（可被 ?quality= 覆盖；50 时文字边缘糊，75 明显更清楚）
     live_crop: str = ""          # 默认裁剪："" = 整页；"last" = 只裁最后一条回复（原生像素，窄栏里字更清楚）
     # 会话绑定（thread_id）：空闲回收 TTL / 上限 / 是否并行 / 是否持久化
