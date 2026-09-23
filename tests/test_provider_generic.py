@@ -126,6 +126,15 @@ async def test_auto_login_gives_up_after_retries():
 
 # ---- _send_prompt：type_prompt（contenteditable/React）vs fill ----
 
+class _ElHandle:
+    def __init__(self, page, sel):
+        self._page = page
+        self._sel = sel
+
+    async def evaluate(self, script, *args):
+        self._page.calls.append(("evaluate", self._sel, script, args))
+
+
 class _Loc:
     def __init__(self, page, sel):
         self._page = page
@@ -146,6 +155,9 @@ class _Loc:
 
     async def press_sequentially(self, t, delay=0):
         self._page.calls.append(("type", t))
+
+    async def element_handle(self):
+        return _ElHandle(self._page, self._sel)
 
 
 class _Page:
@@ -177,7 +189,8 @@ async def test_send_prompt_type_mode():
     p = WebChatProvider(cfg, _StubBrowser())
     page = _Page(present={"#prompt-textarea"})
     await p._send_prompt(page, "#prompt-textarea", "hello")
-    assert ("type", "hello") in page.calls
+    assert not any(c[0] == "type" for c in page.calls), "不应再逐字输入"
+    assert any(c[0] == "evaluate" for c in page.calls), "应使用 JS 注入"
     assert ("fill", "hello") not in page.calls
     assert page.keys == ["Enter"]  # send_button 空 → 回车发送
 

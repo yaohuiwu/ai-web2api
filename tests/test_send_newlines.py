@@ -15,12 +15,24 @@ class _StubBrowser:
     default_locale = "zh-CN"
 
 
-class _Input:
-    def __init__(self, rec: list) -> None:
-        self.rec = rec
+class _ElHandle:
+    def __init__(self, rec, content_editable=True):
+        self._rec = rec
+        self._content_editable = content_editable
 
-    async def press_sequentially(self, text: str, delay: float = 0) -> None:
-        self.rec.append(("type", text))
+    async def evaluate(self, script, *args):
+        self._rec.append(("evaluate", script, args))
+        if "isContentEditable" in script:
+            return self._content_editable
+
+
+class _Input:
+    def __init__(self, rec: list, content_editable: bool = True) -> None:
+        self.rec = rec
+        self._content_editable = content_editable
+
+    async def element_handle(self):
+        return _ElHandle(self.rec, self._content_editable)
 
 
 class _Keyboard:
@@ -56,26 +68,43 @@ async def test_newlines_use_shift_enter():
     inp = _Input(page.rec)
     await prov._type_prompt_human(page, inp, "line1\nline2\n\nline4")
 
-    typed = [t for kind, t in page.rec if kind == "type"]
-    keys = [k for kind, k in page.rec if kind == "key"]
-    assert typed == ["line1", "line2", "line4"]  # 空行不输入字符
-    assert keys == ["Shift+Enter", "Shift+Enter", "Shift+Enter"]  # 3 个换行
-    assert "Enter" not in keys  # 绝不裸 Enter（会提前发送）
+    # JS 注入：应调用 evaluate 执行 JS 脚本（含 <br> 换行）
+    evals = [item for item in page.rec if item[0] == "evaluate"]
+    assert len(evals) >= 1, "应有 JS 注入调用"
+    # 检查脚本中用 createElement('br') 处理换行
+    scripts = [e[1] for e in evals if isinstance(e[1], str)]
+    assert any("createElement('br')" in s for s in scripts), "contenteditable 换行应用 <br>"
+    # 不应再有为换行按 Shift+Enter
+    keys = [item[1] for item in page.rec if item[0] == "key"]
+    assert "Shift+Enter" not in keys
+    assert "Enter" not in keys
 
 
 @pytest.mark.asyncio
 async def test_crlf_normalized():
     prov, page = _prov(), _Page()
     await prov._type_prompt_human(page, _Input(page.rec), "a\r\nb\rc")
-    assert [t for kind, t in page.rec if kind == "type"] == ["a", "b", "c"]
-    assert [k for kind, k in page.rec if kind == "key"] == ["Shift+Enter", "Shift+Enter"]
+    # JS 注入应接收规范化后的文本（\r\n 和 \r 都转为 \n）
+    evals = [item for item in page.rec if item[0] == "evaluate"]
+    assert len(evals) >= 1
+    # 检查传入的文本中不含 \r
+    for kind, script, args in evals:
+        if kind == "evaluate" and isinstance(args, tuple) and args:
+            assert "\r" not in str(args[0]), f"文本应已规范化，收到: {args[0]!r}"
 
 
 @pytest.mark.asyncio
 async def test_single_line_has_no_newline_key():
     prov, page = _prov(), _Page()
     await prov._type_prompt_human(page, _Input(page.rec), "可用工具:[{...}]")
-    assert [k for kind, k in page.rec if kind == "key"] == []
+    # 单行无换行，JS 注入中不应有 <br>
+    # 单行无换行，JS 注入的文本参数不应含 \n
+    evals = [item for item in page.rec if item[0] == "evaluate"]
+    assert len(evals) >= 1
+    # 找到 contenteditable 注入调用的文本参数
+    for kind, script, args in evals:
+        if kind == "evaluate" and isinstance(args, tuple) and args:
+            assert "\n" not in args[0], f"单行文本不应含换行: {args[0]!r}"
 
 
 # ---------- 发送确认：点发送 ≠ 消息发出（实测 ChatGPT 会静默丢掉） ----------

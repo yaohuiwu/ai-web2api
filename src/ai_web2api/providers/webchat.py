@@ -35,7 +35,7 @@ from ..core.errors import (
     UnsupportedModeError,
 )
 from ..core.timeline import TIMELINES, RequestTimeline
-from .base import BaseProvider, StreamChunk, build_prompt, last_user_message
+from .base import BaseProvider, StreamChunk, build_prompt, js_type, last_user_message
 
 logger = logging.getLogger(__name__)
 
@@ -779,18 +779,9 @@ class WebChatProvider(BaseProvider):
             await page.wait_for_timeout(400)
 
     async def _type_prompt_human(self, page: Page, input_el, prompt: str) -> None:
-        """逐字输入提示词（触发 React 受控状态）。
-
-        换行必须用 ``Shift+Enter``：contenteditable / textarea 会把裸 ``Enter`` 当成
-        “发送”，多行提示词（function calling 工具清单、markdown）会被截断 → 发送不完整。
-        """
-        text = prompt.replace("\r\n", "\n").replace("\r", "\n")
-        lines = text.split("\n")
-        for i, line in enumerate(lines):
-            if line:
-                await input_el.press_sequentially(line, delay=15)
-            if i < len(lines) - 1:
-                await page.keyboard.press("Shift+Enter")
+        """JS 注入输入（委托给 js_type）：瞬间完成，触发 React/ProseMirror 状态同步。"""
+        el = await input_el.element_handle()
+        await js_type(el, prompt)
 
     # ---------- 网络接入 ----------
 

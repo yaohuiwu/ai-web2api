@@ -20,6 +20,24 @@ from ..core.queue import SerialGate
 
 logger = logging.getLogger(__name__)
 
+# JS 注入脚本：textarea/input — 设值 + 派发事件触发 React 状态同步
+_JS_TYPE_INPUT = """(el, text) => {
+    el.value = text;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+}"""
+
+# JS 注入脚本：contenteditable — innerText + <br> 换行 + InputEvent
+_JS_TYPE_CONTENTEDITABLE = """(el, text) => {
+    el.innerText = '';
+    const lines = text.split('\\n');
+    lines.forEach((line, i) => {
+        if (i > 0) el.appendChild(document.createElement('br'));
+        el.appendChild(document.createTextNode(line));
+    });
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+}"""
+
 
 @dataclass
 class StreamChunk:
@@ -48,6 +66,20 @@ def last_user_message(messages: list[dict]) -> str:
         if m.get("role") == "user":
             return str(m.get("content", "")).strip()
     return ""
+
+
+async def js_type(el, text: str) -> None:
+    """JS 注入输入：瞬间完成，触发 React/ProseMirror 状态同步。
+
+    对 textarea/input：设 value + dispatch input/change 事件。
+    对 contenteditable：设 innerText（\n → <br>）+ dispatch InputEvent。
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    is_content_editable = await el.evaluate("el => el.isContentEditable")
+    if is_content_editable:
+        await el.evaluate(_JS_TYPE_CONTENTEDITABLE, text)
+    else:
+        await el.evaluate(_JS_TYPE_INPUT, text)
 
 
 class BaseProvider(abc.ABC):
@@ -294,12 +326,12 @@ class BaseProvider(abc.ABC):
                 return await self._login_fail(
                     page, f"登录页输入框未匹配（user={user_sel}, pwd={pwd_sel}）"
                 )
-            # 逐字输入（而非 fill()）：Qwen 的登录框是 React 受控组件，fill() 只改 DOM 值、
-            # React state 仍为空 → 点“登录”会被静默跳过（实测：零请求、页面又变回验证码 tab）。
+            # JS 注入输入（而非 fill/press_sequentially）：React 受控组件
+            # fill() 只改 DOM 值、state 仍为空 → 静默跳过。js_type 设值 +
+            # 派发事件可正确触发 React 状态同步，且瞬间完成。
             async def _type(el, text: str) -> None:
                 await el.click()
-                await el.fill("")
-                await el.press_sequentially(text, delay=25)
+                await js_type(await el.element_handle(), text)
 
             await _type(page.locator(user_sel).first, creds["username"])
             await _type(page.locator(pwd_sel).first, creds["password"])

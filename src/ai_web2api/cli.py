@@ -27,6 +27,7 @@ from .browser import extractor
 from .browser.manager import BrowserManager
 from .config import AppConfig, load_config
 from .core.auth_expiry import compute_for_state_file
+from .providers.base import js_type
 from .providers.registry import ProviderRegistry
 
 
@@ -184,10 +185,9 @@ def _post_state(url: str, provider: str, state: dict, api_key: str | None) -> tu
 
 
 async def _type_into(loc, text: str) -> None:
-    """逐字输入（React 受控组件 fill() 可能不生效）。"""
+    """JS 注入输入（React 受控组件 fill() 可能不生效），委托给 js_type。"""
     await loc.click()
-    await loc.fill("")
-    await loc.press_sequentially(text, delay=25)
+    await js_type(await loc.element_handle(), text)
 
 
 async def _login_flow(args: argparse.Namespace) -> int:
