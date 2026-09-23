@@ -70,3 +70,12 @@ def test_real_config_loads_and_env_applies(monkeypatch: pytest.MonkeyPatch):
     deepseek = next(p for p in cfg.providers if p.name == "deepseek")
     assert deepseek.selectors.mode_button == {}
     assert deepseek.selectors.toggle_button["deep_think"]
+
+
+def test_debug_port_adds_cdp_arg():
+    """诊断端口：配置 >0 才加 --remote-debugging-port（默认为 0，不开放 CDP）。"""
+    from ai_web2api.browser.manager import LAUNCH_ARGS, build_launch_args
+    from ai_web2api.config import BrowserConfig
+
+    assert build_launch_args(BrowserConfig()) == LAUNCH_ARGS
+    assert "--remote-debugging-port=9222" in build_launch_args(BrowserConfig(debug_port=9222))

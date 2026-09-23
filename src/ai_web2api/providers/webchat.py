@@ -1072,7 +1072,8 @@ XMLHttpRequest.prototype.send = function (body) {{
         stable_polls = cfg.stable_polls
         min_wait = cfg.min_wait_before_stable
         stop_settle = getattr(cfg.selectors, "stop_settle_polls", 2) or 0
-        soft_polls = getattr(cfg.selectors, "soft_stable_polls", 0) or 0
+        preview = bool(getattr(cfg.selectors, "preview_stream", False))
+        preview_min = max(1, int(getattr(cfg.selectors, "preview_min_chars", 12) or 12))
         # 正文重渲染严重的站点（如 ChatGPT）逐字 diff 会丢内容 → 改“缓冲、结束一次性发”
         buffer_content = not cfg.selectors.stream_content
 
@@ -1273,13 +1274,14 @@ XMLHttpRequest.prototype.send = function (body) {{
                         )
                 return
 
-            # 预览流：缓冲模式下，正文稳定 soft_polls 拍后开始把已有内容发出去（不必等定稿）
-            if buffer_content and soft_polls and not done:
-                if not preview_active and stable >= soft_polls:
+            # 预览流：缓冲模式下**一有新增就发**（不再要求"稳定 N 拍"——
+            # 站点连续吐字时文本每拍都变，等稳定等于等到停顿才发，用户侧就是"缓冲感"）。
+            # 只发前缀追加；非前缀改写（重渲染）丢弃，尾巴由定稿时的 _suffix_after 补。
+            if buffer_content and preview and not done:
+                if not preview_active and len(last["content"]) >= preview_min:
                     preview_active = True
                     logger.info(
-                        "[%s] 预览流开始（正文稳定 %d 拍，已生成 %d 字）",
-                        self.name, stable, len(last["content"]),
+                        "[%s] 预览流开始（已生成 %d 字）", self.name, len(last["content"])
                     )
                 if preview_active:
                     for kind in ("thinking", "content"):

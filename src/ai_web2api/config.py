@@ -93,10 +93,12 @@ class SelectorsConfig(BaseModel):
     response_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = [".ds-markdown"]
     thinking_container: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
     stop_button: Annotated[list[str], BeforeValidator(_norm_selectors)] = []
-    # 「预览流」：缓冲模式（stream_content: false）下，正文**稳定 N 拍后**就开始把已生成的内容
-    # 发给客户端（用户不必等到定稿才看到字）；之后只发**前缀追加**的增量，非前缀改写丢弃（防脏数据）。
-    # 0 = 关闭（回到"定稿时一次性发"的旧行为）。定稿条件不受影响（防截断的安全网照旧）。
-    soft_stable_polls: int = 0
+    # 「预览流」：缓冲模式（stream_content: false）下**边生成边把新追加的文字发出去**（实时感）。
+    # 与 true 的流式模式区别：只发**前缀追加**的增量（非前缀的 DOM 重渲染改写一律丢弃，防脏数据），
+    # 定稿时再按最长公共前缀补发尾巴 → 既不脏也不丢。**定稿条件完全不受影响**（防截断安全网照旧）。
+    preview_stream: bool = False
+    # 攒够这么多字才开始发（避免把开场动画/自己的提问当正文误发）
+    preview_min_chars: int = 12
     # 停止按钮**消失后**，再要求 N 拍无变化才定稿（双确认）：
     # 否则可能在最后一拍渲染完成前就取文本 → 长回答/表格被截断（实测 Kimi/豆包/GLM）
     stop_settle_polls: int = 2  # 填了可加快"生成结束"判定
@@ -228,6 +230,10 @@ class BrowserConfig(BaseModel):
     state_expiry_margin: float = 86400.0  # 登录态剩余有效期低于该值才落盘 state.json（秒）；未过期不重复写
     auth_expiry_warn_days: float = 3.0    # 「认证即将过期」默认预警阈值（天）；provider 可用 login.expiry_warn_days 覆盖
     status_check: bool = True            # 定时状态检测总开关（关掉后后台不再访问页面）
+    # 诊断用：>0 时给 Chromium 传 ``--remote-debugging-port``，可用 Playwright
+    # ``connect_over_cdp`` **连到服务正在用的页面**查看真实 DOM/时序（省得新开会话触发风控）。
+    # 默认 0 关闭；仅在容器内可用（docker-compose 未把该端口 publish 出去）。
+    debug_port: int = 0
     status_check_headless: bool = True   # 定时检测用独立 headless 浏览器（不弹窗口，默认开）
 
 

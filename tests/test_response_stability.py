@@ -216,14 +216,15 @@ async def test_stop_button_requires_settle_before_done(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_preview_stream_emits_before_finalize(monkeypatch):
-    """预览流：缓冲模式下正文稳定 N 拍就开始发增量，用户不必等定稿。
+    """预览流：缓冲模式下**一有新增就发**，用户不必等定稿（实测定稿要再等 ~8s）。
 
-    实测定稿要等 `stable_polls*3` 拍（豆包 ≈8s），而正文早就生成完了 → Playground 一直空白。
+    注意不能要求"文本稳定 N 拍后才发"——站点连续吐字时每拍都在变（实测豆包每 0.2s 长一次），
+    等稳定等于"等到停顿才发"，用户看到的就是"缓冲/一次性返回"。
     """
     from ai_web2api.browser import extractor as ex
 
     prov = _prov(response_container=[".md"], thinking_container=[], stream_content=False,
-                 soft_stable_polls=2)
+                 preview_stream=True, preview_min_chars=1)
     page = _FakePage()
     seq = ["第一段。", "第一段。第二段。", "第一段。第二段。第三段。"]
     polls = {"n": 0}
@@ -251,12 +252,13 @@ async def test_preview_stream_emits_before_finalize(monkeypatch):
     assert first_at < polls["n"] - 2, (
         f"预览流必须**在定稿前**发出（首次 t=第{first_at}拍 / 定稿在第{polls['n']}拍）"
     )
-    assert first_at <= 7, f"应稳定 soft_stable_polls(2) 拍左右就发，实际第 {first_at} 拍"
+    assert first_at <= 2, f"攒够 preview_min_chars 就该发（不该等稳定），实际第 {first_at} 拍"
+    assert len(chunks) >= 3, f"应边生成边发多条增量，实际 {len(chunks)} 条"
 
 
 @pytest.mark.asyncio
 async def test_buffered_without_preview_keeps_old_behavior(monkeypatch):
-    """soft_stable_polls=0（默认）→ 与旧行为一致：定稿时一次性发完整正文。"""
+    """preview_stream=false（默认）→ 与旧行为一致：定稿时一次性发完整正文。"""
     from ai_web2api.browser import extractor as ex
 
     prov = _prov(response_container=[".md"], thinking_container=[], stream_content=False)

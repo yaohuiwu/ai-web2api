@@ -62,7 +62,7 @@ def test_disabled_providers_keep_calibration():
 @pytest.mark.parametrize("p", ENABLED + DISABLED, ids=lambda p: p.name)
 def test_preview_stream_requires_buffering(p):
     """预览流只对"缓冲模式"有意义（流式模式本来就在实时发）。"""
-    if p.selectors.soft_stable_polls > 0:
+    if p.selectors.preview_stream:
         assert p.selectors.stream_content is False, (
-            f"{p.name}: soft_stable_polls>0 需配合 stream_content: false"
+            f"{p.name}: preview_stream 需配合 stream_content: false"
         )

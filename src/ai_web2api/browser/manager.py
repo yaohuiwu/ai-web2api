@@ -26,6 +26,15 @@ LAUNCH_ARGS = [
 ]
 
 
+def build_launch_args(cfg: BrowserConfig) -> list[str]:
+    """启动参数；``browser.debug_port > 0`` 时额外开 CDP（诊断用，默认关）。"""
+    args = list(LAUNCH_ARGS)
+    port = int(getattr(cfg, "debug_port", 0) or 0)
+    if port > 0:
+        args.append(f"--remote-debugging-port={port}")
+    return args
+
+
 class BrowserManager:
     """管理一个 Chromium 实例。
 
@@ -51,7 +60,7 @@ class BrowserManager:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
             headless=self._cfg.headless,
-            args=LAUNCH_ARGS,
+            args=build_launch_args(self._cfg),
         )
         logger.info("browser started (headless=%s)", self._cfg.headless)
 

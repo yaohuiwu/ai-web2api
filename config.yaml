@@ -19,6 +19,7 @@ server:
   live_fps: 5              # 默认帧率（生成中自动降到 1，避免抢占自动化）
   live_quality: 50         # 默认 JPEG 质量
 browser:
+  debug_port: 9222          # 诊断用（CDP 连接现有页面看 DOM）；0 = 关闭。容器内有效，未对外 publish
   headless: true          # 静默运行（不弹浏览器窗口）；由 .env 覆盖：
                           # 优先级 WEB2API_HEADLESS > DEEPSEEK_HEADLESS(<PROVIDER>_HEADLESS) > 本项
                           # 需要看得见窗口（自动登录被验证码拦住时手动登录）：DEEPSEEK_HEADLESS=false 重启
@@ -213,6 +214,9 @@ providers:
       type_prompt: true         # contenteditable/React → 逐字输入
       stream_content: false     # markdown 重渲染严重 → 正文缓冲后一次性发（避免 diff 丢内容）
       response_all_new: true    # 多容器/多段回答全部拼接（防截断；保险）
+      # 预览流：实测正文 9.9s 就完整了，但缓冲模式要等到定稿(17.4s)才吐字 → 边生成边发
+      preview_stream: true
+      preview_min_chars: 12
       send_button:
         - 'button[data-testid="send-button"]'
         - 'button[aria-label="Send prompt"]'
@@ -321,8 +325,9 @@ providers:
       type_prompt: true
       stream_content: false     # 表格/代码类回答重渲染多 → 缓冲后一次发，避免拿到残片
       response_all_new: true    # 一次回答可能被拆成多个 .md-box-root → 新容器全部拼接
-      # 预览流：正文稳定 6 拍（≈1.3s）就开始发增量，用户不用等到定稿（实测定稿要再等 ~8s）
-      soft_stable_polls: 6
+      # 预览流：边生成边发增量（实测定稿还要再等 ~8s，缓冲模式会让 Playground 空白到定稿）
+      preview_stream: true
+      preview_min_chars: 12
       send_button:              # 实测：发送控件是 DIV（不是 button），输入后出现
         - ".send-btn-wrapper"
       response_container:       # 实测：助手回答（`.md-box-root` 同时匹配用户提问，必须排除右侧对齐的那侧）
