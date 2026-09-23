@@ -110,7 +110,7 @@ class RequestTimeline:
             "model": self.model,
             "thread": self.thread,
             "path": self.path,
-            "finalize": self.finalize,
+            "finalize": self.finalize or self.notes.get("finalize", ""),
             "ts": round(time.time()),
             "marks": {k: round(v, 3) for k, v in self.marks.items()},
             "counts": {k: round(v, 3) for k, v in self.counts.items()},

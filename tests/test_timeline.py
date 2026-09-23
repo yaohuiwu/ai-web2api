@@ -216,3 +216,12 @@ async def test_settled_is_marked_at_dom_change_not_at_emit(monkeypatch):
     assert tl.get("done") is not None
     assert tl.get("settled") <= tl.get("done"), "settled 不能晚于 done（否则 settle_lag 为负）"
     assert tl.settle_lag is not None and tl.settle_lag >= 0
+
+
+def test_as_dict_exposes_finalize_from_notes():
+    """``/admin/timeline`` 与未来入库都读 as_dict()：finalize 不能只在日志行里出现。"""
+    tl = RequestTimeline(provider="doubao")
+    tl.note("finalize", "stability")
+    tl.mark("final")
+    assert tl.as_dict()["finalize"] == "stability"
+    assert "finalize=stability" in tl.line()
