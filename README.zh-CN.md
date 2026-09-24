@@ -7,7 +7,9 @@
 
 ![界面预览](docs/assets/ui/playground.png)
 
-把各种 **Web 端 AI 聊天产品**（DeepSeek、Kimi、通义千问、ChatGPT 等）封装成 **OpenAI 兼容 API** 的服务。
+把各种 **Web 端 AI 聊天产品**（DeepSeek、ChatGPT、豆包等）封装成 **OpenAI 兼容 API** 的服务。
+
+> 仅供个人学习交流。
 
 核心机制：Playwright 驱动真实浏览器 —— 打开网页、保持登录态、输入消息、增量提取流式响应，再以 OpenAI 的 `/v1/chat/completions` 格式暴露出去。不逆向任何内部 API，纯 DOM 自动化，Web 改版只需改配置里的选择器。
 
@@ -20,7 +22,7 @@
 - **OpenAI 兼容 API** —— `/v1/chat/completions`（流式 SSE + 非流式）与 `/v1/models`；OpenAI SDK、LangChain / llama_index 及任何 OpenAI 客户端可直接接入，可选 API Key 鉴权
 - **多 provider + 真实浏览器自动化** —— 支持 DeepSeek、ChatGPT、豆包、智谱清言、Kimi（Qwen 可选）；Playwright 驱动真实页面（纯 DOM 自动化，不逆向内部接口），站点改版只需改 `config.yaml` 里的选择器
 - **登录态与会话跨重启保持** —— `storage_state` 持久化（cookies **与 localStorage token** 都参与指纹，轮换即重新落盘）、自动登录或一条命令手动登录、手动认证 provider 的**认证有效期倒计时 + 到期提醒**、以及 thread 会话续用
-- **流式、思考、附件、工具** —— SSE 增量输出，思考过程单独放在 `reasoning_content`；OpenAI 风格的图片附件；Function Calling（`tools` / `tool_choice` → 标准 `tool_calls`）
+- **流式、思考、附件、工具**（实验性质，不建议大量使用） —— SSE 增量输出，思考过程单独放在 `reasoning_content`；OpenAI 风格的图片附件；Function Calling（`tools` / `tool_choice` → 标准 `tool_calls`）
 - **自带 Web 界面**（免构建、亮暗主题、响应式）—— **状态面板**（登录态、认证有效期、模型/别名、一键导入登录态）、**Playground**（流式对话、思考面板、附件、工具测试、原始报文 + 复制为 curl）、**会话页**（搜索 / provider 过滤 / 分页）与**实时画面**（只读浏览器画面，并能呈现捕获到的交互组件）
 - **Docker 友好** —— 镜像自带 Chromium；`WEB2API_HEADLESS=false` 在 Xvfb 下跑 headful（应对必须"真实显示器"的站点，如 ChatGPT 的 Sentinel）；`config.yaml` 已挂载，改配置只需 restart
 

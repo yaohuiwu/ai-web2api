@@ -7,7 +7,9 @@
 
 ![UI preview](docs/assets/ui/playground.png)
 
-Turn **web-only AI chat products** (DeepSeek, Kimi, Qwen/Tongyi, ChatGPT, …) into an **OpenAI-compatible API**.
+Turn **web-only AI chat products** (DeepSeek, ChatGPT, Doubao, …) into an **OpenAI-compatible API**.
+
+> 仅供个人学习交流。
 
 How it works: Playwright drives a real browser — opens the page, keeps the session alive, types the message, incrementally extracts the streaming answer — and exposes it as OpenAI's `/v1/chat/completions`. No internal API reverse-engineering: pure DOM automation, so when a site changes you only update selectors in the config.
 
@@ -18,7 +20,7 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 - OpenAI-compatible API (`/v1/chat/completions` streaming + non-streaming, `/v1/models`) — drop-in with OpenAI SDK
 - Multi-provider, real-browser automation — no internal API reverse-engineering; site redesign → update selectors only
 - Login state survives restarts (`storage_state` + localStorage fingerprint); auth-expiry countdown
-- Streaming, thinking, attachments, function calling
+- Streaming, thinking, attachments, function calling（实验性质，不建议大量使用）
 - Built-in web UI: status dashboard, Playground, Threads, Live view
 
 ## Supported providers
