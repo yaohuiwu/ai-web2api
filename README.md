@@ -5,13 +5,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
-![UI preview](docs/assets/ui.png)
+![UI preview](docs/assets/ui/playground.png)
 
 Turn **web-only AI chat products** (DeepSeek, Kimi, Qwen/Tongyi, ChatGPT, …) into an **OpenAI-compatible API**.
 
 How it works: Playwright drives a real browser — opens the page, keeps the session alive, types the message, incrementally extracts the streaming answer — and exposes it as OpenAI's `/v1/chat/completions`. No internal API reverse-engineering: pure DOM automation, so when a site changes you only update selectors in the config.
 
-**Web UI at `/ui/`**: status dashboard, **Playground** (chat + live view), **Threads** page and **Live view** page. Light/dark theme.
+**Web UI at `/ui/`**: [status dashboard](docs/UI.md#status-dashboard), [Playground](docs/UI.md#playground), [Threads](docs/UI.md#threads), [Live view](docs/UI.md#live-view--交互). Light/dark theme.
 
 ## Features
 

@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
-![界面预览](docs/assets/ui.png)
+![界面预览](docs/assets/ui/playground.png)
 
 把各种 **Web 端 AI 聊天产品**（DeepSeek、Kimi、通义千问、ChatGPT 等）封装成 **OpenAI 兼容 API** 的服务。
 

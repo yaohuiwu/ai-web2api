@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-IMG = "docs/assets/ui.png"
+IMG_DIR = "docs/assets/ui"
 
 
 def test_bilingual_readme_defaults_to_english():
@@ -24,11 +24,13 @@ def test_bilingual_readme_defaults_to_english():
 
 
 def test_readme_shows_ui_screenshot_at_top():
-    assert (ROOT / IMG).is_file(), f"缺少截图 {IMG}"
+    import os as _os
+    imgs = [f for f in _os.listdir(ROOT / IMG_DIR) if f.endswith((".png", ".jpg", ".webp"))]
+    assert imgs, f"{IMG_DIR} 中无截图"
     for name in ("README.md", "README.zh-CN.md"):
         lines = (ROOT / name).read_text(encoding="utf-8").split("\n")
-        img_line = next((i for i, ln in enumerate(lines) if IMG in ln), None)
-        assert img_line is not None, f"{name} 未引用界面截图"
+        img_line = next((i for i, ln in enumerate(lines) if any(img in ln for img in imgs)), None)
+        assert img_line is not None, f"{name} 未引用界面截图（需要 {imgs} 之一）"
         assert img_line <= 12, f"{name} 截图应放在最上方（当前第 {img_line + 1} 行）"
         body = "\n".join(lines)
         assert body.count("```") % 2 == 0, f"{name} 代码块未闭合（会破坏 GitHub 渲染）"
