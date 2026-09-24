@@ -328,6 +328,8 @@ providers:
     driver: doubao
     url: https://www.doubao.com/chat
     locale: zh-CN
+    session_url: "{base}/chat/{id}"   # 会话 URL 模板（thread 恢复用）
+    capture_mode: observer            # 事件驱动：DOM 一变就唤醒提取（比 0.2s 轮询快得多）
     models:
       - {name: doubao-web, ui_label: "豆包"}
     selectors:
