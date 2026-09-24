@@ -44,19 +44,19 @@ def test_readme_documents_login_shortcuts():
 
 
 def test_readme_features_block_and_provider_table():
-    """开头要有 Feature 块 + provider 支持状态表（Qwen 如实标注不稳定/慢/登录易被墙）。"""
+    """开头要有 Feature 块 + provider 支持状态表（仅保留核心 provider）。"""
     cases = {
         "README.md": {
             "feature_head": "## Features",
             "table_head": "## Supported providers",
             "quick_start": "## Quick start",
-            "tokens": ["DeepSeek", "ChatGPT", "Qwen", "unstable", "slow", "blocked", "enabled: false"],
+            "tokens": ["DeepSeek", "ChatGPT", "Doubao", "实验性质", "不建议大量使用", "仅供个人学习交流"],
         },
         "README.zh-CN.md": {
             "feature_head": "## 功能特性",
             "table_head": "## 支持的 provider",
             "quick_start": "## 快速开始",
-            "tokens": ["DeepSeek", "ChatGPT", "Qwen", "不稳定", "登录容易被墙", "enabled: false"],
+            "tokens": ["DeepSeek", "ChatGPT", "Doubao", "实验性质", "不建议大量使用", "仅供个人学习交流"],
         },
     }
     for name, spec in cases.items():
