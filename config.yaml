@@ -420,7 +420,7 @@ providers:
   # 游客/额度用尽后站点会降级为 Flash-Lite 仍可免费聊；抓取与模型无关（只读 DOM）
   # 登录（Google）只能手动、但非必需：登录后才能保存历史/用更多能力
   gemini:
-    enabled: false
+    enabled: true
     driver: gemini
     url: https://gemini.google.com/app
     locale: zh-CN
