@@ -218,6 +218,8 @@ class ProviderConfig(BaseModel):
     queue: QueueConfig = Field(default_factory=QueueConfig)
     network: NetworkConfig = Field(default_factory=NetworkConfig)
     model_aliases: dict[str, str] = {}  # 别名 → 本 provider 的模型名（如 gpt-4 → deepseek-web）
+    # 是否走 ``browser.proxy``：False = 该 provider **直连**（国内站点用，避免走国外代理）。
+    proxy: bool = True
     response_timeout: float = 180.0
     # 发送确认窗口（秒）：这么久内既无新容器也无停止按钮 → 判定消息没真正发出，
     # 重发一次并快速失败（0 = 关闭）。避免被静默丢弃时死等满 response_timeout。
@@ -257,6 +259,9 @@ class BrowserConfig(BaseModel):
     # 默认 0 关闭；仅在容器内可用（docker-compose 未把该端口 publish 出去）。
     debug_port: int = 0
     status_check_headless: bool = True   # 定时检测用独立 headless 浏览器（不弹窗口，默认开）
+    # 全局代理（Playwright 按 **context** 应用，不是启动级 → 可按 provider 退出）。
+    # 由环境变量 ``WEB2API_PROXY`` 注入（如 http://host.docker.internal:7890）。
+    proxy: str | None = None
 
 
 class ServerConfig(BaseModel):
@@ -359,6 +364,14 @@ def apply_env_overrides(cfg: AppConfig) -> AppConfig:
     导致设了无头仍弹窗口。
     """
     cfg = _apply_headless_override(cfg)
+
+    # 全局代理（可选）：只作为 Playwright **context** 代理的默认值，provider 可 proxy: false 退出
+    proxy = os.environ.get("WEB2API_PROXY", "").strip()
+    if proxy:
+        logger.info("browser.proxy 被环境变量 WEB2API_PROXY 覆盖：%s", proxy)
+        cfg = cfg.model_copy(
+            update={"browser": cfg.browser.model_copy(update={"proxy": proxy})}
+        )
 
     # host/port 的刻意例外：容器内需要 0.0.0.0（安全暴露交给 compose 的端口绑定）
     host = os.environ.get("WEB2API_HOST", "").strip()

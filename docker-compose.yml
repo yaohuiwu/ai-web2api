@@ -29,6 +29,10 @@ services:
       WEB2API_HEADLESS: "${WEB2API_HEADLESS:-true}"
       # 可选：设置后 /v1/* 需带 Authorization: Bearer <key>（逗号分隔多 key）
       # WEB2API_API_KEY: "your-secret-key"
+    # 容器内访问宿主服务（如宿主代理 FlClash 7890）需要它；Docker Desktop 自动提供，
+    # Linux 用 host-gateway。配合 .env 的 HTTP(S)_PROXY 让容器内 Chromium 走宿主代理。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       # ⚠️ 只绑宿主回环：局域网/公网访问不到（画面与交互接口无鉴权）。
       # 需要别的机器访问：改成 "${WEB2API_PUBLISH_PORT:-8000}:8000" 并自行加鉴权/反代。

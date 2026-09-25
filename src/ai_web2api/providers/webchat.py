@@ -96,6 +96,9 @@ class _NetFallback(Exception):
 class WebChatProvider(BaseProvider):
     """站点无关的网页聊天引擎。"""
 
+    # 网络通道"等首帧"优先时间（秒）：这期间即使 DOM 已动也不降级（见 _poll_response_net）
+    NET_FIRST_GRACE: float = 0.0
+
     # 网络抓取通道在页面里用的全局量名（init_scripts 注入的 JS 写入）
     NET_GLOBAL = "__aiw2a_sse"
     NET_GLOBAL_DONE = "__aiw2a_sse_done"
@@ -895,20 +898,35 @@ XMLHttpRequest.prototype.send = function (body) {{
   }}
   return __aiw2a_os.apply(this, arguments);
 }};
-// 补充 fetch 拦截（现代 Web App 多用 fetch）
+// 补充 fetch 拦截（现代 Web App 多用 fetch）。
+// 关键：**不能 await clone().text()** —— 那会推迟把 response 交给页面，阻塞流式 UI。
+// 改为：response 就绪后立即返回，另开 reader 增量读取 clone 的 body，
+// 边读边追加到全局量；读完置 done。页面零阻塞，我们也能实时拿到增量。
 const __aiw2a_fo = window.fetch;
 window.fetch = function(...args) {{
   const url = args[0] || (args[1] && args[1].url);
+  const p = __aiw2a_fo.apply(this, args);
   if (url && __aiw2a_rx.test(url)) {{
-    return __aiw2a_fo.apply(this, args).then(async resp => {{
+    p.then(resp => {{
       try {{
-        const rt = await resp.clone().text();
-        if (rt) window.{g} = rt;
-      }} catch(e) {{}}
-      return resp;
-    }}).finally(() => {{ window.{d} = true; }});
+        const body = resp.clone().body;
+        if (!body || !body.getReader) {{ window.{d} = true; return; }}
+        const reader = body.getReader();
+        const dec = new TextDecoder();
+        const pump = () => reader.read().then(({{done, value}}) => {{
+          if (done) {{
+            try {{ window.{g} += dec.decode(); }} catch (e) {{}}
+            window.{d} = true;
+            return;
+          }}
+          if (value) {{ try {{ window.{g} += dec.decode(value, {{stream: true}}); }} catch (e) {{}} }}
+          pump();
+        }}).catch(() => {{ window.{d} = true; }});
+        pump();
+      }} catch (e) {{ window.{d} = true; }}
+    }}).catch(() => {{ window.{d} = true; }});
   }}
-  return __aiw2a_fo.apply(this, args);
+  return p;
 }};
 """
 
@@ -1042,7 +1060,12 @@ window.fetch = function(...args) {{
                 break
             if elapsed > net_grace:
                 raise _NetFallback(f"no SSE within {net_grace:.0f}s")
-            if await self._find_new(page, md_before) or await self._find_new(page, th_before):
+            # 给网络通道一点优先时间再决定是否因 DOM 先动而降级：
+            # 有的站点（实测 Claude）发送后会立刻渲染一个**空的**助手壳，但 SSE
+            # 首帧（ping/message_start）要 ~1s 才到 → 立即降级会白白丢掉网络通道。
+            if elapsed > self.NET_FIRST_GRACE and (
+                await self._find_new(page, md_before) or await self._find_new(page, th_before)
+            ):
                 raise _NetFallback("DOM moved before SSE")
             await page.wait_for_timeout(poll_ms)
 
@@ -1094,11 +1117,14 @@ window.fetch = function(...args) {{
             thinking, content = self._parse_sse_snapshot(sse)
             # 诊断：SSE解析结果
             if not thinking and not content and sse:
-                logger.warning(
-                    "[%s] _parse_sse_snapshot返回空结果, sse_len=%d, "
-                    "sse前80字符=%r",
-                    self.name, len(sse), sse[:80],
-                )
+                # ping/心跳帧也会到这里 → 只在每轮首次告警，避免长思考时刷屏
+                if not getattr(self, "_net_empty_warned", False):
+                    self._net_empty_warned = True
+                    logger.warning(
+                        "[%s] _parse_sse_snapshot返回空结果, sse_len=%d, "
+                        "sse前80字符=%r",
+                        self.name, len(sse), sse[:80],
+                    )
             pairs: list[tuple[Literal["thinking", "content"], str]] = [
                 ("thinking", thinking),
                 ("content", content),
@@ -1140,7 +1166,7 @@ window.fetch = function(...args) {{
                 except Exception:  # noqa: BLE001
                     pass
                 return
-            if "event: close" in sse:
+            if self._net_stream_complete(sse):
                 self._tl_mark("done")
                 self._tl_note("finalize", "net_close")
                 # close 后可能还有最后一帧：再读一次最新快照 flush 残留增量
@@ -1165,6 +1191,13 @@ window.fetch = function(...args) {{
     def _parse_sse_snapshot(cls, sse_text: str) -> tuple[str, str]:
         """网络快照 → (thinking, content)。默认无解析能力 → 触发 DOM 兜底。"""
         raise _NetFallback("provider 未实现网络流解析")
+
+    def _net_stream_complete(self, sse: str) -> bool:
+        """SSE 文本里是否已出现"流结束"标记（默认 ``event: close``）。
+
+        站点协议不同：有的发 ``event: close``，有的发 ``message_stop`` 后仍保持连接
+        继续推送 ping（如 Claude）→ 子类可覆写本方法。"""
+        return "event: close" in sse
 
     async def _net_read(self, page: Page) -> str | None:
         """读取当前网络快照；注入丢失/页面导航 → None。"""
@@ -1504,6 +1537,7 @@ window.fetch = function(...args) {{
         self._widgets = []          # 组件捕获
         self._obs_wake = None       # 事件驱动唤醒（由 _start_observer 打开）
         self._obs_reinjected = False
+        self._net_empty_warned = False   # SSE 空解析告警去重（每轮一次）
 
     async def _start_observer(self, page: Page) -> bool:
         """安装事件驱动观察器；成功返回 True（任何失败都自动回退轮询）。"""

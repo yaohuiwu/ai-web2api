@@ -549,7 +549,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         if name not in registry.providers():
             return JSONResponse(status_code=404, content={"error": {"message": f"未知 provider：{name}"}})
 
-        page, _focus = await _live_page(name, thread_id)
+        page, shown_thread = await _live_page(name, thread_id)
         if page is None:
             return _live_no_page(name)
         # 若锁定了某个会话且它正在生成 → 画面交互属于"体验"，直接 409 让路（见 docs/CONCURRENCY.md）
@@ -562,10 +562,20 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 status_code=409,
                 content={"error": {"message": "该会话正在生成，画面交互请稍后再试（API 优先）"}},
             )
+        # reopen 目标：会话页 → 回该会话 URL（重开新文档、不丢上下文）；否则回 provider 首页。
+        # 只允许这两个同源目标（不接受任意 URL）。
+        provider = registry.providers()[name]
+        reopen_url = provider.cfg.url
+        if shown_thread and threads is not None:
+            sess = threads.get(shown_thread)
+            url_id = getattr(sess, "url_id", None)
+            restore_url = provider.session_url(url_id) if url_id else None
+            if restore_url:
+                reopen_url = restore_url
         lock = _input_locks.setdefault(name, asyncio.Lock())
         async with lock:                     # 同一 provider 串行，避免动作交错成坏序列
             try:
-                result = await _apply_input(page, req)
+                result = await _apply_input(page, req, reopen_url=reopen_url)
             except Exception as exc:  # noqa: BLE001  页面在动/元素失效等
                 logger.warning("live input failed provider=%s action=%s: %s", name, req.action, exc)
                 return JSONResponse(

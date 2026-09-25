@@ -3,6 +3,7 @@
 设计见 docs/LIVE_CONTROL.md。要点：
 - **默认关闭**：只有 ``server.live_control=true`` 时路由才接受 /input（否则 403）；
 - 事件是真实输入（``isTrusted=true``）→ 站点组件/验证码都认；
+- ``reopen`` 只去调用方指定的同源目标（会话页或 provider 首页），不做任意 URL 跳转；
 - 拖拽在**一次请求内**完成（起点→down→插值移动→up），并在 ``finally`` 里补发 ``up``，
   避免"漏发 up"导致站点卡在拖拽态、后续点击全乱；
 - 坐标是 **CSS 像素**（与 ``page.mouse`` 一致），越界夹取，不报错。
@@ -18,7 +19,9 @@ from typing import Any
 from playwright.async_api import Page
 
 # 允许的动作（少而必要；不做任意 JS 执行）
-ACTIONS = ("click", "move", "down", "up", "drag", "wheel", "type", "key", "reload", "to_bottom")
+# `reopen` = 重开页面（会话页→该会话 URL；否则 provider 首页），与 `reload`（原地刷新）区分；
+# 只能去调用方传入的 reopen_url（同源白名单在路由层保证），不接受任意 URL。
+ACTIONS = ("click", "move", "down", "up", "drag", "wheel", "type", "key", "reload", "reopen", "to_bottom")
 
 MAX_STEPS = 60
 MIN_STEP_DELAY_MS = 5
@@ -75,11 +78,28 @@ def interpolate(x1: float, y1: float, x2: float, y2: float, steps: int) -> list[
     ]
 
 
-async def apply_input(page: Page, req: InputAction) -> dict[str, Any]:
-    """执行一次输入动作；返回摘要（含实际坐标/步数），供 UI 与日志使用。"""
+async def apply_input(
+    page: Page, req: InputAction, *, reopen_url: str | None = None
+) -> dict[str, Any]:
+    """执行一次输入动作；返回摘要（含实际坐标/步数），供 UI 与日志使用。
+
+    ``reopen_url``：``reopen`` 的目标（会话页 URL 或 provider 首页，由路由层决定）。
+    未提供时 ``reopen`` 退化为原地 ``reload``（不报错，保证旧调用方/测试仍可用）。
+    """
     t0 = time.monotonic()
     vp = page.viewport_size or {}
     out: dict[str, Any] = {"action": req.action, "viewport": vp}
+
+    if req.action == "reopen":
+        if not reopen_url:
+            await page.reload(wait_until="domcontentloaded", timeout=30_000)
+            return {**out, "reloaded": True, "elapsed_ms": round((time.monotonic() - t0) * 1000)}
+        await page.goto(reopen_url, wait_until="domcontentloaded", timeout=30_000)
+        return {
+            **out,
+            "url": page.url,
+            "elapsed_ms": round((time.monotonic() - t0) * 1000),
+        }
 
     if req.action == "reload":
         await page.reload(wait_until="domcontentloaded", timeout=30_000)

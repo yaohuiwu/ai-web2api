@@ -29,6 +29,7 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 |---|---|---|---|---|
 | DeepSeek | ✅ default | `deepseek-web`, `deepseek-r1-web` | auto / manual | |
 | ChatGPT | ✅ headful only | `gpt-5-web`, `gpt-4o-web`, `o3-web` | manual (Google OAuth) | |
+| Claude | ✅ | `claude-web` | manual (Google / email code) | [docs](docs/PROVIDER_CLAUDE.md) |
 | Kimi | ✅ | `kimi-web` | manual (WeChat QR) | [docs](docs/PROVIDER_KIMI.md) |
 | Doubao | ✅ | `doubao-web` | manual (phone/QR) | [docs](docs/PROVIDER_DOUBAO.md) |
 | GLM | ⚠️ disabled | `glm-web` | manual (Aliyun WAF) | [docs](docs/PROVIDER_GLM.md) |

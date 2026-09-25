@@ -45,6 +45,7 @@ profiles_dir: profiles
 providers:
   deepseek:
     url: https://chat.deepseek.com
+    proxy: false            # 国内站点直连（不走 browser.proxy）
     session_url: "{base}/a/chat/s/{id}"  # thread 恢复 URL 模板（{base}=url 去尾斜杠）
     network:
       url_pattern: "/api/v0/chat/completion"  # XHR 监听 URL（生成页面级抓取脚本）
@@ -276,6 +277,7 @@ providers:
     enabled: false
     driver: kimi
     url: https://www.kimi.com/
+    proxy: false                # 国内站点直连（不走 browser.proxy）
     locale: zh-CN
     session_url: "{base}/chat/{id}"   # 会话 URL 模板（thread 恢复用）
     models:
@@ -327,6 +329,7 @@ providers:
     enabled: true
     driver: doubao
     url: https://www.doubao.com/chat
+    proxy: false                # 国内站点直连（不走 browser.proxy）
     locale: zh-CN
     session_url: "{base}/chat/{id}"   # 会话 URL 模板（thread 恢复用）
     capture_mode: observer            # 事件驱动：DOM 一变就唤醒提取（比 0.2s 轮询快得多）
@@ -380,6 +383,7 @@ providers:
     enabled: false
     driver: glm
     url: https://chatglm.cn/main/alltoolsdetail?lang=zh
+    proxy: false                # 国内站点直连（不走 browser.proxy）
     locale: zh-CN
     models:
       - {name: glm-web, ui_label: "智谱清言"}
@@ -462,3 +466,60 @@ providers:
     poll_interval: 0.2
     stable_polls: 20
     min_wait_before_stable: 8.0
+
+  # Claude（claude.ai）
+  # 登录：**仅手动**（Google / 邮箱验证码，无密码自动登录）；未登录访问 /new 会跳 /login。
+  # 选择器为公开 DOM 结构（2026-09），登录后请按 docs/PROVIDER_CLAUDE.md 复核。
+  claude:
+    enabled: true
+    driver: claude
+    url: https://claude.ai/new
+    locale: en-US                  # Claude 默认英文 UI → aria-label 用英文
+    session_url: "{base}/chat/{id}"   # 会话 URL：claude.ai/chat/<uuid>
+    capture_mode: observer         # 事件驱动（异常自动回退轮询）
+    models:
+      - {name: claude-web, ui_label: "Claude"}
+    selectors:
+      input:                       # ProseMirror contenteditable
+        - "div.ProseMirror[contenteditable='true']"
+        - "div[contenteditable='true']"
+      type_prompt: true
+      stream_content: false        # markdown 重渲染频繁 → 缓冲后一次发
+      response_all_new: true       # 多段/多容器回答全部拼接（防截断）
+      preview_stream: true         # 边生成边发前缀增量（定稿条件不受影响）
+      preview_min_chars: 12
+      send_button:
+        - 'button[aria-label="Send message"]'
+        - 'button[aria-label="Send Message"]'
+        - 'button[data-testid="send-button"]'
+      stop_button:                 # 生成中出现、结束消失
+        - 'button[aria-label="Stop response"]'
+        - 'button[aria-label*="Stop"]'
+      response_container:          # 实测：.font-claude-response 是干净正文
+        - ".font-claude-response"   # （[data-testid="assistant-message"] 会混入 "Claude responded: …"）
+        - '[data-testid="assistant-message"] .font-claude-response'
+      thinking_container: []       # ⚠ 待实测（扩展思考折叠区；SSE 已能解析 thinking_delta）
+      done_toolbar:                # 实测：该条消息写完才出现工具栏
+        - 'button[data-testid="action-bar-copy"]'
+      login_check: []              # 未登录跳 /login（无输入框）→ 用 input 判定
+      new_chat_button:
+        - '[data-testid="new-chat-button"]'
+        - 'a[href="/new"]'
+      upload_input:                # ⚠ 待实测
+        - 'input[type="file"]'
+    login:
+      mode: manual
+      auth_cookies: ["sessionKey"]   # 实测：Claude 会话 cookie（有效期约 28 天）
+      hint: "Claude 无密码自动登录（Google / 邮箱验证码）→ 用 python -m ai_web2api.cli login claude 或 /ui 导入 state"
+    # 网络抓取（实测 SSE）：POST /api/organizations/<org>/chat_conversations/<id>/completion
+    # event: content_block_delta / data: {"type":"content_block_delta","delta":{...}}
+    network:
+      url_pattern: "/chat_conversations/[^/]+/completion"
+      grace_seconds: 20        # 思考阶段可能较久（实测首字延迟可达 ~2min）
+    queue: {max_size: 3, timeout: 30}   # 短队列：超限/超时立刻 429，客户端自己重试
+    response_timeout: 180
+    poll_interval: 0.2
+    stable_polls: 20
+    min_wait_before_stable: 10.0
+    send_confirm_timeout: 0    # Claude 思考期可能很久（实测首字延迟可达 ~2min）→ 关闭"20s 无迹象就重发"
+    thread_busy_timeout: 0
