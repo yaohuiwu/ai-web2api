@@ -694,10 +694,15 @@ class WebChatProvider(BaseProvider):
         page: Page,
         md_before: dict[str, int] | None = None,
         th_before: dict[str, int] | None = None,
+        input_sel: str | None = None,
+        prompt: str | None = None,
     ) -> bool:
         """页面是否真的开始生成：出现新的 assistant/thinking 容器，或停止按钮可见。
 
         用于区分两种情况：消息被静默丢弃（要重发/快速失败） vs 只是生成慢（继续等）。
+
+        额外检查：如果输入框已被清空，说明网页端已接受消息，即使容器计数
+        未增加（如站点在原容器内渲染回复），也判定为已发出。
         """
         for before in (md_before, th_before):
             for sel, count in (before or {}).items():
@@ -709,6 +714,21 @@ class WebChatProvider(BaseProvider):
         for stop in self.cfg.selectors.stop_button:
             if await self._is_visible(page, stop):
                 return True
+        # 输入框已清空 = 消息已发出（对 Doubao 等容器计数不增加的站点有效）
+        if input_sel:
+            try:
+                loc = page.locator(input_sel).first
+                left = ""
+                try:
+                    left = (await loc.input_value() or "").strip()
+                except Exception:  # noqa: BLE001  # contenteditable
+                    pass
+                if not left:
+                    left = (await loc.inner_text() or "").strip()
+                if not left or (prompt and prompt[:20].strip() not in left):
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
         return False
 
     async def _dismiss_overlays(self, page: Page, *, reason: str = "") -> list[str]:
@@ -849,7 +869,7 @@ class WebChatProvider(BaseProvider):
         )
 
     def _net_init_js(self, url_pattern: str) -> str:
-        """生成 XHR 监听脚本：匹配 ``url_pattern`` 的请求把 responseText 存到全局量。"""
+        """生成 XHR + fetch 监听脚本：匹配 ``url_pattern`` 的请求把 responseText 存到全局量。"""
         g, d = self.NET_GLOBAL, self.NET_GLOBAL_DONE
         pat = json.dumps(url_pattern)  # 包成 JS 字符串供 new RegExp 用，避免正则转义问题
         return f"""
@@ -875,6 +895,21 @@ XMLHttpRequest.prototype.send = function (body) {{
   }}
   return __aiw2a_os.apply(this, arguments);
 }};
+// 补充 fetch 拦截（现代 Web App 多用 fetch）
+const __aiw2a_fo = window.fetch;
+window.fetch = function(...args) {{
+  const url = args[0] || (args[1] && args[1].url);
+  if (url && __aiw2a_rx.test(url)) {{
+    return __aiw2a_fo.apply(this, args).then(async resp => {{
+      try {{
+        const rt = await resp.clone().text();
+        if (rt) window.{g} = rt;
+      }} catch(e) {{}}
+      return resp;
+    }}).finally(() => {{ window.{d} = true; }});
+  }}
+  return __aiw2a_fo.apply(this, args);
+}};
 """
 
     def init_scripts(self) -> list[str]:
@@ -886,9 +921,13 @@ XMLHttpRequest.prototype.send = function (body) {{
 
     @property
     def net_enabled(self) -> bool:
-        """是否启用网络抓取（未启用则全程走 DOM，不碰全局量）。"""
+        """是否启用网络抓取（未启用则全程走 DOM，不碰全局量）。
+
+        ``capture`` 显式为 False 时不注入（Gemini 观测型旁听）；
+        否则只要配了 ``url_pattern`` 就注入（XHR + fetch 拦截）。
+        """
         net = self.cfg.network
-        return bool(net.capture and net.url_pattern)
+        return bool(net.url_pattern) and net.capture is not False
 
     # ---------- 响应读取：网络优先 + DOM 兜底 ----------
 
@@ -987,6 +1026,19 @@ XMLHttpRequest.prototype.send = function (body) {{
                 )
             sse = await self._net_read(page)
             if sse:
+                logger.info(
+                    "[%s] 阶段1: 首次SSE事件, sse_len=%d, "
+                    "sse前100字符=%r",
+                    self.name, len(sse), sse[:100],
+                )
+                break
+            # 请求已完成但响应尚未写入 _aiw2a_sse（如 fetch 极快完成）：
+            # 直接跳过网络流式阶段，进入 DOM 定稿提取
+            if await self._net_read_done(page):
+                logger.info(
+                    "[%s] 阶段1: _net_read_done=True (未收到SSE), sse_len=%d",
+                    self.name, len(await self._net_read(page) or ""),
+                )
                 break
             if elapsed > net_grace:
                 raise _NetFallback(f"no SSE within {net_grace:.0f}s")
@@ -1028,7 +1080,25 @@ XMLHttpRequest.prototype.send = function (body) {{
             sse = await self._net_read(page)
             if sse is None:
                 raise _NetFallback("capture lost (page navigated?)")
+            # 始终先解析SSE（即使网络已完成）——SSE文本包含完整的
+            # JSON-Patch状态机，DOM提取可能因渲染未完成而遗漏内容
+            if await self._net_read_done(page):
+                self._tl_mark("done")
+                self._tl_note("finalize", "net_done")
+                logger.warning(
+                    "[%s] _net_read_done=True, sse_len=%d, "
+                    "last_content_len=%d → 先解析SSE，再走DOM兜底",
+                    self.name, len(sse or ""), len(last.get("content", "")),
+                )
+            # 解析SSE（网络完成时也必须解析，不能跳过）
             thinking, content = self._parse_sse_snapshot(sse)
+            # 诊断：SSE解析结果
+            if not thinking and not content and sse:
+                logger.warning(
+                    "[%s] _parse_sse_snapshot返回空结果, sse_len=%d, "
+                    "sse前80字符=%r",
+                    self.name, len(sse), sse[:80],
+                )
             pairs: list[tuple[Literal["thinking", "content"], str]] = [
                 ("thinking", thinking),
                 ("content", content),
@@ -1043,6 +1113,33 @@ XMLHttpRequest.prototype.send = function (body) {{
                 if inc:
                     yield StreamChunk(kind, inc)
                 last[kind] = new
+            logger.debug(
+                "[%s] SSE迭代: thinking_len=%d content_len=%d",
+                self.name, len(thinking), len(content),
+            )
+            # 网络请求已完成：SSE解析完毕后，走DOM兜底提取做最终校验
+            if await self._net_read_done(page):
+                await asyncio.sleep(0.5)  # 等渲染完成
+                try:
+                    final = await self._extract_content(page, md_sel, md_idx, last["thinking"])
+                    logger.warning(
+                        "[%s] DOM兜底提取: content_len=%d, thinking_len=%d",
+                        self.name, len(final or ""), len(last.get("thinking", "")),
+                    )
+                    if final:
+                        inc = _diff_increment(last["content"], final)
+                        if inc:
+                            yield StreamChunk("content", inc)
+                        last["content"] = final
+                    self._widgets.extend(
+                        await self._capture_widgets(page, frames_before or set())
+                    )
+                    extra = await self._frame_results(page, frames_before or set())
+                    if extra:
+                        last["content"] = (last["content"] + "\n\n" + extra).strip()
+                except Exception:  # noqa: BLE001
+                    pass
+                return
             if "event: close" in sse:
                 self._tl_mark("done")
                 self._tl_note("finalize", "net_close")
@@ -1076,6 +1173,13 @@ XMLHttpRequest.prototype.send = function (body) {{
             return v if isinstance(v, str) else None
         except Exception:
             return None
+
+    async def _net_read_done(self, page: Page) -> bool:
+        """读取网络请求是否已完成（window._aiw2a_done）。"""
+        try:
+            return bool(await page.evaluate(f"() => window.{self.NET_GLOBAL_DONE}"))
+        except Exception:
+            return False
 
     async def _poll_response_dom(
         self,
@@ -1128,7 +1232,7 @@ XMLHttpRequest.prototype.send = function (body) {{
             # 早期确认：一段时间内既无新容器、也无停止按钮 → 消息很可能是被静默丢弃了。
             # 重发一次；重发后仍无迹象就快速失败，而不是死等满 response_timeout。
             if confirm_timeout and not confirmed and elapsed > confirm_timeout:
-                delivered = await self._message_delivered(page, md_before, th_before)
+                delivered = await self._message_delivered(page, md_before, th_before, input_sel=input_sel, prompt=prompt)
                 if not delivered:
                     await self._dismiss_overlays(page, reason="探测到无生成迹象")
                     if await self._busy_hint_visible(page):
@@ -1158,7 +1262,7 @@ XMLHttpRequest.prototype.send = function (body) {{
                 break
             if confirm_timeout and confirmed and elapsed > confirm_timeout:
                 # 已重发过一次且仍无任何迹象 → 快速失败（明确原因，不误导为"超时"）
-                if not await self._message_delivered(page, md_before, th_before):
+                if not await self._message_delivered(page, md_before, th_before, input_sel=input_sel, prompt=prompt):
                     if busy_seen:
                         raise ResponseTimeoutError(
                             f'provider "{self.name}" 网站提示繁忙/排队（可能需要订阅优先队列）：'
@@ -1281,12 +1385,14 @@ XMLHttpRequest.prototype.send = function (body) {{
             if not done and stable >= stable_polls and elapsed > min_wait:
                 if last["content"]:
                     # 正文已开始：markdown 渐进渲染会有超过稳定窗口的停顿，放宽避免截断
-                    if stable >= stable_polls * 3:
+                    # （原为 *3，改为 *2：*3 对无停止按钮的站点延迟过大，Doubao 实测 *2 足够）
+                    if stable >= stable_polls * 2:
                         done = True
                 elif last["thinking"] and md_sel is not None:
                     # 思考稳定、已有正文容器但正文还没出 → 可能"思考→正文"间隙，大幅放宽。
                     # 用"思考最后一次变动的时间"判断（思考会持续跳动，stable 可能一直被清零）。
-                    if time.monotonic() - thinking_changed_recently > stable_polls * 4 * cfg.poll_interval:
+                    # 原为 *4，改为 *2：Doubao 等站点思考→正文过渡无需如此长等待
+                    if time.monotonic() - thinking_changed_recently > stable_polls * 2 * cfg.poll_interval:
                         done = True
                 # 否则（正文容器尚未出现）→ 继续等，避免空正文提前结束（Qwen 实测）
             if done:
