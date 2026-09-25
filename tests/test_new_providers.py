@@ -83,19 +83,39 @@ def test_glm_has_no_session_pattern_and_waf_documented():
     assert "复用" in doc, "要写明 WAF cookie 导入后可复用（实测）"
 
 
-def test_gemini_calibrated_but_disabled_by_default():
-    """Gemini 游客态即可用 → 默认启用；不能配 logged_out（否则会把可用状态拒掉）。"""
+def test_gemini_calibrated_and_enabled():
+    """Gemini 游客态即可用 → 启用；不能配 logged_out（否则会把可用状态拒掉）。"""
     from ai_web2api.providers.gemini import GeminiProvider
     from ai_web2api.providers.registry import DRIVERS
 
     assert DRIVERS["gemini"] is GeminiProvider
     assert GeminiProvider.session_url_pattern == r"/app/([0-9a-fA-F]{8,})"
     p = _cfg("gemini")
-    assert p.enabled is False, "账号侧限流（流不结束）→ 默认禁用，需要时手动开"
+    assert p.enabled is True
     assert any("ql-editor" in x for x in p.selectors.input), "实测 Quill 输入框别删"
     assert any("model-response-text" in x for x in p.selectors.response_container)
     assert p.selectors.logged_out == [], "游客态是合法可用状态，不能当未登录"
     assert p.selectors.type_prompt is True
+
+
+def test_gemini_login_detect_ignores_guest_placeholder_avatar():
+    """登录自动检测不得用裸头像选择器：游客态占位头像是 `img.user-icon` 的
+    default-user，未登录也命中 → 会「还没登录就保存/导入 state」（实测 bug）。
+
+    必须用「无登录入口」条件约束头像，或只认 SignOutOptions。
+    """
+    p = _cfg("gemini")
+    detect = p.login.detect
+    assert detect, "Gemini 应保留自动检测（真登录标记）"
+    # 裸 `img[alt*="个人资料"]` / `img.user-icon` 会命中最游客占位头像，禁止单独出现
+    assert 'img[alt*="个人资料"]' not in detect
+    assert "img.user-icon" not in detect, "不能单独用头像判定（游客占位头像会命中）"
+    # 若用头像，必须叠加「页面上没有登录链接」的条件
+    avatar_sels = [s for s in detect if "img.user-icon" in s]
+    assert avatar_sels, "应有一个带约束的头像选择器"
+    assert all("ServiceLogin" in s for s in avatar_sels), (
+        "头像选择器必须带「页面上没有登录链接」的条件"
+    )
 
 
 def test_claude_calibrated_scaffold():

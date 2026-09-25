@@ -456,10 +456,14 @@ providers:
       observe: true
     login:
       mode: manual
-      # CLI 自动检测：登录后才有、游客态**不存在**（实测；早前用 aria-label*="Google 账号" 会误判）
+      # CLI 自动检测：登录后才有、游客态**不存在**（实测 2026-09）。
+      # ⚠ 不能用裸 `img[alt*="个人资料"]`：游客态的占位头像是
+      #   <img class="user-icon" alt="个人资料照片" src=".../default-user">
+      #   → 未登录也会命中，导致「还没登录就自动保存/导入 state」（实测 bug）。
+      #   （早前用 aria-label*="Google 账号" 同样会误判，已废弃。）
       detect:
-        - 'a[href*="SignOutOptions"]'
-        - 'img[alt*="个人资料"]'
+        - 'a[href*="SignOutOptions"]'                              # 账号菜单里的「退出登录」= 真登录标记
+        - 'body:not(:has(a[href*="ServiceLogin"])) img.user-icon'  # 有头像**且**无「登录」入口才算已登录
       hint: "Gemini 游客态即可用；如需保存历史/更多能力，用 ./scripts/login.sh gemini 手动登录（Google 账号）"
     queue: {max_size: 3, timeout: 30}   # 短队列：超限/超时立刻 429，客户端自己重试
     response_timeout: 300     # Google 免费档在密集请求后容易“思考中”很久 → 放宽

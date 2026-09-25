@@ -49,6 +49,27 @@ POST /v1/chat/completions {"model":"gemini-web","thread_id":"gemini-cal-1", ...}
 > 注：Google 登录不适合自动化（OAuth + 强风控），与 ChatGPT 的情况一致；**但 Gemini 不登录也能用**，
 > 所以本 provider 默认就能工作，不必先登录。
 
+### 3.1 CLI 登录自动检测（⚠ 游客态占位头像）
+
+`./scripts/login.sh gemini` 用 `login.detect` 自动确认「真的登录成功」（不想等也可回终端按回车）：
+
+```yaml
+detect:
+  - 'a[href*="SignOutOptions"]'                              # 账号菜单里的「退出登录」
+  - 'body:not(:has(a[href*="ServiceLogin"])) img.user-icon'  # 有头像**且**无「登录」入口
+```
+
+**坑（实测）**：Gemini 游客态也有输入框，且顶栏会渲染一个**占位头像**：
+
+```html
+<img class="user-icon" alt="个人资料照片" src="https://lh3.googleusercontent.com/a/default-user=s64-c">
+```
+
+所以 `img[alt*="个人资料"]` / `img.user-icon` 这类**裸头像选择器在未登录时也会命中**，
+会让 CLI 在「还没登录」时就打印「自动检测到登录成功」并保存/导入 `state.json`。
+头像必须叠加「页面上没有登录链接（`a[href*="ServiceLogin"]`）」的约束，或只认 `SignOutOptions`。
+回归测试：`tests/test_new_providers.py::test_gemini_login_detect_ignores_guest_placeholder_avatar`。
+
 ## 3.5 观测型旁听（已启用，用于定位"卡住"）
 
 `network.observe: true`（**不解析 Google 内部协议**，只记状态码与时序）。超时或完成时日志/错误里会带一行：
