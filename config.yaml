@@ -347,7 +347,10 @@ providers:
       response_container:       # 实测：助手回答（`.md-box-root` 同时匹配用户提问，必须排除右侧对齐的那侧）
         - '[data-container-type="block-v2"] > div:not([class*="justify-end"]) .md-box-root'
       thinking_container: []    # ⚠ 待实测（本轮回复无深度思考折叠区）
-      stop_button: []           # 实测：**不存在**停止按钮
+      stop_button:
+        - 'button[class*="stop"]'        # 实测：生成中输入框右下角出现，结束消失
+        - 'button[class*="cancel"]'      # 兜底
+        - 'button[aria-label*="停止"]'    # 通用
       done_toolbar: []          # 实测：助手消息**没有工具栏**（hover 前后 DOM 无变化）→ 只能靠稳定性兜底
                                 #       （详见 docs/PROVIDER_DOUBAO.md「结束信号」）
       login_check: []           # 空 = 用 input 判定
@@ -363,6 +366,9 @@ providers:
     poll_interval: 0.2
     stable_polls: 20
     min_wait_before_stable: 8.0
+    network:
+      url_pattern: "/api/chat/completions"  # 待实测确认（XHR/fetch 拦截 URL 模式）
+      grace_seconds: 3         # 请求结束后等 3s 让 DOM 渲染完毕再定稿
 
   # 智谱清言（chatglm.cn）：**默认禁用**（见 docs/PROVIDER_GLM.md）
   # 原因：① 站点前置**阿里云 WAF 滑块**，headless 与 headful 自动化**都被拦**（无法纯自动化）

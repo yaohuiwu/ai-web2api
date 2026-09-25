@@ -869,7 +869,7 @@ class WebChatProvider(BaseProvider):
         )
 
     def _net_init_js(self, url_pattern: str) -> str:
-        """生成 XHR 监听脚本：匹配 ``url_pattern`` 的请求把 responseText 存到全局量。"""
+        """生成 XHR + fetch 监听脚本：匹配 ``url_pattern`` 的请求把 responseText 存到全局量。"""
         g, d = self.NET_GLOBAL, self.NET_GLOBAL_DONE
         pat = json.dumps(url_pattern)  # 包成 JS 字符串供 new RegExp 用，避免正则转义问题
         return f"""
@@ -895,6 +895,21 @@ XMLHttpRequest.prototype.send = function (body) {{
   }}
   return __aiw2a_os.apply(this, arguments);
 }};
+// 补充 fetch 拦截（现代 Web App 多用 fetch）
+const __aiw2a_fo = window.fetch;
+window.fetch = function(...args) {{
+  const url = args[0] || (args[1] && args[1].url);
+  if (url && __aiw2a_rx.test(url)) {{
+    return __aiw2a_fo.apply(this, args).then(async resp => {{
+      try {{
+        const rt = await resp.clone().text();
+        if (rt) window.{g} = rt;
+      }} catch(e) {{}}
+      return resp;
+    }}).finally(() => {{ window.{d} = true; }});
+  }}
+  return __aiw2a_fo.apply(this, args);
+}};
 """
 
     def init_scripts(self) -> list[str]:
@@ -906,9 +921,13 @@ XMLHttpRequest.prototype.send = function (body) {{
 
     @property
     def net_enabled(self) -> bool:
-        """是否启用网络抓取（未启用则全程走 DOM，不碰全局量）。"""
+        """是否启用网络抓取（未启用则全程走 DOM，不碰全局量）。
+
+        ``capture`` 显式为 False 时不注入（Gemini 观测型旁听）；
+        否则只要配了 ``url_pattern`` 就注入（XHR + fetch 拦截）。
+        """
         net = self.cfg.network
-        return bool(net.capture and net.url_pattern)
+        return bool(net.url_pattern) and net.capture is not False
 
     # ---------- 响应读取：网络优先 + DOM 兜底 ----------
 
@@ -1008,6 +1027,10 @@ XMLHttpRequest.prototype.send = function (body) {{
             sse = await self._net_read(page)
             if sse:
                 break
+            # 请求已完成但响应尚未写入 _aiw2a_sse（如 fetch 极快完成）：
+            # 直接跳过网络流式阶段，进入 DOM 定稿提取
+            if await self._net_read_done(page):
+                break
             if elapsed > net_grace:
                 raise _NetFallback(f"no SSE within {net_grace:.0f}s")
             if await self._find_new(page, md_before) or await self._find_new(page, th_before):
@@ -1048,6 +1071,27 @@ XMLHttpRequest.prototype.send = function (body) {{
             sse = await self._net_read(page)
             if sse is None:
                 raise _NetFallback("capture lost (page navigated?)")
+            # 网络请求已完成（XHR readyState=4 或 fetch finally）：直接 DOM 兜底提取全文
+            if await self._net_read_done(page):
+                self._tl_mark("done")
+                self._tl_note("finalize", "net_done")
+                await asyncio.sleep(0.5)  # 等渲染完成
+                try:
+                    final = await self._extract_content(page, md_sel, md_idx, last["thinking"])
+                    if final:
+                        inc = _diff_increment(last["content"], final)
+                        if inc:
+                            yield StreamChunk("content", inc)
+                        last["content"] = final
+                    self._widgets.extend(
+                        await self._capture_widgets(page, frames_before or set())
+                    )
+                    extra = await self._frame_results(page, frames_before or set())
+                    if extra:
+                        last["content"] = (last["content"] + "\n\n" + extra).strip()
+                except Exception:  # noqa: BLE001
+                    pass
+                return
             thinking, content = self._parse_sse_snapshot(sse)
             pairs: list[tuple[Literal["thinking", "content"], str]] = [
                 ("thinking", thinking),
@@ -1096,6 +1140,13 @@ XMLHttpRequest.prototype.send = function (body) {{
             return v if isinstance(v, str) else None
         except Exception:
             return None
+
+    async def _net_read_done(self, page: Page) -> bool:
+        """读取网络请求是否已完成（window._aiw2a_done）。"""
+        try:
+            return bool(await page.evaluate(f"() => window.{self.NET_GLOBAL_DONE}"))
+        except Exception:
+            return False
 
     async def _poll_response_dom(
         self,
