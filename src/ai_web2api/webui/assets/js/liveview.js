@@ -52,11 +52,13 @@ window.LiveView = (function () {
     }
     const ctrlBtn = el("button", "btn sm lv-ctrl-toggle", "🖱 交互");
     ctrlBtn.title = "交互模式：在画面上点击/拖拽/输入（需 server.live_control: true）";
+    const reopenBtn = el("button", "btn sm", "⟳ 重开");
+    reopenBtn.title = "重新打开页面：会话页→重开该会话（不丢上下文）；非会话页→回 provider 首页（人机验证/页面卡住时用）";
     const dismissBtn = el("button", "btn sm", "关遮挡");
     dismissBtn.title = "关闭页面上的弹窗/遮罩（挡住输入时用）";
     head.append(title, meta, spacer);
     if (opts.headerExtra) head.append(opts.headerExtra);
-    head.append(zoomSel, ctrlBtn, dismissBtn);
+    head.append(reopenBtn, zoomSel, ctrlBtn, dismissBtn);
     if (opts.onClose) {
       const closeBtn = el("button", "btn sm lv-close", "✕");
       closeBtn.title = "收起画面";
@@ -217,6 +219,7 @@ window.LiveView = (function () {
       const p = getProvider();
       ctrlBtn.classList.toggle("active", ctrlPref());
       ctrlBtn.hidden = controlAllowed === false;     // 服务端关闭交互 → 藏起来（避免"点了没反应"）
+      reopenBtn.hidden = controlAllowed === false;   // reopen 走同一 /input 接口 → 同样受 live_control 开关约束
       if (!enabled || !p || document.hidden) {
         pane.hidden = true;
         stopStream();
@@ -350,6 +353,10 @@ window.LiveView = (function () {
       b.onclick = () => postInput({ action: "key", key: b.dataset.key });
     });
     reloadBtn.onclick = () => postInput({ action: "reload" });
+    reopenBtn.onclick = async () => {         // 重开（新文档）：比 reload 更能跳出"人机验证"循环页
+      const r = await postInput({ action: "reopen" });
+      if (r) onToast("已重新打开页面");
+    };
     bottomBtn.onclick = () => postInput({ action: "to_bottom" });
     resetBtn.onclick = async () => {          // 解卡：发 up + Esc
       await postInput({ action: "up", x: 0, y: 0 });

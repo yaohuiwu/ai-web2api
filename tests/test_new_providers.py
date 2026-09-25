@@ -98,10 +98,71 @@ def test_gemini_calibrated_but_disabled_by_default():
     assert p.selectors.type_prompt is True
 
 
+def test_claude_calibrated_scaffold():
+    """Claude：手动登录 + ProseMirror 输入 + 助手侧正文容器。"""
+    from ai_web2api.providers.claude import ClaudeProvider
+    from ai_web2api.providers.registry import DRIVERS
+
+    assert DRIVERS["claude"] is ClaudeProvider
+    assert ClaudeProvider.session_url_pattern == r"/chat/([0-9a-fA-F-]{8,})"
+    p = _cfg("claude")
+    assert p.url.startswith("https://claude.ai")
+    assert p.login.mode == "manual"
+    assert p.selectors.type_prompt is True, "contenteditable 需逐字输入"
+    assert any("ProseMirror" in s for s in p.selectors.input)
+    assert any("font-claude-response" in s for s in p.selectors.response_container)
+    assert p.selectors.stream_content is False, "markdown 重渲染多 → 缓冲后发"
+    assert p.network.url_pattern, "Claude 走网络 SSE 抓取"
+    assert any("action-bar-copy" in s for s in p.selectors.done_toolbar)
+
+
+def test_claude_sse_parse():
+    """Claude content_block_delta → (thinking, content)。"""
+    from ai_web2api.providers.claude import ClaudeProvider
+
+    sse = (
+        'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,'
+        '"delta":{"type":"thinking_delta","thinking":"想"}}\n\n'
+        'event: content_block_delta\ndata: {"type":"content_block_delta","index":1,'
+        '"delta":{"type":"text_delta","text":"收"}}\n\n'
+        'event: content_block_delta\ndata: {"type":"content_block_delta","index":1,'
+        '"delta":{"type":"text_delta","text":"到"}}\n\n'
+        'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+    )
+    thinking, content = ClaudeProvider._parse_sse_snapshot(sse)
+    assert thinking == "想"
+    assert content == "收到"
+
+
+def test_domestic_providers_bypass_proxy():
+    """国内站点直连（不走 browser.proxy）；Claude 等仍走代理。"""
+    for name in ("deepseek", "doubao", "kimi", "glm"):
+        assert _cfg(name).proxy is False, f"{name} 应直连"
+    assert _cfg("claude").proxy is True
+
+
+def test_proxy_applied_per_provider():
+    """浏览器 context 级代理：Claude 走 proxy，国内 provider set_direct 后为空。"""
+    from pathlib import Path
+
+    from ai_web2api.browser.manager import BrowserManager
+    from ai_web2api.config import BrowserConfig
+
+    bm = BrowserManager(BrowserConfig(proxy="http://p:7890"), Path("/tmp/x"))
+    assert bm._proxy_kwargs("claude") == {"proxy": {"server": "http://p:7890"}}
+    bm.set_direct("deepseek")
+    assert bm._proxy_kwargs("deepseek") == {}
+
+
 def test_docs_and_readme_reference_both():
-    for name in ("doubao", "glm", "gemini"):
+    for name in ("doubao", "glm", "gemini", "claude"):
         assert (ROOT / "docs" / f"PROVIDER_{name.upper()}.md").is_file()
     for f in ("README.md", "README.zh-CN.md"):
         text = (ROOT / f).read_text(encoding="utf-8")
-        for doc in ("docs/PROVIDER_DOUBAO.md", "docs/PROVIDER_GLM.md", "docs/PROVIDER_GEMINI.md"):
+        for doc in (
+            "docs/PROVIDER_DOUBAO.md",
+            "docs/PROVIDER_GLM.md",
+            "docs/PROVIDER_GEMINI.md",
+            "docs/PROVIDER_CLAUDE.md",
+        ):
             assert doc in text, f"{f} 缺少 {doc}"

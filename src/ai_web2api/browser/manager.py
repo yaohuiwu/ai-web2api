@@ -53,6 +53,8 @@ class BrowserManager:
         self._state_dirty: set[str] = set()
         # 上次落盘时的 cookie 指纹（name+value 哈希）→ 轮换后即使未过期也能落盘
         self._state_fp: dict[str, str] = {}
+        # 直连 provider（``proxy: false``）：这些 provider 的 context 不使用 browser.proxy
+        self._direct: set[str] = set()
 
     # ---------- 生命周期 ----------
 
@@ -178,6 +180,18 @@ class BrowserManager:
         """已有 context（**不创建**）；供实时画面选页 —— 避免"看一眼"把浏览器拉起来。"""
         return self._contexts.get(provider)
 
+    def set_direct(self, provider: str) -> None:
+        """标记 provider 直连（不走 ``browser.proxy``）。注册时由 ProviderRegistry 调用。"""
+        self._direct.add(provider)
+
+    def _proxy_kwargs(self, provider: str) -> dict:
+        """该 provider 的 Playwright context 代理参数（空 = 直连）。"""
+        if provider in self._direct:
+            return {}
+        if self._cfg.proxy:
+            return {"proxy": {"server": self._cfg.proxy}}
+        return {}
+
     async def get_context(self, provider: str, locale: str | None = None) -> BrowserContext:
         if provider in self._contexts:
             return self._contexts[provider]
@@ -198,6 +212,7 @@ class BrowserManager:
             kwargs["device_scale_factor"] = dsf      # 截图超采样（字迹锐利）
         if state.exists():
             kwargs["storage_state"] = str(state)
+        kwargs.update(self._proxy_kwargs(provider))   # 按 provider 应用/绕开代理
         ctx = await self._browser.new_context(**kwargs)
         ctx.set_default_timeout(self._cfg.default_timeout * 1000)
         self._contexts[provider] = ctx

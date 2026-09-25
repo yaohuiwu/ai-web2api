@@ -64,7 +64,7 @@ POST /admin/{provider}/input   {action, x, y, ...}
 
 ```
 POST /admin/{provider}/input
-{ "action": "click" | "move" | "down" | "up" | "drag" | "wheel" | "type" | "key" | "reload" | "to_bottom",
+{ "action": "click" | "move" | "down" | "up" | "drag" | "wheel" | "type" | "key" | "reload" | "reopen" | "to_bottom",
   "x": 640, "y": 320,              # CSS 像素（click/move/down/up/drag/wheel 需要）
   "x2": 900, "y2": 320,            # drag 终点
   "text": "你好",                   # type
@@ -80,7 +80,7 @@ POST /admin/{provider}/input
 - `click` = `move → down → up`（3 次真实事件）。
 - `drag` = `move(起点) → down → N 次 move(插值) → up`（**一次请求完成**，避免 HTTP 往返把拖拽打散——
   这正是图形验证码拖拽成功的关键）。
-- `reload` = `page.reload()`；`to_bottom` = 滚到底（End 键或 wheel 大值）。
+- `reload` = `page.reload()`（原地刷新）；`reopen` = 新文档重开（**会话页→该会话 URL**，不丢上下文；否则→ provider 首页），用于跳出人机验证/卡死循环页；目标只允许这两个同源地址（路由层决定，不接受任意 URL）；`to_bottom` = 滚到底（End 键或 wheel 大值）。
 - 返回里带 `viewport` 与 `frame_t`（前端可用它显示"画面帧龄"，提示用户画面可能滞后）。
 
 ## 6. 前端交互（最小可用）
@@ -91,7 +91,7 @@ POST /admin/{provider}/input
 | 拖拽 | `mousedown` 起、画面上跟随显示一条**虚线引导**、`mouseup` 发一次 `drag`（起点/终点） |
 | 滚轮 | 默认**滚动面板**（看画面其他部分）；按住 **Shift** → `wheel` 发给**页面** |
 | 打字 | 面板下方一个输入框 + 「输入」按钮（Enter 直接发）；另提供 Enter/Esc/Tab/↑↓←→/Backspace 快捷键按钮 |
-| 其它 | 「刷新页面」「回到底部」 |
+| 其它 | 「⟳ 重开（会话页/首页）」「刷新页面」「回到底部」 |
 | 只读保护 | 顶部「🖱 交互」开关（默认**关**）；关闭时画面纯只读，所有输入事件不拦截 |
 
 ## 7. 安全与并发

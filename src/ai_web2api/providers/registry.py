@@ -11,6 +11,7 @@ from ..config import AppConfig
 from ..core.errors import ModelNotFoundError
 from .base import BaseProvider, first_match, wait_first_match
 from .chatgpt import ChatGPTProvider
+from .claude import ClaudeProvider
 from .doubao import DoubaoProvider
 from .gemini import GeminiProvider
 from .glm import GlmProvider
@@ -25,6 +26,7 @@ DRIVERS: dict[str, type[BaseProvider]] = {
     "deepseek": DeepSeekProvider,
     "qwen": QwenProvider,
     "chatgpt": ChatGPTProvider,
+    "claude": ClaudeProvider,
     "kimi": KimiProvider,
     "doubao": DoubaoProvider,
     "glm": GlmProvider,
@@ -67,6 +69,8 @@ class ProviderRegistry:
                 logger.warning("未知驱动 %r，provider %s 已跳过", pcfg.driver or pcfg.name, pcfg.name)
                 continue
             provider = driver(pcfg, browser)
+            if pcfg.proxy is False and hasattr(browser, "set_direct"):
+                browser.set_direct(pcfg.name)   # 国内站点直连（不走 browser.proxy）
             self._providers[pcfg.name] = provider
             for m in pcfg.models:
                 if m.name in self._model_map:
@@ -226,6 +230,8 @@ class ProviderRegistry:
                         kwargs: dict = {}
                         if state is not None:
                             kwargs["storage_state"] = state
+                        if p.cfg.proxy is not False and self.config.browser.proxy:
+                            kwargs["proxy"] = {"server": self.config.browser.proxy}
                         ctx = await browser.new_context(
                             user_agent=self.config.browser.user_agent,
                             locale=p.locale,

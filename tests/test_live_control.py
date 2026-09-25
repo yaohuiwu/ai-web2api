@@ -53,10 +53,19 @@ class _Page:
         self.keyboard = _Keyboard()
         self.viewport_size = {"width": 1440, "height": 900}
         self.reloaded = 0
+        self.goto_calls: list[str] = []
+        self.url = "https://example.com/c/abc"
         self._fail_on = fail_on
+
+    def is_closed(self) -> bool:
+        return False
 
     async def reload(self, **_kw):
         self.reloaded += 1
+
+    async def goto(self, url, **_kw):
+        self.goto_calls.append(url)
+        self.url = url
 
 
 def test_validate_rejects_bad_input():
@@ -127,6 +136,24 @@ async def test_type_key_wheel_reload_to_bottom():
     assert ("wheel", 0, 10000) in page.mouse.calls
 
 
+@pytest.mark.asyncio
+async def test_reopen_navigates_to_home_not_reload():
+    """reopen = 导航回 provider 首页（人机验证/页面卡住时用），与 reload（原地刷新）区分。"""
+    page = _Page()
+    out = await apply_input(page, InputAction(action="reopen"), reopen_url="https://example.com/")
+    assert page.goto_calls == ["https://example.com/"]
+    assert page.reloaded == 0, "reopen 不应退化成 reload"
+    assert out["url"] == "https://example.com/"
+
+
+@pytest.mark.asyncio
+async def test_reopen_without_reopen_url_falls_back_to_reload():
+    """未提供 reopen_url（旧调用方/测试）→ 退化为刷新当前页，不报错。"""
+    page = _Page()
+    out = await apply_input(page, InputAction(action="reopen"))
+    assert page.reloaded == 1 and out.get("reloaded") is True
+
+
 def _client(control: bool) -> TestClient:
     from types import SimpleNamespace
 
@@ -171,3 +198,70 @@ def test_input_rejects_unknown_action_and_missing_coords():
     assert c.post("/admin/fake/input", json={"action": "click"}).status_code == 400
     # 已知 provider 校验：未知 provider → 404（先过参数校验）
     assert c.post("/admin/nope/input", json={"action": "click", "x": 1, "y": 1}).status_code == 404
+
+
+def _reopen_client(page: _Page, *, bound_thread_id=None, url_id=None):
+    """带假 provider/threads 的路由：验证 reopen 的目标选择（会话页 vs 首页）。"""
+    from types import SimpleNamespace
+
+    from ai_web2api.api.routes import create_router
+    from ai_web2api.config import AppConfig
+
+    class _Provider:
+        def __init__(self) -> None:
+            self.cfg = SimpleNamespace(url="https://chat.example.com/")
+
+        def session_url(self, sid: str) -> str:
+            return f"https://chat.example.com/c/{sid}"
+
+    class _Threads:
+        def __init__(self) -> None:
+            self.session = SimpleNamespace(lock=None, url_id=url_id)
+
+        def live_pages(self, _name):
+            return [(bound_thread_id, page)] if bound_thread_id else []
+
+        def get(self, _tid):
+            return self.session
+
+    class _Ctx:
+        pages = [page]
+
+    class _Registry:
+        def __init__(self) -> None:
+            self.config = AppConfig.model_validate(
+                {
+                    "server": {"live_control": True},
+                    "providers": [{"name": "fake", "url": "https://chat.example.com/", "models": []}],
+                }
+            )
+            self.browser = SimpleNamespace(active_context=lambda _n: _Ctx())
+
+        def providers(self):
+            return {"fake": _Provider()}
+
+        def login_status(self):
+            return {}
+
+    app = FastAPI()
+    app.include_router(create_router(_Registry(), _Threads()))  # type: ignore[arg-type]
+    return TestClient(app)
+
+
+def test_reopen_route_goes_to_session_url_when_thread_bound():
+    """会话页 reopen → 重开该会话 URL（不丢上下文）。"""
+    page = _Page()
+    c = _reopen_client(page, bound_thread_id="t1", url_id="abc123")
+    r = c.post("/admin/fake/input", json={"action": "reopen"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert page.goto_calls == ["https://chat.example.com/c/abc123"]
+    assert page.reloaded == 0
+
+
+def test_reopen_route_goes_home_when_no_session():
+    """非会话页（无活跃 thread）reopen → provider 首页。"""
+    page = _Page()
+    c = _reopen_client(page)
+    r = c.post("/admin/fake/input", json={"action": "reopen"})
+    assert r.status_code == 200
+    assert page.goto_calls == ["https://chat.example.com/"]

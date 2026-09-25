@@ -264,6 +264,18 @@ def test_playground_has_resizable_splitter():
     assert 'width = "100%"' in live_js, "组件里适应模式应铺满宽度"
 
 
+def test_liveview_has_reopen_button():
+    """画面组件：常驻「⟳ 重开（回首页）」按钮，用于跳出人机验证/卡死循环页。
+
+    reopen = `page.goto(provider 首页)`，与 reload（原地刷新）区分；
+    必须放在头部（不能只藏在交互模式工具条里 —— 出现验证时用户往往还没开交互）。
+    """
+    js = (WEBUI / "assets/js/liveview.js").read_text(encoding="utf-8")
+    assert "⟳ 重开" in js
+    assert 'action: "reopen"' in js, "未接线 reopen action"
+    assert "head.append(reopenBtn" in js, "reopen 按钮应在头部常驻"
+
+
 def test_splitter_constants_defined_before_init():
     """守卫：`initLivePane()` 会同步调用分隔条逻辑，常量必须在它之前定义（否则 TDZ 报错）。
 
