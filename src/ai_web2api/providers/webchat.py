@@ -1301,12 +1301,14 @@ XMLHttpRequest.prototype.send = function (body) {{
             if not done and stable >= stable_polls and elapsed > min_wait:
                 if last["content"]:
                     # 正文已开始：markdown 渐进渲染会有超过稳定窗口的停顿，放宽避免截断
-                    if stable >= stable_polls * 3:
+                    # （原为 *3，改为 *2：*3 对无停止按钮的站点延迟过大，Doubao 实测 *2 足够）
+                    if stable >= stable_polls * 2:
                         done = True
                 elif last["thinking"] and md_sel is not None:
                     # 思考稳定、已有正文容器但正文还没出 → 可能"思考→正文"间隙，大幅放宽。
                     # 用"思考最后一次变动的时间"判断（思考会持续跳动，stable 可能一直被清零）。
-                    if time.monotonic() - thinking_changed_recently > stable_polls * 4 * cfg.poll_interval:
+                    # 原为 *4，改为 *2：Doubao 等站点思考→正文过渡无需如此长等待
+                    if time.monotonic() - thinking_changed_recently > stable_polls * 2 * cfg.poll_interval:
                         done = True
                 # 否则（正文容器尚未出现）→ 继续等，避免空正文提前结束（Qwen 实测）
             if done:
