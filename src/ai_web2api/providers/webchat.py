@@ -694,10 +694,15 @@ class WebChatProvider(BaseProvider):
         page: Page,
         md_before: dict[str, int] | None = None,
         th_before: dict[str, int] | None = None,
+        input_sel: str | None = None,
+        prompt: str | None = None,
     ) -> bool:
         """页面是否真的开始生成：出现新的 assistant/thinking 容器，或停止按钮可见。
 
         用于区分两种情况：消息被静默丢弃（要重发/快速失败） vs 只是生成慢（继续等）。
+
+        额外检查：如果输入框已被清空，说明网页端已接受消息，即使容器计数
+        未增加（如站点在原容器内渲染回复），也判定为已发出。
         """
         for before in (md_before, th_before):
             for sel, count in (before or {}).items():
@@ -709,6 +714,21 @@ class WebChatProvider(BaseProvider):
         for stop in self.cfg.selectors.stop_button:
             if await self._is_visible(page, stop):
                 return True
+        # 输入框已清空 = 消息已发出（对 Doubao 等容器计数不增加的站点有效）
+        if input_sel:
+            try:
+                loc = page.locator(input_sel).first
+                left = ""
+                try:
+                    left = (await loc.input_value() or "").strip()
+                except Exception:  # noqa: BLE001  # contenteditable
+                    pass
+                if not left:
+                    left = (await loc.inner_text() or "").strip()
+                if not left or (prompt and prompt[:20].strip() not in left):
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
         return False
 
     async def _dismiss_overlays(self, page: Page, *, reason: str = "") -> list[str]:
@@ -1128,7 +1148,7 @@ XMLHttpRequest.prototype.send = function (body) {{
             # 早期确认：一段时间内既无新容器、也无停止按钮 → 消息很可能是被静默丢弃了。
             # 重发一次；重发后仍无迹象就快速失败，而不是死等满 response_timeout。
             if confirm_timeout and not confirmed and elapsed > confirm_timeout:
-                delivered = await self._message_delivered(page, md_before, th_before)
+                delivered = await self._message_delivered(page, md_before, th_before, input_sel=input_sel, prompt=prompt)
                 if not delivered:
                     await self._dismiss_overlays(page, reason="探测到无生成迹象")
                     if await self._busy_hint_visible(page):
@@ -1158,7 +1178,7 @@ XMLHttpRequest.prototype.send = function (body) {{
                 break
             if confirm_timeout and confirmed and elapsed > confirm_timeout:
                 # 已重发过一次且仍无任何迹象 → 快速失败（明确原因，不误导为"超时"）
-                if not await self._message_delivered(page, md_before, th_before):
+                if not await self._message_delivered(page, md_before, th_before, input_sel=input_sel, prompt=prompt):
                     if busy_seen:
                         raise ResponseTimeoutError(
                             f'provider "{self.name}" 网站提示繁忙/排队（可能需要订阅优先队列）：'
