@@ -179,6 +179,120 @@ async def wait_first_match(
         await page.wait_for_timeout(poll * 1000)
 
 
+_MD_JS_PARTS = r"""
+(sel, start) => {
+  const nodes = document.querySelectorAll(sel);
+  const results = [];
+  // 复用 _MD_JS 的核心逻辑：对每个元素执行完整的 markdown 转换
+  for (let i = start; i < nodes.length; i++) {
+    const el = nodes[i];
+    if (!el) { results.push(""); continue; }
+    const blocks = [];
+    const walkChildren = (node, list) => {
+      [...node.childNodes].forEach((child) => {
+        if (child.nodeType === 3) {
+          const t = child.textContent;
+          if (!t) return;
+          if (!/\S/.test(t)) {
+            if (!t.includes("\n")) list.push(" ");
+            return;
+          }
+          list.push(t.replace(/[ \t\r\n]+/g, " "));
+          return;
+        }
+        if (child.nodeType === 1) walk(child, list);
+      });
+    };
+    const seenImgs = new Set();
+    const pushImg = (node, list) => {
+      const altRaw = node.getAttribute ? (node.getAttribute("alt") || "") : "";
+      let src = node.getAttribute ? (node.getAttribute("src") || node.src || "") : (node.src || "");
+      let alt = altRaw;
+      if (/^https?:\/\//.test(alt)) {
+        if (src && !/purpose=inline/.test(src)) { alt = ""; }
+        else { src = alt; alt = ""; }
+      }
+      if (!src) { return; }
+      if (seenImgs.has(src)) { return; }
+      seenImgs.add(src);
+      list.push("[" + alt + "](" + src + ")");
+    };
+    const walk = (node, list) => {
+      const tag = node.tagName.toLowerCase();
+      const cls = typeof node.className === "string" ? node.className : "";
+      if (node.style && node.style.display === "none") return;
+      if (node.getAttribute && node.getAttribute("aria-hidden") === "true") return;
+      if (cls.includes("katex")) {
+        const ann = node.querySelector(".katex-mathml annotation");
+        const tex = ann ? ann.textContent.trim() : node.textContent.trim();
+        if (tex) list.push("$" + tex + "$");
+        return;
+      }
+      if (tag === "pre") {
+        const code = node.querySelector("code");
+        const text = (code || node).textContent.replace(/\n+$/, "");
+        let lang = "";
+        if (code) { const l = [...code.classList].find((c) => c.startsWith("language-")); if (l) lang = l.slice(9); }
+        list.push("```" + lang + "\n" + text + "\n```");
+        return;
+      }
+      if (tag === "code") { list.push("`" + node.textContent + "`"); return; }
+      if (["h1","h2","h3","h4","h5","h6"].includes(tag)) {
+        list.push("\n" + "#".repeat(Number(tag[1])) + " " + node.textContent.trim() + "\n");
+        return;
+      }
+      if (tag === "p") { walkChildren(node, list); list.push("\n\n"); return; }
+      if (tag === "blockquote") {
+        const inner = [];
+        walkChildren(node, inner);
+        list.push("> " + inner.join("").trim().replace(/\n+/g, "\n> ") + "\n");
+        return;
+      }
+      if (tag === "ul" || tag === "ol") {
+        const ordered = tag === "ol";
+        [...node.children].forEach((li, i) => {
+          const inner = [];
+          walkChildren(li, inner);
+          list.push((ordered ? i + 1 + "." : "-") + " " + inner.join("").trim() + "\n");
+        });
+        list.push("\n");
+        return;
+      }
+      if (tag === "table") {
+        const rows = [...node.querySelectorAll("tr")].map((tr) =>
+          [...tr.querySelectorAll("th,td")].map((c) => c.textContent.trim())
+        );
+        if (rows.length) {
+          rows.forEach((r, i) => {
+            list.push("| " + r.join(" | ") + " |\n");
+            if (i === 0) list.push("|" + r.map(() => "---").join("|") + "|\n");
+          });
+          list.push("\n");
+        }
+        return;
+      }
+      if (tag === "br") { list.push("\n"); return; }
+      if (tag === "button") { node.querySelectorAll("img").forEach((im) => pushImg(im, list)); return; }
+      if (tag === "img") { pushImg(node, list); return; }
+      if (tag === "iframe") { const src = node.getAttribute("src") || ""; if (src) list.push("\n[🧩 交互组件](" + src + ")\n"); return; }
+      if (["strong","b"].includes(tag)) { list.push("**" + node.textContent + "**"); return; }
+      if (["em","i"].includes(tag)) { list.push("*" + node.textContent + "*"); return; }
+      if (tag === "a") { list.push("[" + node.textContent + "](" + node.href + ")"); return; }
+      walkChildren(node, list);
+    };
+    walk(el, blocks);
+    const out = blocks.join("");
+    const parts = out.split("```");
+    for (let j = 0; j < parts.length; j += 2) {
+      parts[j] = parts[j].replace(/^[ \t]+/gm, "").replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n");
+    }
+    results.push(parts.join("```").trim());
+  }
+  return results;
+}
+"""
+
+
 async def extract_markdown(page: Page, selector: str | None, index: int | None = -1) -> str:
     """提取第 index 个（默认最后一个）匹配元素为 Markdown；无匹配返回空串。"""
     if not selector:
@@ -187,21 +301,29 @@ async def extract_markdown(page: Page, selector: str | None, index: int | None =
 
 
 async def extract_markdown_parts(page: Page, selector: str | None, start: int) -> list[str]:
-    """从第 ``start`` 个匹配元素起，逐个提取（**不去重、不过滤**），供调用方自行筛选。
+    """从第 ``start`` 个匹配元素起，一次性提取全部（**单次 page.evaluate**），供调用方自行筛选。
 
     典型用途：拼接多容器回答时，按内容剔除"其实是思考"的块。
+
+    与旧版的区别：旧版在循环中逐个调用 extract_markdown（每次 page.evaluate 传输 4660 字节 JS），
+    新版用单次 page.evaluate 提取所有元素，性能提升 N 倍（N = 匹配元素数）。
     """
     if not selector:
         return []
     count = await count_matches(page, selector)
-    if count <= 0:
+    if count <= 0 or start >= count:
         return []
-    parts: list[str] = []
-    for i in range(max(0, min(start, count)), count):
-        text = (await extract_markdown(page, selector, i)).strip()
-        if text:
-            parts.append(text)
-    return parts
+    try:
+        results = await page.evaluate(f"({_MD_JS_PARTS})({json.dumps(selector)}, {start})")
+        return [r.strip() for r in results if r.strip()]
+    except Exception:
+        # 回退：逐个提取（极罕见：JS 执行失败）
+        parts: list[str] = []
+        for i in range(start, count):
+            text = (await extract_markdown(page, selector, i)).strip()
+            if text:
+                parts.append(text)
+        return parts
 
 
 async def extract_markdown_from(page: Page, selector: str | None, start: int) -> str:
