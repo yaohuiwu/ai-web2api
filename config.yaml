@@ -367,7 +367,7 @@ providers:
     stable_polls: 20
     min_wait_before_stable: 8.0
     network:
-      url_pattern: "/api/chat/completions"  # 待实测确认（XHR/fetch 拦截 URL 模式）
+      url_pattern: "/chat/completion"  # 实测：http://www.doubao.com/chat/completion?aid=...
       grace_seconds: 3         # 请求结束后等 3s 让 DOM 渲染完毕再定稿
 
   # 智谱清言（chatglm.cn）：**默认禁用**（见 docs/PROVIDER_GLM.md）
