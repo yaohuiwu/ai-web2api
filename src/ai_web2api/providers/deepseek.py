@@ -141,6 +141,9 @@ class DeepSeekProvider(WebChatProvider):
         if not sse_text:
             return "", ""
         state: dict = {}
+        block_count = 0
+        parsed_count = 0
+        json_err_count = 0
         for block in sse_text.split("\n\n"):
             data = None
             for line in block.split("\n"):
@@ -148,19 +151,37 @@ class DeepSeekProvider(WebChatProvider):
                     data = (data or "") + line[5:].strip()
             if not data:
                 continue
+            block_count += 1
             try:
                 obj = json.loads(data)
             except Exception:
+                json_err_count += 1
                 continue
+            parsed_count += 1
             cls._apply_sse_op(state, obj)
         resp = state.get("response")
         if not isinstance(resp, dict):
+            logger.warning(
+                "[%s] _parse_sse_snapshot: response不是dict, "
+                "block_count=%d parsed_count=%d json_err_count=%d, "
+                "state_keys=%r",
+                cls.name, block_count, parsed_count, json_err_count,
+                list(state.keys()) if isinstance(state, dict) else type(state),
+            )
             return "", ""
+        fragments = resp.get("fragments") or []
+        logger.debug(
+            "[%s] _parse_sse_snapshot: block_count=%d parsed=%d json_err=%d, "
+            "fragments=%d, types=%r",
+            cls.name, block_count, parsed_count, json_err_count,
+            len(fragments),
+            [f.get("type") for f in fragments],
+        )
         thinking_parts: list[str] = []
         content_parts: list[str] = []
         search_block = ["【搜索资料】"]
         seen_urls: set[str] = set()
-        for frag in resp.get("fragments") or []:
+        for frag in fragments:
             ftype = frag.get("type")
             if ftype == "THINK":
                 c = frag.get("content") or ""
@@ -199,6 +220,10 @@ class DeepSeekProvider(WebChatProvider):
         thinking = "\n\n".join(thinking_parts).strip()
         if len(search_block) > 1:
             thinking = (thinking + "\n\n" if thinking else "") + "\n".join(search_block)
+        logger.debug(
+            "[%s] _parse_sse_snapshot结果: thinking_len=%d content_len=%d",
+            cls.name, len(thinking), len("\n\n".join(content_parts).strip()),
+        )
         return thinking, "\n\n".join(content_parts).strip()
 
     # ---------- 思考面板提取 ----------

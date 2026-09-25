@@ -1026,10 +1026,19 @@ window.fetch = function(...args) {{
                 )
             sse = await self._net_read(page)
             if sse:
+                logger.info(
+                    "[%s] 阶段1: 首次SSE事件, sse_len=%d, "
+                    "sse前100字符=%r",
+                    self.name, len(sse), sse[:100],
+                )
                 break
             # 请求已完成但响应尚未写入 _aiw2a_sse（如 fetch 极快完成）：
             # 直接跳过网络流式阶段，进入 DOM 定稿提取
             if await self._net_read_done(page):
+                logger.info(
+                    "[%s] 阶段1: _net_read_done=True (未收到SSE), sse_len=%d",
+                    self.name, len(await self._net_read(page) or ""),
+                )
                 break
             if elapsed > net_grace:
                 raise _NetFallback(f"no SSE within {net_grace:.0f}s")
@@ -1071,28 +1080,25 @@ window.fetch = function(...args) {{
             sse = await self._net_read(page)
             if sse is None:
                 raise _NetFallback("capture lost (page navigated?)")
-            # 网络请求已完成（XHR readyState=4 或 fetch finally）：直接 DOM 兜底提取全文
+            # 始终先解析SSE（即使网络已完成）——SSE文本包含完整的
+            # JSON-Patch状态机，DOM提取可能因渲染未完成而遗漏内容
             if await self._net_read_done(page):
                 self._tl_mark("done")
                 self._tl_note("finalize", "net_done")
-                await asyncio.sleep(0.5)  # 等渲染完成
-                try:
-                    final = await self._extract_content(page, md_sel, md_idx, last["thinking"])
-                    if final:
-                        inc = _diff_increment(last["content"], final)
-                        if inc:
-                            yield StreamChunk("content", inc)
-                        last["content"] = final
-                    self._widgets.extend(
-                        await self._capture_widgets(page, frames_before or set())
-                    )
-                    extra = await self._frame_results(page, frames_before or set())
-                    if extra:
-                        last["content"] = (last["content"] + "\n\n" + extra).strip()
-                except Exception:  # noqa: BLE001
-                    pass
-                return
+                logger.warning(
+                    "[%s] _net_read_done=True, sse_len=%d, "
+                    "last_content_len=%d → 先解析SSE，再走DOM兜底",
+                    self.name, len(sse or ""), len(last.get("content", "")),
+                )
+            # 解析SSE（网络完成时也必须解析，不能跳过）
             thinking, content = self._parse_sse_snapshot(sse)
+            # 诊断：SSE解析结果
+            if not thinking and not content and sse:
+                logger.warning(
+                    "[%s] _parse_sse_snapshot返回空结果, sse_len=%d, "
+                    "sse前80字符=%r",
+                    self.name, len(sse), sse[:80],
+                )
             pairs: list[tuple[Literal["thinking", "content"], str]] = [
                 ("thinking", thinking),
                 ("content", content),
@@ -1107,6 +1113,33 @@ window.fetch = function(...args) {{
                 if inc:
                     yield StreamChunk(kind, inc)
                 last[kind] = new
+            logger.debug(
+                "[%s] SSE迭代: thinking_len=%d content_len=%d",
+                self.name, len(thinking), len(content),
+            )
+            # 网络请求已完成：SSE解析完毕后，走DOM兜底提取做最终校验
+            if await self._net_read_done(page):
+                await asyncio.sleep(0.5)  # 等渲染完成
+                try:
+                    final = await self._extract_content(page, md_sel, md_idx, last["thinking"])
+                    logger.warning(
+                        "[%s] DOM兜底提取: content_len=%d, thinking_len=%d",
+                        self.name, len(final or ""), len(last.get("thinking", "")),
+                    )
+                    if final:
+                        inc = _diff_increment(last["content"], final)
+                        if inc:
+                            yield StreamChunk("content", inc)
+                        last["content"] = final
+                    self._widgets.extend(
+                        await self._capture_widgets(page, frames_before or set())
+                    )
+                    extra = await self._frame_results(page, frames_before or set())
+                    if extra:
+                        last["content"] = (last["content"] + "\n\n" + extra).strip()
+                except Exception:  # noqa: BLE001
+                    pass
+                return
             if "event: close" in sse:
                 self._tl_mark("done")
                 self._tl_note("finalize", "net_close")
