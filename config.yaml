@@ -445,7 +445,7 @@ providers:
       stop_button:              # 实测（登录态）：生成中出现、结束消失 → 结束判定更可靠
         - 'button[aria-label="停止回答"]'
         - 'button[aria-label*="Stop"]'
-      login_check: []           # 游客态即可用 → 用输入框判定"可用"（**故意不配 logged_out**）
+      login_check: []           # 登录态检测：用 detect 标记判定（游客态已不可用）
       upload_input:
         - "input[type=file]"    # ⚠ 待实测
     # 观测型旁听（**不解析 Google 内部协议**）：只记状态码与时序，
@@ -456,15 +456,15 @@ providers:
       observe: true
     login:
       mode: manual
-      # CLI 自动检测：登录后才有、游客态**不存在**（实测 2026-09）。
-      # ⚠ 不能用裸 `img[alt*="个人资料"]`：游客态的占位头像是
+      # CLI 自动检测：登录后才有、未登录**不存在**（实测 2026-09）。
+      # ⚠ 不能用裸 `img[alt*="个人资料"]`：未登录时的占位头像是
       #   <img class="user-icon" alt="个人资料照片" src=".../default-user">
       #   → 未登录也会命中，导致「还没登录就自动保存/导入 state」（实测 bug）。
       #   （早前用 aria-label*="Google 账号" 同样会误判，已废弃。）
       detect:
         - 'a[href*="SignOutOptions"]'                              # 账号菜单里的「退出登录」= 真登录标记
         - 'body:not(:has(a[href*="ServiceLogin"])) img.user-icon'  # 有头像**且**无「登录」入口才算已登录
-      hint: "Gemini 游客态即可用；如需保存历史/更多能力，用 ./scripts/login.sh gemini 手动登录（Google 账号）"
+      hint: "Gemini 需手动登录 Google 账号（游客态已不可用）：./scripts/login.sh gemini"
     queue: {max_size: 3, timeout: 30}   # 短队列：超限/超时立刻 429，客户端自己重试
     response_timeout: 300     # Google 免费档在密集请求后容易"思考中"很久 → 放宽
     poll_interval: 0.2
@@ -602,7 +602,9 @@ providers:
     api_key: ${GLM_API_KEY}          # 从环境变量读取
     api_model: glm-4-flash
     models:
-      - {name: glm-4-flash, ui_label: "GLM-4.7-Flash"}
+      - {name: glm-4-flash, ui_label: "GLM-4-Flash"}
+      - {name: glm-4.7-flash, ui_label: "GLM-4.7-Flash"}
+      - {name: glm-4-flash-250414, ui_label: "GLM-4-Flash-250414"}
     proxy: false                        # 国内直连
     api_timeout: 180
     api_retry_attempts: 3              # 429/502/503/504 重试次数
