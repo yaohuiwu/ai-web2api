@@ -249,6 +249,9 @@ class ProviderConfig(BaseModel):
     # 重试：
     api_retry_attempts: int = 3       # 429/503 重试次数（0 = 不重试）
     api_retry_backoff: float = 2.0    # 退避基数（秒）（上一请求未完成）
+    # Thread 行为（API provider）：
+    api_save_messages: bool = True          # 是否保存消息到 thread（默认 true）
+    api_auto_send_history: bool = True      # 是否自动发送历史消息（默认 true）
 
 
 class BrowserConfig(BaseModel):

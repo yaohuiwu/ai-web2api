@@ -207,7 +207,71 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         if fc_active:
             opts["prompt_override"] = fc_build_prompt(messages, req.tools, req.tool_choice)
 
-        timeout = provider.cfg.response_timeout or 180
+        # Thread 保存
+        save_messages = getattr(provider.cfg, "api_save_messages", True)
+        auto_history = getattr(provider.cfg, "api_auto_send_history", True)
+        thread_id = req.thread_id or getattr(http_request, "headers", {}).get("x-thread-id")
+        tm = threads if (save_messages and threads is not None) else None
+        # 会话标题：第一句 user 消息（过长截断）
+        title = next(
+            (m.get("content", "") for m in messages if m.get("role") == "user" and m.get("content")),
+            "",
+        )[:60]
+        logger.info("API provider chat_completions: save_messages=%s auto_history=%s thread_id=%s tm=%s", save_messages, auto_history, thread_id, tm is not None)
+
+        # API provider 不需要浏览器页面，直接用 store
+        session = None
+        if tm and thread_id:
+            # 确保 threads 行存在
+            try:
+                tm.store.upsert_thread(thread_id, provider.name, model=resolved, title=title)
+            except Exception as e:
+                logger.debug("API provider upsert_thread failed: %s", e)
+        if tm and not thread_id:
+            thread_id = f"auto-{uuid.uuid4().hex[:8]}"
+            try:
+                tm.store.upsert_thread(thread_id, provider.name, model=resolved, title=title)
+            except Exception as e:
+                logger.debug("API provider upsert_thread failed: %s", e)
+
+        # 自动发送历史消息：从会话中取最近的 user/assistant 消息
+        history: list[dict] = []
+        if auto_history and tm is not None:
+            try:
+                hist_msgs = tm.store.get_messages(thread_id)
+                for m in hist_msgs[-10:]:
+                    role = m.get("role")
+                    content = m.get("content", "")
+                    if role in ("user", "assistant") and content:
+                        history.append({"role": role, "content": content})
+                logger.info("API provider history: thread_id=%s history=%d", thread_id, len(history))
+            except Exception as e:
+                logger.debug("API provider get_history failed: %s", e)
+
+        # 合并历史 + 当前消息
+        all_messages = history + messages
+
+        async def _save_turn(content: str, thinking: str | None) -> None:
+            """保存回合到 thread store（流式/非流式共用）。"""
+            if not tm or not thread_id:
+                return
+            try:
+                tm.store.upsert_thread(thread_id, provider.name, model=resolved, title=title)
+                user_msgs = [
+                    ("user", m.get("content", ""), None, None)
+                    for m in messages
+                    if m.get("role") == "user"
+                ]
+                if user_msgs:
+                    tm.store.append_messages(thread_id, user_msgs)
+                tm.store.append_messages(
+                    thread_id,
+                    [("assistant", content, thinking, None)],
+                )
+                await tm.persist(thread_id)
+                logger.info("API provider save_turn: thread_id=%s messages=%d", thread_id, len(messages))
+            except Exception as e:
+                logger.warning("API provider save_turn failed: %s", e)
 
         async def _stream():
             content_parts: list[str] = []
@@ -216,7 +280,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             finish = "stop"
             try:
                 async for chunk in provider.generate(
-                    messages, resolved, thread_mode="api", **opts
+                    all_messages, resolved, thread_mode="api", **opts
                 ):
                     if chunk.kind == "thinking":
                         thinking_parts.append(chunk.text)
@@ -233,6 +297,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 content, tool_calls, finish = parse_tool_response(content_parts[0] if content_parts else "", req.tools)
             else:
                 content = "".join(content_parts)
+            # 保存回合（流式路径同样写入 thread store）
+            await _save_turn(content, "".join(thinking_parts) or None)
             yield _sse({"id": chat_id, "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]})
             yield "data: [DONE]\n\n"
 
@@ -248,7 +314,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         thinking_parts: list[str] = []
         tool_calls: list[dict] | None = None
         finish = "stop"
-        async for chunk in provider.generate(messages, resolved, thread_mode="api", **opts):
+        async for chunk in provider.generate(all_messages, resolved, thread_mode="api", **opts):
             if chunk.kind == "thinking":
                 thinking_parts.append(chunk.text)
             else:
@@ -257,6 +323,10 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             content, tool_calls, finish = parse_tool_response(content_parts[0] if content_parts else "", req.tools)
         else:
             content = "".join(content_parts)
+
+        # 保存回合
+        await _save_turn(content, "".join(thinking_parts) or None)
+
         message = ResponseMessage(
             content=content,
             reasoning_content="".join(thinking_parts) or None,
@@ -268,7 +338,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
             id=chat_id,
             created=int(time.time()),
             model=model,
-            thread_id=None,
+            thread_id=thread_id,
             choices=[ChatCompletionChoice(message=message, finish_reason=finish)],
         )
 

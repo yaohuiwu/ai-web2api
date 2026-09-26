@@ -612,3 +612,5 @@ providers:
     poll_interval: 0.2
     selectors:
       stream_content: false             # API provider 直接解析 SSE，无需浏览器流式
+    api_save_messages: true           # 保存消息到 thread（默认 true）
+    api_auto_send_history: true       # 自动发送历史消息（默认 true）
