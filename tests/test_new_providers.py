@@ -118,6 +118,45 @@ def test_gemini_login_detect_ignores_guest_placeholder_avatar():
     )
 
 
+def test_yuanbao_provider_registered_and_configured():
+    """元宝：国内站点直连、手动登录、Quill 输入。"""
+    from ai_web2api.providers.yuanbao import YuanbaoProvider
+    from ai_web2api.providers.registry import DRIVERS
+
+    assert DRIVERS["yuanbao"] is YuanbaoProvider
+    assert YuanbaoProvider.session_url_pattern == r"/chat/[^/]+/([0-9a-fA-F-]{8,})"
+    p = _cfg("yuanbao")
+    assert p.enabled is True
+    assert p.proxy is False, "国内站点直连"
+    assert p.login.mode == "manual"
+    assert any("ql-editor" in x for x in p.selectors.input), "实测 Quill 输入框"
+    assert any("发送" in s or "send-btn" in s for s in p.selectors.send_button), "实测发送按钮"
+    assert p.selectors.type_prompt is True
+    # 实测（登录态）正文容器
+    assert any("hyc-common-markdown" in s for s in p.selectors.response_container)
+    # ⚠ 思考容器不能是 `.hyc-component-deep-search-agent`：它会包住正文 → 正文被当成思考
+    for s in p.selectors.thinking_container:
+        assert s != ".hyc-component-deep-search-agent", (
+            "思考容器不能是整个 deep-search-agent（会吞掉正文）"
+        )
+    # 实测：登录后才有右上角头像；不能用宽泛 avatar（会命中未登录骨架）
+    assert any("yb-common-nav__ft__avatar" in s for s in p.selectors.login_check), (
+        "login_check 应为登录后才出现的右上角头像"
+    )
+    assert all("ql-editor" not in s for s in p.selectors.login_check), (
+        "login_check 不得回退到输入框"
+    )
+    assert all("skeleton" not in s for s in p.selectors.login_check), (
+        "login_check 不得命中未登录时的骨架头像"
+    )
+    assert any("未登录" in s or "login" in s.lower() for s in p.selectors.logged_out), (
+        "应配「未登录/登录按钮」反向标记"
+    )
+    # 实测 SSE 流式端点
+    assert p.network.url_pattern and "/api/chat/" in p.network.url_pattern
+    assert p.selectors.stream_content or p.selectors.response_all_new
+
+
 def test_claude_calibrated_scaffold():
     """Claude：手动登录 + ProseMirror 输入 + 助手侧正文容器。"""
     from ai_web2api.providers.claude import ClaudeProvider
@@ -175,7 +214,7 @@ def test_proxy_applied_per_provider():
 
 
 def test_docs_and_readme_reference_both():
-    for name in ("doubao", "glm", "gemini", "claude"):
+    for name in ("doubao", "glm", "gemini", "claude", "yuanbao"):
         assert (ROOT / "docs" / f"PROVIDER_{name.upper()}.md").is_file()
     for f in ("README.md", "README.zh-CN.md"):
         text = (ROOT / f).read_text(encoding="utf-8")
@@ -184,5 +223,6 @@ def test_docs_and_readme_reference_both():
             "docs/PROVIDER_GLM.md",
             "docs/PROVIDER_GEMINI.md",
             "docs/PROVIDER_CLAUDE.md",
+            "docs/PROVIDER_YUANBAO.md",
         ):
             assert doc in text, f"{f} 缺少 {doc}"

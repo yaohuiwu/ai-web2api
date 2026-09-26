@@ -34,6 +34,7 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 | Doubao | ✅ | `doubao-web` | manual (phone/QR) | [docs](docs/PROVIDER_DOUBAO.md) |
 | GLM | ⚠️ disabled | `glm-web` | manual (Aliyun WAF) | [docs](docs/PROVIDER_GLM.md) |
 | Gemini | ✅ guest | `gemini-web` | guest | [docs](docs/PROVIDER_GEMINI.md) |
+| Yuanbao (元宝) | ✅ | `yuanbao-web` | manual (WeChat QR / phone / QQ) | [docs](docs/PROVIDER_YUANBAO.md) |
 | Qwen | ⚠️ unstable/slow/login often blocked | `qwen3.7-plus-web` | auto / manual | |
 
 > Qwen: disabled by default (`enabled: false`). Full provider details → [`docs/`](docs/).

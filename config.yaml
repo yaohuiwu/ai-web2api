@@ -466,7 +466,71 @@ providers:
         - 'body:not(:has(a[href*="ServiceLogin"])) img.user-icon'  # 有头像**且**无「登录」入口才算已登录
       hint: "Gemini 游客态即可用；如需保存历史/更多能力，用 ./scripts/login.sh gemini 手动登录（Google 账号）"
     queue: {max_size: 3, timeout: 30}   # 短队列：超限/超时立刻 429，客户端自己重试
-    response_timeout: 300     # Google 免费档在密集请求后容易“思考中”很久 → 放宽
+    response_timeout: 300     # Google 免费档在密集请求后容易"思考中"很久 → 放宽
+    poll_interval: 0.2
+    stable_polls: 20
+    min_wait_before_stable: 8.0
+
+  # 元宝（yuanbao.tencent.com）：**默认禁用**（选择器待校准）
+  # 登录：**仅手动**（微信扫码 / 手机 / QQ，无密码自动登录）；
+  # 游客态被 hyc-login-v2 遮罩拦截，输入框 placeholder="请登录后输入内容"。
+  # 端点：POST /api/anon/login（手机短信）、GET /api/v5/accountLogic/login/config
+  yuanbao:
+    enabled: true
+    driver: yuanbao
+    url: https://yuanbao.tencent.com/chat/naQivTmsDa
+    proxy: false             # 国内站点直连
+    locale: zh-CN
+    session_url: "{base}/{id}"   # {id}=chatId
+    models:
+      - {name: yuanbao-web, ui_label: "元宝"}          # 默认模型 Hunyuan
+      # 注：/api/agent/model/list 还有 deep_seek_v3，但页面无可见模型选择器（待校准 model_menu）
+      # 暂不对外暴露第二个模型，避免用户选了却仍走默认模型。
+    selectors:
+      input:                    # 实测（登录态）：Quill 编辑器
+        - "div.ql-editor[contenteditable='true']"
+      type_prompt: true
+      stream_content: true      # 实测：.hyc-common-markdown 流式渐进（23→421 字），可 diff
+      response_all_new: true    # 保险：多段/多容器全部拼接
+      send_button:              # 实测：发送控件是 DIV（不是 button）
+        - "#yuanbao-send-btn"
+        - '[aria-label*="发送"]'
+      stop_button:              # 实测：生成中出现、结束消失（可靠）
+        - '[aria-label*="停止"]'
+      response_container:       # 实测：助手正文（.hyc-content-md 包裹，避开思考区）
+        - ".hyc-content-md .hyc-common-markdown"
+        - ".agent-chat__list__item--ai .hyc-common-markdown"
+      thinking_container:       # 实测：深度思考/搜索推理文本（**不是**整个 deep-search-agent——
+        - ".hyc-component-deep-search-agent__think-container"    # 它会包住正文！）
+        - ".hyc-component-deep-search-agent__think__header-container"
+      # login_check = 登录后**才出现**的标记。实测（登录态）：右上角头像
+      # `.yb-common-nav__ft__avatar`（内部 img）；未登录时右上角是「登录」按钮、
+      # 左下角是「未登录」。注意 `[class*="avatar"]` 也会命中未登录时的骨架
+      # `.yb-nav__user-skeleton__avatar` → 不能用宽泛匹配；也不能用 input（未登录也有）。
+      login_check:              # 登录后才有：右上角头像
+        - ".yb-common-nav__ft__avatar img"
+        - ".yb-common-nav__ft__avatar"
+      logged_out:               # 可见即未登录（反向保险）
+        - "button.agent-dialogue__tool__login"
+        - "text=未登录"
+      new_chat_button:
+        - "text=新建对话"
+      upload_input:
+        - "input[type=file]"     # ⚠ 待实测
+    login:
+      mode: manual
+      # 自动检测登录成功：只用登录后**才出现**的右上角头像（绝不用 input）
+      detect:
+        - ".yb-common-nav__ft__avatar img"
+        - ".yb-common-nav__ft__avatar"
+      hint: "元宝仅微信扫码/手机/QQ 登录 → 用 ./scripts/login.sh yuanbao 手动登录"
+    # 观测型旁听（**不解析**）：流式端点为 POST /api/chat/<conversationId>（SSE）
+    network:
+      url_pattern: "/api/chat/"
+      capture: false          # 走 DOM 提取（实测足够）
+      observe: true
+    queue: {max_size: 3, timeout: 30}
+    response_timeout: 180
     poll_interval: 0.2
     stable_polls: 20
     min_wait_before_stable: 8.0
