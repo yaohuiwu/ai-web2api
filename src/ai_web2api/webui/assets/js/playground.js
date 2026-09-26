@@ -883,22 +883,31 @@ if (qsThread) {
 // 组件负责：MJPEG + 状态轮询 + 缩放 + 交互（点击/拖拽/输入）+ 关遮挡 + 断线退避。
 // 这里只做"接线"：模型 → provider 映射、开关记忆、与中缝拖拽的联动。
 let PROVIDER_MAP = {};          // 模型名 → provider（来自 /admin/status）
+let PROVIDER_DRIVER_MAP = {};   // provider 名 → driver
 let liveControlAllowed = null;  // 服务端是否允许画面交互（false → 组件隐藏交互入口）
 let liveView = null;
 
-const liveOn = () => localStorage.getItem("aiw2api_live") !== "0";
+const liveOn = () => {
+  if (localStorage.getItem("aiw2api_live") === "0") return false;
+  const provider = PROVIDER_MAP[$("#model").value] || null;
+  if (provider && PROVIDER_DRIVER_MAP[provider] === "api") return false;
+  return true;
+};
 
 async function loadProviderMap() {
   try {
     const st = await (await fetch("/admin/status")).json();
     PROVIDER_MAP = {};
+    PROVIDER_DRIVER_MAP = {};
     for (const p of st.providers || []) {
       for (const m of p.models || []) PROVIDER_MAP[m] = p.name;
+      PROVIDER_DRIVER_MAP[p.name] = p.driver || p.name;
     }
     liveControlAllowed = !!((st.server || {}).live_control);
   } catch (e) {
     console.warn("loadProviderMap failed:", e);
     PROVIDER_MAP = {};
+    PROVIDER_DRIVER_MAP = {};
   }
   if (liveView) {
     liveView.setControlAllowed(liveControlAllowed);
@@ -907,6 +916,8 @@ async function loadProviderMap() {
 }
 
 function setLiveOn(on) {
+  const provider = PROVIDER_MAP[$("#model").value] || null;
+  if (provider && PROVIDER_DRIVER_MAP[provider] === "api") on = false;
   localStorage.setItem("aiw2api_live", on ? "1" : "0");
   $("#liveToggle").classList.toggle("primary", on);
   if (liveView) liveView.setEnabled(on);
@@ -916,6 +927,12 @@ function setLiveOn(on) {
 function initLivePane() {
   const pane = $("#livePane");
   if (!pane || !window.LiveView) return;
+  const provider = PROVIDER_MAP[$("#model").value] || null;
+  const isApi = provider && PROVIDER_DRIVER_MAP[provider] === "api";
+  if (isApi) {
+    pane.innerHTML = '<div style="padding:24px;text-align:center;color:#888">API provider 无需实时画面</div>';
+    return;
+  }
   liveView = window.LiveView.create({
     pane: pane,
     getProvider: () => PROVIDER_MAP[$("#model").value] || null,
@@ -923,7 +940,17 @@ function initLivePane() {
     onClose: () => setLiveOn(false),          // ✕ 收起（等价于顶部「▥ 画面」）
   });
   $("#liveToggle").onclick = () => setLiveOn(!liveOn());
-  $("#model").addEventListener("change", () => liveView && liveView.refresh());
+  $("#model").addEventListener("change", () => {
+    const pane = $("#livePane");
+    const provider = PROVIDER_MAP[$("#model").value] || null;
+    const isApi = provider && PROVIDER_DRIVER_MAP[provider] === "api";
+    if (isApi) {
+      if (liveView) { liveView.destroy(); liveView = null; }
+      if (pane) pane.innerHTML = '<div class="lv-empty">API provider 无需实时画面</div>';
+      return;
+    }
+    if (liveView) liveView.refresh();
+  });
   $("#threadId").addEventListener("input", () => liveView && liveView.refresh());
   loadProviderMap().then(() => {
     liveView.setEnabled(liveOn());

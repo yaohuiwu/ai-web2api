@@ -60,6 +60,7 @@ from .schemas import (
     normalize_message,
     LiveInputRequest,
 )
+from ..providers.api_provider import APIProvider
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +178,100 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
 
     # ---------------- OpenAI 兼容 API ----------------
 
+    async def _chat_completions_api(
+        req: ChatCompletionRequest,
+        provider: "APIProvider",
+        messages: list[dict],
+        resolved: str,
+        model: str,
+        chat_id: str,
+        attachments: list[dict] | None,
+        http_request: Request,
+    ):
+        """API provider 的 /v1/chat/completions 处理（无浏览器/无线程）。"""
+        cfg = registry.config
+        fc_active = bool(
+            cfg.server.function_calling and needs_tool_handling(messages, req.tools)
+        )
+        opts: dict[str, Any] = {}
+        if req.mode is not None:
+            opts["mode"] = req.mode
+        if req.deep_think is not None:
+            opts["deep_think"] = req.deep_think
+        if req.search is not None:
+            opts["search"] = req.search
+        if attachments:
+            opts["attachments"] = attachments
+        if req.options:
+            opts["options"] = req.options
+        if fc_active:
+            opts["prompt_override"] = fc_build_prompt(messages, req.tools, req.tool_choice)
+
+        timeout = provider.cfg.response_timeout or 180
+
+        async def _stream():
+            content_parts: list[str] = []
+            thinking_parts: list[str] = []
+            tool_calls: list[dict] | None = None
+            finish = "stop"
+            try:
+                async for chunk in provider.generate(
+                    messages, resolved, thread_mode="api", **opts
+                ):
+                    if chunk.kind == "thinking":
+                        thinking_parts.append(chunk.text)
+                        yield _sse({"id": chat_id, "choices": [{"index": 0, "delta": {"reasoning_content": chunk.text}, "finish_reason": None}]})
+                    else:
+                        content_parts.append(chunk.text)
+                        yield _sse({"id": chat_id, "choices": [{"index": 0, "delta": {"content": chunk.text}, "finish_reason": None}]})
+            except Exception as exc:
+                logger.exception("API provider generate error")
+                yield _sse({"id": chat_id, "choices": [{"index": 0, "delta": {}, "finish_reason": "error"}]})
+                yield "data: [DONE]\n\n"
+                raise
+            if fc_active and req.tools:
+                content, tool_calls, finish = parse_tool_response(content_parts[0] if content_parts else "", req.tools)
+            else:
+                content = "".join(content_parts)
+            yield _sse({"id": chat_id, "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]})
+            yield "data: [DONE]\n\n"
+
+        if req.stream:
+            return StreamingResponse(
+                _stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
+        # 非流式：缓冲全部内容
+        content_parts: list[str] = []
+        thinking_parts: list[str] = []
+        tool_calls: list[dict] | None = None
+        finish = "stop"
+        async for chunk in provider.generate(messages, resolved, thread_mode="api", **opts):
+            if chunk.kind == "thinking":
+                thinking_parts.append(chunk.text)
+            else:
+                content_parts.append(chunk.text)
+        if fc_active and req.tools:
+            content, tool_calls, finish = parse_tool_response(content_parts[0] if content_parts else "", req.tools)
+        else:
+            content = "".join(content_parts)
+        message = ResponseMessage(
+            content=content,
+            reasoning_content="".join(thinking_parts) or None,
+            tool_calls=tool_calls,
+        )
+        if finish != "stop":
+            message.content = None  # type: ignore[assignment]
+        return ChatCompletionResponse(
+            id=chat_id,
+            created=int(time.time()),
+            model=model,
+            thread_id=None,
+            choices=[ChatCompletionChoice(message=message, finish_reason=finish)],
+        )
+
     @router.get("/v1/models")
     async def list_models():
         return {"object": "list", "data": registry.list_models()}
@@ -195,6 +290,11 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         model = req.model                       # 响应回显请求名（OpenAI 兼容）
         resolved = registry.resolve_model_name(model)  # 驱动用真实模型名
         chat_id = _chat_id()
+
+        # API provider：无需浏览器/线程，直接调用 generate/complete
+        is_api = getattr(provider.cfg, "driver", None) == "api"
+        if is_api:
+            return await _chat_completions_api(req, provider, messages, resolved, model, chat_id, attachments, request)
 
         # 闸门排队时长记进时间线（区分"排队慢"与"生成慢"）；闸门本身不区分优先级。
         on_queued = getattr(provider, "note_queued", None)
@@ -630,7 +730,7 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                 session_ttl_days=pcfg.login.session_ttl_days,
                 auth_local_storage=pcfg.login.auth_local_storage,
                 warn_days=pcfg.login.expiry_warn_days or cfg.browser.auth_expiry_warn_days,
-                login_at=p.browser.read_login_at(name),
+                login_at=p.browser.read_login_at(name) if p.browser else None,
             ).to_dict()
             if not logged_in:
                 auth["state"] = "logged_out"
@@ -644,8 +744,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
                     "login_mode": pcfg.login.mode,
                     "auth_expiry": auth,
                     "has_state_file": state_file.exists(),
-                    "login_error_screenshot": p.browser.login_error_path(name).exists(),
-                    "login_error_at": p.browser.login_error_mtime(name),
+                    "login_error_screenshot": p.browser.login_error_path(name).exists() if p.browser else False,
+                    "login_error_at": p.browser.login_error_mtime(name) if p.browser else None,
                     "queue": (lambda g: g.stats() if g is not None else None)(
                         getattr(p, "gate", None)
                     ),
@@ -694,6 +794,9 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
 
         ⚠ ②必须按"最近使用"排序：字典顺序是"最早创建"，会让画面停在你没在用的那个会话上。
         """
+        provider = registry.providers().get(name)
+        if provider and getattr(provider.cfg, "driver", None) == "api":
+            return None, None
         candidates = threads.live_pages(name) if threads is not None else []
         if focus:
             candidates.sort(key=lambda item: item[0] != focus)   # 命中的排最前
@@ -964,9 +1067,19 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
 
     # ---------------- admin：登录管理 ----------------
 
+    def _api_provider_error(name: str):
+        """API provider 不需要登录，返回友好提示。"""
+        return JSONResponse({
+            "status": "n/a",
+            "provider": name,
+            "hint": "API provider 无需浏览器登录",
+        })
+
     @router.post("/admin/{name}/login/start")
     async def login_start(name: str):
         provider = registry.get_provider(name)
+        if getattr(provider.cfg, "driver", None) == "api":
+            return _api_provider_error(name)
         page = await provider.browser.open_page(name, locale=provider.locale)
         await page.goto(provider.login_url, wait_until="domcontentloaded", timeout=30000)
         headless = registry.config.browser.headless
@@ -988,6 +1101,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
     @router.get("/admin/{name}/login/status")
     async def login_status(name: str):
         provider = registry.get_provider(name)
+        if getattr(provider.cfg, "driver", None) == "api":
+            return {"provider": name, "logged_in": True, "api_provider": True}
         was = registry.login_status().get(name, False)
         ok = await provider.check_login()
         if ok is None:
@@ -1005,6 +1120,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
     async def login_auto(name: str):
         """用 .env 中的账号密码自动登录（login.mode=auto 时可用）。"""
         provider = registry.get_provider(name)
+        if getattr(provider.cfg, "driver", None) == "api":
+            return _api_provider_error(name)
         result = await provider.gate.run(provider.auto_login)
         ok = bool(result.get("ok"))
         registry.set_login_status(name, ok)
@@ -1017,6 +1134,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         供手动登录：宿主用 `python -m ai_web2api.cli login <provider>` 生成 state 后自动/手动导入。
         """
         provider = registry.get_provider(name)
+        if getattr(provider.cfg, "driver", None) == "api":
+            return _api_provider_error(name)
         if not payload.cookies:
             return JSONResponse(
                 status_code=400, content={"error": "storage_state.cookies 为空"}
@@ -1049,6 +1168,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
     async def login_cookies(name: str, payload: CookiesPayload):
         """只导入 cookies（兼容旧接口）；需要 localStorage 时用 login/state。"""
         provider = registry.get_provider(name)
+        if getattr(provider.cfg, "driver", None) == "api":
+            return _api_provider_error(name)
         ctx = await provider.browser.get_context(name, locale=provider.locale)
         # playwright 的 dict 形式使用 camelCase 字段名，与 CookieItem.model_dump() 一致
         await ctx.add_cookies([c.model_dump() for c in payload.cookies])  # type: ignore[arg-type]
@@ -1064,6 +1185,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
     @router.post("/admin/{name}/login/logout")
     async def login_logout(name: str):
         provider = registry.get_provider(name)
+        if getattr(provider.cfg, "driver", None) == "api":
+            return _api_provider_error(name)
         await provider.browser.clear_state(name)
         registry.set_login_status(name, False)
         return {"provider": name, "logged_in": False}
@@ -1072,6 +1195,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
     async def login_screenshot(name: str):
         """上次登录失败截图（PNG）；没有则 404。供状态面板调试展示。"""
         provider = registry.get_provider(name)
+        if getattr(provider.cfg, "driver", None) == "api":
+            return _api_provider_error(name)
         path = provider.browser.login_error_path(name)
         if not path.exists():
             return JSONResponse(status_code=404, content={"error": "no screenshot"})
@@ -1083,6 +1208,8 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
     async def login_screenshot_capture(name: str):
         """即时抓取当前登录页/聊天页截图（调试用，覆盖上次失败截图）。"""
         provider = registry.get_provider(name)
+        if getattr(provider.cfg, "driver", None) == "api":
+            return _api_provider_error(name)
         page = await provider.browser.open_page(name, locale=provider.locale)
         try:
             await page.goto(provider.login_url, wait_until="domcontentloaded", timeout=30000)

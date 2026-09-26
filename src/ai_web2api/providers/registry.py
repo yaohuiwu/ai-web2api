@@ -10,6 +10,7 @@ from ..browser.manager import BrowserManager
 from ..config import AppConfig
 from ..core.errors import ModelNotFoundError
 from .base import BaseProvider, first_match, wait_first_match
+from .api_provider import APIProvider
 from .chatgpt import ChatGPTProvider
 from .claude import ClaudeProvider
 from .doubao import DoubaoProvider
@@ -33,6 +34,7 @@ DRIVERS: dict[str, type[BaseProvider]] = {
     "glm": GlmProvider,
     "gemini": GeminiProvider,
     "yuanbao": YuanbaoProvider,
+    "api": APIProvider,
 }
 
 # 常见 OpenAI 模型名（llama_index 等客户端默认使用）→ 自动映射到首选 provider 的默认模型。
@@ -70,7 +72,11 @@ class ProviderRegistry:
             if driver is None:
                 logger.warning("未知驱动 %r，provider %s 已跳过", pcfg.driver or pcfg.name, pcfg.name)
                 continue
-            provider = driver(pcfg, browser)
+            # API provider 不需要浏览器上下文
+            if pcfg.driver == "api":
+                provider = driver(pcfg, None)
+            else:
+                provider = driver(pcfg, browser)
             if pcfg.proxy is False and hasattr(browser, "set_direct"):
                 browser.set_direct(pcfg.name)   # 国内站点直连（不走 browser.proxy）
             self._providers[pcfg.name] = provider
@@ -202,6 +208,10 @@ class ProviderRegistry:
             await self._refresh_login_status_headless()
             return
         for name, p in self._providers.items():
+            # API provider 不需要浏览器登录态检测
+            if getattr(p.cfg, "driver", None) == "api":
+                self._login_status[name] = True
+                continue
             try:
                 ok = await p.check_login()
             except Exception as e:  # noqa: BLE001
@@ -231,6 +241,10 @@ class ProviderRegistry:
             )
             try:
                 for name, p in self._providers.items():
+                    # API provider 不需要浏览器登录态检测
+                    if getattr(p.cfg, "driver", None) == "api":
+                        self._login_status[name] = True
+                        continue
                     ok = False
                     try:
                         state = await self._browser.export_storage_state(name)

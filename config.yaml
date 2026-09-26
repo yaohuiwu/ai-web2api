@@ -591,3 +591,24 @@ providers:
     min_wait_before_stable: 10.0
     send_confirm_timeout: 0    # Claude 思考期可能很久（实测首字延迟可达 ~2min）→ 关闭"20s 无迹象就重发"
     thread_busy_timeout: 0
+
+  # 智谱清言 API（无需浏览器，纯 HTTP API）
+  # 免费额度，GLM-4.7-Flash 并发 1，值得接入
+  # 用法：export GLM_API_KEY="sk-xxx" 后启动服务
+  glm-api:
+    enabled: true
+    driver: api
+    url: https://open.bigmodel.cn/api/paas/v4/chat/completions
+    api_key: ${GLM_API_KEY}          # 从环境变量读取
+    api_model: glm-4-flash
+    models:
+      - {name: glm-4-flash, ui_label: "GLM-4.7-Flash"}
+    proxy: false                        # 国内直连
+    api_timeout: 180
+    api_retry_attempts: 3              # 429/502/503/504 重试次数
+    api_retry_backoff: 2.0             # 退避基数（秒）
+    queue: {max_size: 3, timeout: 30}
+    response_timeout: 180
+    poll_interval: 0.2
+    selectors:
+      stream_content: false             # API provider 直接解析 SSE，无需浏览器流式
