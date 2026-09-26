@@ -173,6 +173,7 @@ function renderProviders(providers, metrics) {
 function renderProviderDetail(p) {
   const detail = $("#providerDetail");
   if (!p) { detail.innerHTML = ""; return; }
+  const isApi = p.driver === "api";
   const badge = !p.logged_in
     ? `<span class="badge no">✗ 未登录</span>`
     : (p.auth_expiry && (p.auth_expiry.state === "soon" || p.auth_expiry.state === "expired"))
@@ -249,7 +250,7 @@ function renderProviderDetail(p) {
     return `<span class="auth-bar ${esc(aeState)}"><i style="width:${pct}%"></i></span>`;
   })();
   // 仅手动认证 provider 快过期/已过期时提醒（自动认证无需人工干预）
-  const manualWarn = p.login_mode === "manual" && (aeState === "soon" || aeState === "expired");
+  const manualWarn = !isApi && p.login_mode === "manual" && (aeState === "soon" || aeState === "expired");
   const expiryCard = manualWarn
     ? `<div class="login-cta ${aeState === "expired" ? "danger" : "warn"}">⚠ <b>${esc(p.name)} 认证${
         aeState === "expired" ? "已过期" : `约 ${days} 天后过期`
@@ -281,12 +282,12 @@ function renderProviderDetail(p) {
     ${metricsCard(p.name)}
     ${shot}
     <div class="actions">
-      <button class="btn" onclick="actLoginStatus('${p.name}')">刷新登录状态</button>
-      <button class="btn primary" onclick="actAutoLogin('${p.name}')">自动登录</button>
-      <button class="btn" onclick="actManualLogin('${p.name}')">导入登录态</button>
+      ${!isApi ? `<button class="btn" onclick="actLoginStatus('${p.name}')">刷新登录状态</button>` : ""}
+      ${!isApi ? `<button class="btn primary" onclick="actAutoLogin('${p.name}')">自动登录</button>` : ""}
+      ${!isApi ? `<button class="btn" onclick="actManualLogin('${p.name}')">导入登录态</button>` : ""}
       <a class="btn" href="/ui/browser.html?provider=${encodeURIComponent(p.name)}" title="实时查看该 provider 的浏览器画面">查看画面 →</a>
-      <button class="btn" onclick="actScreenshot('${p.name}')">抓取截图</button>
-      <button class="btn danger" onclick="actLogout('${p.name}')">退出登录</button>
+      ${!isApi ? `<button class="btn" onclick="actScreenshot('${p.name}')">抓取截图</button>` : ""}
+      ${!isApi ? `<button class="btn danger" onclick="actLogout('${p.name}')">退出登录</button>` : ""}
     </div>
     <div class="manual-panel" id="manualPanel" ${notLogged ? "" : "hidden"}>
       <div class="mp-line">在<b>项目根目录</b>运行（登录完会自动导入当前服务）：</div>

@@ -33,7 +33,8 @@
 | **DeepSeek** | ✅ **稳定，推荐默认** | `deepseek-web`、`deepseek-r1-web` | `mode: auto`（账号密码）或手动 | 支持 headless。深度思考 / 智能搜索开关、图片附件、Function Calling 均已端到端验证 |
 | **ChatGPT** | ✅ **可用，但必须 headful** | `gpt-5-web`、`gpt-4o-web`、`o3-web` | **仅手动登录**（无密码登录：Google OAuth） | Sentinel 会拦 headless，必须 headful（`WEB2API_HEADLESS=false`，Docker 里靠 Xvfb）。会话 token 约 90 天，登录一次可长期复用 |
 | **Claude** | ⚠️ **已接入，选择器待登录后复核** | `claude-web` | **仅手动登录**（Google / 邮箱验证码，无密码登录） | 站点 `claude.ai`（会话页 `/chat/<uuid>`）。输入框是 ProseMirror contenteditable，正文用 `.font-claude-message`（用户侧 `.font-user-message` 不会误匹配），结束靠 `Stop response` 按钮 + 稳定性判定。markdown 重渲染频繁 → 缓冲 + 预览流（[`docs/PROVIDER_CLAUDE.md`](docs/PROVIDER_CLAUDE.md)） |
-| **Gemini** | ✅ **可用 —— 游客态，无需登录** | `gemini-web` | 游客态（Google 登录可选） | 已端到端验证（15.8s）。输入框是 Quill 编辑器，正文用 `.model-response-text` 抓取（用户侧是 `<user-query>`，不会被误当回答）；免费额度用尽后站点会**降级为 Flash-Lite 且仍可免费聊** —— 抓取与模型无关，我们无需特殊处理（[`docs/PROVIDER_GEMINI.md`](docs/PROVIDER_GEMINI.md)） |
+| **Gemini** | ✅ **可用 —— 需手动登录（Google 账号）** | `gemini-web` | 手动登录（Google 账号；游客态不再可用） | 已端到端验证（15.8s）。输入框是 Quill 编辑器，正文用 `.model-response-text` 抓取（用户侧是 `<user-query>`，不会被误当回答）；登录检测用复合选择器避免把未登录的默认头像误判为已登录（[`docs/PROVIDER_GEMINI.md`](docs/PROVIDER_GEMINI.md)） |
+| **GLM API（智谱开放平台）** | ✅ **可用 —— 无需浏览器** | `glm-4-flash` | **API Key**（环境变量 `GLM_API_KEY`，支持 `${ENV_VAR}` 语法） | 纯 HTTP API，无需浏览器/登录态。直连智谱开放平台 `/api/paas/v4/chat/completions`，SSE 流式解析，429/5xx 自动重试（指数退避），支持 Function Calling 透传。会话保存/历史注入可配（`api_save_messages` / `api_auto_send_history`，默认 true）。免费额度 GLM-4.7-Flash 并发 1（[`docs/PROVIDER_API.md`](docs/PROVIDER_API.md)） |
 | **豆包 Doubao** | ✅ **可用 —— 需手动登录** | `doubao-web` | **仅手动**（手机号验证码/扫码，无密码登录） | 已端到端验证（14.7s）并通过文本保真度回归（3/3 用例、覆盖率 1.00）。正文用**区分角色**的选择器（`.md-box-root` 也匹配用户提问）；被拆成多个容器的回答会**拼接**（`response_all_new`）+ **缓冲发送**（`stream_content: false`）。游客态也有输入框 → 登录态靠**反向标记**判定（[`docs/PROVIDER_DOUBAO.md`](docs/PROVIDER_DOUBAO.md)） |
 | **元宝 Yuanbao** | ✅ **可用 —— 需手动登录** | `yuanbao-web` | **仅手动**（微信扫码 / 手机 / QQ，无密码登录） | 腾讯元宝（`yuanbao.tencent.com`）。**必须登录**（游客态被登录遮罩拦截），国内站点直连。输入是 Quill 编辑器，正文 `.hyc-common-markdown`（流式），思考 `.hyc-component-deep-search-agent__think-container`（注意：整个 `deep-search-agent` 会包住正文，不能当思考容器）。登录标记＝右上角头像 `.yb-common-nav__ft__avatar`；未登录是「登录」按钮 + 左下角「未登录」（[`docs/PROVIDER_YUANBAO.md`](docs/PROVIDER_YUANBAO.md)） |
 | **智谱清言 GLM** | ⚠️ **默认禁用 —— 阿里云 WAF 拦自动化** | `glm-web` | **仅手动**（手机号验证码/扫码） | chatglm.cn 前置**阿里云 WAF 滑块**，headless 与 headful 自动化都被拦；且票据实测**仅约 30 分钟**，之后必须**人工再过一次**滑块，无法无人值守（**账号并未被登出**，登录 cookie 有效期 30 天）。选择器已校准、在这个时间窗内可用；需要时临时启用，长期请改用**智谱开放平台官方 API**（[`docs/PROVIDER_GLM.md`](docs/PROVIDER_GLM.md)） |
@@ -402,6 +403,17 @@ providers:                 # 也支持 list 写法
         option: ['div[role=option]:has-text("{label}")']
         labels: {auto: "自动", thinking: "思考", fast: "快速"}
     login: {mode: auto, url: https://chat.qwen.ai/auth, auth_cookies: ["token", "refresh_token"], username_env: QWEN_USERNAME, password_env: QWEN_PASSWORD}
+  glm-api:                      # 纯 API provider：无需浏览器/登录态
+    enabled: true
+    driver: api
+    url: https://open.bigmodel.cn/api/paas/v4/chat/completions
+    api_key: ${GLM_API_KEY}     # 从环境变量读取（支持 ${ENV_VAR} 语法）
+    api_model: glm-4-flash
+    models:
+      - {name: glm-4-flash, ui_label: "GLM-4.7-Flash"}
+    proxy: false                # 国内直连
+    api_save_messages: true     # 保存消息到 thread（默认 true）
+    api_auto_send_history: true # 自动发送历史消息（默认 true）
 ```
 
 > 选择器三种 UI 形态：`mode_button`（radio）/ `toggle_button`（开关）/ `model_menu`+`mode_menu`（下拉菜单）；

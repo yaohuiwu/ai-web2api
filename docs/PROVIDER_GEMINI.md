@@ -3,7 +3,7 @@
 > 状态：**默认禁用（`enabled: false`）**，需要时手动开（选择器已校准）。
 > 原因：账号侧免费额度限流 —— 实测密集请求后 StreamGenerate 返回 200 且响应头 1.4s 到达，
 > 但**流长时间不结束**（300s 超时、页面持续“思考中”），而同一账号在真人浏览器里很快。驱动：`src/ai_web2api/providers/gemini.py`（纯配置驱动）。
-> 登录：**游客态即可用**（实测无需登录、无验证码）；Google 账号登录为**可选**、且只能手动。
+> 登录：**需手动登录 Google 账号**（游客态不再可用）；Google 登录不适合自动化（OAuth + 强风控），只能人工完成。
 
 ## 1. 实测结论（2026-09-22）
 
@@ -14,24 +14,16 @@
 | 发送 | `button[aria-label="发送"]`（英文环境为 `Send message`） |
 | **正文容器** | **`.model-response-text`**（count=1、纯正文）；兜底 `message-content .markdown` |
 | 用户侧 | `<user-query>`（**不会**被正文选择器匹配 ✓） |
-| **游客态** | ✅ 可用：直接发消息就能得到回答（实测"只回复两个字：收到" → `收到`，13.7s） |
-| 当前模型 | 游客态显示 **Flash-Lite** |
+| **登录态** | ✅ 需 Google 账号登录后可用（游客态已不可用）；登录标记见 §3.1 |
 | 停止按钮 | ⚠ 生成中未观测到 → `stop_button: []`（靠稳定性判定结束） |
-| 思考容器 | ⚠ 游客态未观测到 → `thinking_container: []` |
+| 思考容器 | ⚠ 未观测到 → `thinking_container: []` |
 | 上传入口 | ⚠ 未实测（配置里预留 `input[type=file]`） |
 
-### 关于"额度用尽 → 自动降级 Flash-Lite 仍可免费聊天"
+### 为什么登录检测需要**复合选择器**
 
-那是**站点行为**，对我们**无需特殊处理**：我们只读 DOM，抓取逻辑与模型无关；
-实测游客态当前就是 Flash-Lite，回答同样能完整抓到。若将来降级时出现"提示横幅/弹窗"，
-按下面的方式配 `dismiss_button` / `busy_hint` 即可（见 `docs/PROVIDER_KIMI.md` 的做法）。
-
-### 为什么**不配** `logged_out`（与豆包相反）
-
-豆包是"游客态有输入框但**发不出去**" → 必须靠反向标记判未登录；
-Gemini 是"游客态**可以正常对话**" → 游客是**合法可用状态**，
-因此 `login_check: []`（用输入框判定"可用"）、且**故意不配** `logged_out`，否则会把可用状态拒掉。
-若站点改成"游客不可发消息"，再补 `logged_out: ['button:has-text("登录")']`。
+Gemini 未登录时也有输入框，且顶栏会渲染一个**占位头像**（`default-user`），
+裸头像选择器（如 `img.user-icon`）在未登录时也会命中 → 登录态判定必须叠加
+「页面上没有登录链接（`a[href*="ServiceLogin"]`）」的约束。详见 §3.1。
 
 ## 2. 端到端验证
 
@@ -41,15 +33,15 @@ POST /v1/chat/completions {"model":"gemini-web","thread_id":"gemini-cal-1", ...}
 文本保真度回归：tests/test_text_fidelity.py -k gemini
 ```
 
-## 3. 可选：登录（保存历史 / 更多能力）
+## 3. 登录（必需）
 
 ```bash
-./scripts/login.sh gemini     # 手动完成 Google 账号登录 → 自动导入服务（非必需）
+./scripts/login.sh gemini     # 手动完成 Google 账号登录 → 自动导入服务
 ```
-> 注：Google 登录不适合自动化（OAuth + 强风控），与 ChatGPT 的情况一致；**但 Gemini 不登录也能用**，
-> 所以本 provider 默认就能工作，不必先登录。
+> 注：Google 登录不适合自动化（OAuth + 强风控），与 ChatGPT 的情况一致；
+> **Gemini 现在必须登录后才能用**，未登录状态无法获得回答。
 
-### 3.1 CLI 登录自动检测（⚠ 游客态占位头像）
+### 3.1 CLI 登录自动检测（⚠ 未登录占位头像）
 
 `./scripts/login.sh gemini` 用 `login.detect` 自动确认「真的登录成功」（不想等也可回终端按回车）：
 
@@ -59,7 +51,7 @@ detect:
   - 'body:not(:has(a[href*="ServiceLogin"])) img.user-icon'  # 有头像**且**无「登录」入口
 ```
 
-**坑（实测）**：Gemini 游客态也有输入框，且顶栏会渲染一个**占位头像**：
+**坑（实测）**：Gemini 未登录时也有输入框，且顶栏会渲染一个**占位头像**：
 
 ```html
 <img class="user-icon" alt="个人资料照片" src="https://lh3.googleusercontent.com/a/default-user=s64-c">

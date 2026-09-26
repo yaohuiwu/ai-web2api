@@ -233,7 +233,25 @@ class ProviderConfig(BaseModel):
     observer_grace_seconds: float = 8.0  # 这么久无事件且无正文 → 判定注入失效 → 回退 poll
     stable_polls: int = 12          # 连续多少次轮询无变化判定"结束"（稳定兜底）
     min_wait_before_stable: float = 8.0  # 稳定判定生效前的最短等待（防思考→正文间隙误判）
-    thread_busy_timeout: float = 20.0  # resume 时发送后无新容器即判定页面忙（上一请求未完成）
+    thread_busy_timeout: float = 20.0  # resume 时发送后无新容器即判定页面忙
+
+    # API provider 专用（driver="api" 时必填）：
+    api_base: str | None = None       # API 地址（覆盖 url）
+    api_key: str | None = None        # API Key，支持 ${ENV_VAR}
+    api_model: str | None = None      # 默认模型
+    api_timeout: float = 180.0        # 请求超时
+    api_headers: dict[str, str] = {}  # 额外请求头
+    # 流式解析（适配不同 API 格式）：
+    api_stream_prefix: str = "data: "
+    api_done_marker: str = "[DONE]"
+    api_content_path: list[str] = Field(default_factory=lambda: ["choices", "0", "delta", "content"])
+    api_thinking_path: list[str] | None = None
+    # 重试：
+    api_retry_attempts: int = 3       # 429/503 重试次数（0 = 不重试）
+    api_retry_backoff: float = 2.0    # 退避基数（秒）（上一请求未完成）
+    # Thread 行为（API provider）：
+    api_save_messages: bool = True          # 是否保存消息到 thread（默认 true）
+    api_auto_send_history: bool = True      # 是否自动发送历史消息（默认 true）
 
 
 class BrowserConfig(BaseModel):

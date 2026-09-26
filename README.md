@@ -33,7 +33,8 @@ How it works: Playwright drives a real browser — opens the page, keeps the ses
 | Kimi | ✅ | `kimi-web` | manual (WeChat QR) | [docs](docs/PROVIDER_KIMI.md) |
 | Doubao | ✅ | `doubao-web` | manual (phone/QR) | [docs](docs/PROVIDER_DOUBAO.md) |
 | GLM | ⚠️ disabled | `glm-web` | manual (Aliyun WAF) | [docs](docs/PROVIDER_GLM.md) |
-| Gemini | ✅ guest | `gemini-web` | guest | [docs](docs/PROVIDER_GEMINI.md) |
+| GLM API | ✅ API (no browser) | `glm-4-flash` | API key (env `GLM_API_KEY`) | [docs](docs/PROVIDER_API.md) |
+| Gemini | ✅ | `gemini-web` | manual (Google account) | [docs](docs/PROVIDER_GEMINI.md) |
 | Yuanbao (元宝) | ✅ | `yuanbao-web` | manual (WeChat QR / phone / QQ) | [docs](docs/PROVIDER_YUANBAO.md) |
 | Qwen | ⚠️ unstable/slow/login often blocked | `qwen3.7-plus-web` | auto / manual | |
 
@@ -125,6 +126,16 @@ providers:
       mode: auto             # auto (/.env) or manual
       username_env: DEEPSEEK_USERNAME
       password_env: DEEPSEEK_PASSWORD
+  glm-api:                   # pure-API provider: no browser, no login
+    enabled: true
+    driver: api
+    url: https://open.bigmodel.cn/api/paas/v4/chat/completions
+    api_key: ${GLM_API_KEY}  # resolved from env
+    api_model: glm-4-flash
+    models:
+      - {name: glm-4-flash, ui_label: "GLM-4.7-Flash"}
+    api_save_messages: true        # save turns to thread store (default true)
+    api_auto_send_history: true    # prepend stored history to each request (default true)
 ```
 
 Full field list → [`src/ai_web2api/config.py`](src/ai_web2api/config.py).

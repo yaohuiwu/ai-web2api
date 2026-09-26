@@ -9,10 +9,11 @@ class ProviderError(Exception):
     status_code = 500
     error_type = "provider_error"
 
-    def __init__(self, message: str, *, provider: str | None = None):
+    def __init__(self, message: str, *, provider: str | None = None, retryable: bool = False):
         super().__init__(message)
         self.message = message
         self.provider = provider
+        self.retryable = retryable
 
 
 class ModelNotFoundError(ProviderError):
