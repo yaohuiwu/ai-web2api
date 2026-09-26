@@ -784,6 +784,10 @@ $("#model").addEventListener("change", () => {
     $("#threadId").dispatchEvent(new Event("input"));
     boundThreadModel = null;
     why = `会话 ${tid} 绑定的是 ${boundThreadModel || "另一模型"}；`;
+  } else if (changed) {
+    // 切换模型 → 新会话，清空 thread_id
+    $("#threadId").value = "";
+    $("#threadId").dispatchEvent(new Event("input"));
   }
   currentModel = picked;
   if (changed || why) {
