@@ -124,13 +124,10 @@ function metricsFor(name) {
   return (lastMetrics && lastMetrics.providers || []).find((p) => p.name === name) || null;
 }
 function metricsBar(m) {
-  if (!m) return '<span class="muted">暂无数据</span>';
+  if (!m) return '';
   const rate = m.success_rate;
   const cls = rate >= 95 ? "ok" : rate >= 80 ? "warn" : "no";
-  const avg = m.avg_total != null ? m.avg_total + "s" : "—";
-  const ttft = m.avg_ttft != null ? m.avg_ttft + "s" : "—";
-  const rank = (lastMetrics.ranking || []).indexOf(m.name) + 1;
-  return `<span class="met">✅${rate}% · ⏱${avg} · ttft ${ttft} · #${rank}</span>`;
+  return `<span class="met ${cls}">✅${rate}%</span>`;
 }
 function metricsCard(name) {
   const m = metricsFor(name);
