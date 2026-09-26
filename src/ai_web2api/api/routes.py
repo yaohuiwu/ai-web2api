@@ -599,6 +599,20 @@ def create_router(registry: ProviderRegistry, threads: ThreadManager | None = No
         items = TIMELINES.recent(provider=provider, limit=limit)
         return {"count": len(items), "provider": provider, "items": items}
 
+    @router.get("/admin/metrics")
+    async def metrics_endpoint(window: str = "24h"):
+        """按 provider 聚合的请求指标（成功率 / 耗时 / 排名）。"""
+        try:
+            hours = {"1h": 1, "24h": 24, "7d": 168, "all": 99999}[window]
+        except KeyError:
+            hours = 24
+        if threads is not None and threads.store is not None:
+            agg = await asyncio.to_thread(threads.store.aggregate_metrics, hours)
+        else:
+            agg = []
+        ranking = (agg[-1].get("ranking") if agg else []) or []
+        return {"window": window, "providers": agg, "ranking": ranking}
+
     @router.get("/admin/status")
     async def system_status(request: Request):
         """聚合状态：服务信息 + 各 provider 认证状态 + 活跃 thread 会话。"""

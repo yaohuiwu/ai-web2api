@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import sys
 import tempfile
 import time
 from typing import AsyncIterator, Literal
@@ -219,6 +220,7 @@ class WebChatProvider(BaseProvider):
             await self._start_observer(page)   # 仅 capture_mode=observer 时生效；失败自动回退
 
             frames_before = {f.url for f in page.frames if f.url}
+            has_content = False
             async for chunk in self._poll_response(
                 page, md_before, th_before, busy_timeout,
                 input_sel=input_sel, prompt=prompt, frames_before=frames_before,
@@ -227,11 +229,15 @@ class WebChatProvider(BaseProvider):
                     tl.mark("first_think", overwrite=False)
                     tl.bump("think_chars", len(chunk.text or ""))
                 else:
+                    has_content = True
                     tl.mark("first_content", overwrite=False)
                     tl.bump("chars", len(chunk.text or ""))
                 tl.bump("deltas")
                 yield chunk
         finally:
+            exc = sys.exc_info()[1]
+            tl.ok = has_content and exc is None
+            tl.error = "" if exc is None else str(exc)
             tl.mark("final")
             self._obs_wake = None              # 本轮结束：不再接受唤醒（世代号也会兜底）
             if self.net_observe:
@@ -241,6 +247,23 @@ class WebChatProvider(BaseProvider):
             self.last_timeline = tl
             self._tl = None
             self._stop_observe(page)             # 摘掉旁听监听，避免跨请求累积
+            # 指标落盘（不阻塞）
+            store = getattr(self, "metrics_store", None)
+            if store is not None:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.run_in_executor(
+                        None,
+                        store.record_metric,
+                        self.name, tl.ok,
+                        tl.marks.get("final"),
+                        tl.ttft, tl.settle_lag, tl.tail,
+                        tl.finalize or "", tl.error or "",
+                        model,
+                        thread_mode or "stateless",
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.debug("metrics record failed", exc_info=True)
             # 无状态请求：用完即关；thread 模式：页面留给 ThreadManager 管理
             if thread_mode is None and thread_page is None:
                 await page.close()

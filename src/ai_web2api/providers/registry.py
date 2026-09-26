@@ -160,6 +160,11 @@ class ProviderRegistry:
     def providers(self) -> dict[str, BaseProvider]:
         return self._providers
 
+    def set_metrics_store(self, store) -> None:
+        """注入指标落盘对象（需实现 ``record_metric`` 同步方法）。"""
+        for p in self._providers.values():
+            p.metrics_store = store
+
     # ---------- 登录态 ----------
 
     def set_login_status(self, name: str, ok: bool) -> None:

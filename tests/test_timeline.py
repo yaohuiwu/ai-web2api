@@ -225,3 +225,15 @@ def test_as_dict_exposes_finalize_from_notes():
     tl.mark("final")
     assert tl.as_dict()["finalize"] == "stability"
     assert "finalize=stability" in tl.line()
+
+
+def test_timeline_ok_error_fields():
+    """ok / error 字段在 as_dict 中可见。"""
+    tl = RequestTimeline(provider="doubao")
+    assert tl.ok is True
+    assert tl.error == ""
+    tl.ok = False
+    tl.error = "timeout"
+    d = tl.as_dict()
+    assert d["ok"] is False
+    assert d["error"] == "timeout"
