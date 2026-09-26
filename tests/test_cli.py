@@ -155,6 +155,20 @@ def test_login_auto_detect_never_falls_back_to_input():
     assert "login_check_selectors" not in detect_block, "自动检测不得回退到输入框判定"
 
 
+def test_login_auto_detect_checks_logged_out_marker():
+    """自动检测命中"登录标记"后，若页面仍有"未登录/登录"反向标记 → 不得判为已登录。
+
+    游客态也有输入框/头像占位的站点（元宝、Gemini）必须靠这层反向保险。
+    """
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "src" / "ai_web2api" / "cli.py").read_text(encoding="utf-8")
+    detect_block = src[src.index("detect_sels"): src.index("detect_sels") + 900]
+    assert "logged_out_visible" in detect_block, (
+        "自动检测必须检查 logged_out 反向标记（元宝/游客态站点否则会误判）"
+    )
+
+
 def test_login_detect_config_default_empty():
     from ai_web2api.config import ProviderConfig
 

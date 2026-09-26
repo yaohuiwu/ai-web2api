@@ -18,6 +18,7 @@ from .glm import GlmProvider
 from .kimi import KimiProvider
 from .deepseek import DeepSeekProvider
 from .qwen import QwenProvider
+from .yuanbao import YuanbaoProvider
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ DRIVERS: dict[str, type[BaseProvider]] = {
     "doubao": DoubaoProvider,
     "glm": GlmProvider,
     "gemini": GeminiProvider,
+    "yuanbao": YuanbaoProvider,
 }
 
 # 常见 OpenAI 模型名（llama_index 等客户端默认使用）→ 自动映射到首选 provider 的默认模型。

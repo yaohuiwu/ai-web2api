@@ -266,6 +266,7 @@ async def _login_flow(args: argparse.Namespace) -> int:
                     )
                 deadline = time.monotonic() + args.timeout
                 ok = False
+                auto_detected = False
                 while time.monotonic() < deadline:
                     if confirm is not None and confirm.done():
                         ok = True
@@ -278,13 +279,28 @@ async def _login_flow(args: argparse.Namespace) -> int:
                         provider.cfg.selectors.login_check
                     )
                     if detect_sels and await extractor.first_match(page, detect_sels) is not None:
+                        # 命中了"登录标记"，但页面上仍有"未登录/登录"反向标记（如元宝左下
+                        # 角"未登录"、右上角"登录"按钮）→ 说明实际未登录，不能误判。
+                        # 游客态也有输入框的站点必须靠这层反向保险。
+                        if await provider.logged_out_visible(page):
+                            await page.wait_for_timeout(1500)
+                            continue
                         ok = True
-                        print(f"[{name}] 自动检测到登录成功。")
+                        auto_detected = True
+                        print(f"[{name}] 自动检测到登录成功，稍等确认…（Ctrl+C 取消）")
                         break
                     await page.wait_for_timeout(1500)
                 if not ok:
                     print(f"[{name}] 超时未确认（未保存）。")
                     return 1
+                # 自动检测命中后短暂停留，让用户肉眼确认浏览器里确实登录成功了
+                if auto_detected:
+                    print(f"[{name}] 3 秒后保存登录态…（Ctrl+C 取消）")
+                    try:
+                        await asyncio.sleep(3)
+                    except KeyboardInterrupt:
+                        ok = False
+                        print(f"\n[{name}] 已取消保存。")
 
             # 保存 storage_state
             out = Path(args.out) if args.out else browser.state_path(name)
