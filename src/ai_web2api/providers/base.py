@@ -112,6 +112,8 @@ class BaseProvider(abc.ABC):
         # 本轮捕获的交互组件（iframe widget）元数据；每轮发送前清空，路由 take_widgets() 取走
         self._widgets: list[dict] = []
         self._widget_store_obj = None
+        # 指标落盘（外部注入，None = 只记内存时间线）
+        self.metrics_store: object = None
 
     # ---------- 对外接口 ----------
 

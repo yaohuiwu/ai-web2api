@@ -121,6 +121,10 @@ class ThreadManager:
     def get(self, thread_id: str) -> ThreadSession | None:
         return self._sessions.get(thread_id)
 
+    @property
+    def store(self) -> ThreadStore:
+        return self._store
+
     def list(self) -> list[dict]:
         """内存活跃会话 + DB 持久化条目（重启后左侧列表不空）。
 

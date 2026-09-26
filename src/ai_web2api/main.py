@@ -135,6 +135,7 @@ def create_app(config_path: str = CONFIG_PATH) -> FastAPI:
     browser = BrowserManager(cfg.browser, cfg.profiles_dir)
     registry = ProviderRegistry(cfg, browser)
     threads = ThreadManager(cfg.server, cfg.profiles_dir)
+    registry.set_metrics_store(threads.store)
 
     async def _startup_login() -> None:
         """启动时的登录态检测 + 自动登录。

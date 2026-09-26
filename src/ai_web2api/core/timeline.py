@@ -58,6 +58,8 @@ class RequestTimeline:
     marks: dict[str, float] = field(default_factory=dict)
     counts: dict[str, float] = field(default_factory=dict)
     notes: dict[str, str] = field(default_factory=dict)
+    ok: bool = True
+    error: str = ""
 
     # ---------- 打点 ----------
 
@@ -119,6 +121,8 @@ class RequestTimeline:
             "settle_lag": self.settle_lag,
             "tail": self.tail,
             "total": round(self.marks.get("final", 0.0), 3) or None,
+            "ok": self.ok,
+            "error": self.error or None,
         }
 
     def line(self) -> str:

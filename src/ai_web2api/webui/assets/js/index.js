@@ -2,6 +2,7 @@
 let timer = null;
 let selectedProvider = null;
 let lastData = null;
+let lastMetrics = null;
 
 function fmtUptime(sec) {
   sec = Math.max(0, Math.floor(sec));
@@ -14,9 +15,12 @@ async function load() {
   const data = await api("/admin/status");
   lastData = data;
   renderKpis(data.server, data.threads || { active: 0, max: 0, list: [] });
-  renderProviders(data.providers || []);
+  renderProviders(data.providers || [], lastMetrics);
   renderThreadSummary(data.threads || { active: 0, max: 0, total: 0, list: [] });
   renderQuickstart(data.server);
+  // 指标（独立拉取，失败不阻塞）
+  try { lastMetrics = await api("/admin/metrics?window=24h"); } catch { lastMetrics = null; }
+  if (lastMetrics) renderProviders(data.providers || [], lastMetrics);
 }
 
 function renderKpis(s, t) {
@@ -116,7 +120,35 @@ function renderQuickstart(s) {
   setTab(qsActive);
 }
 
-function renderProviders(providers) {
+function metricsFor(name) {
+  return (lastMetrics && lastMetrics.providers || []).find((p) => p.name === name) || null;
+}
+function metricsBar(m) {
+  if (!m) return '';
+  const rate = m.success_rate;
+  const cls = rate >= 95 ? "ok" : rate >= 80 ? "warn" : "no";
+  return `<span class="met ${cls}">✅${rate}%</span>`;
+}
+function metricsCard(name) {
+  const m = metricsFor(name);
+  if (!m) return '<div class="sec-title">指标</div><div class="muted">暂无数据（等有请求后出现）</div>';
+  const fc = Object.entries(m.finalize_counts || {})
+    .map(([k, v]) => `<span class="chip">${esc(k)}×${v}</span>`).join(" ") || "—";
+  const last = m.last_ok
+    ? `<span class="ok">最近一次 ✅</span>`
+    : `<span class="no">最近一次 ✗ ${esc(m.last_error || "")}</span>`;
+  return `<div class="sec-title">指标（${m.n} 次）</div>
+    <dl class="kv">
+      <dt>成功率</dt><dd class="${m.success_rate >= 95 ? 'ok' : m.success_rate >= 80 ? 'warn' : 'no'}">${m.success_rate}%</dd>
+      <dt>平均耗时</dt><dd>${m.avg_total != null ? m.avg_total + 's' : '—'} (p50 ${m.p50_total || '—'} / p95 ${m.p95_total || '—'})</dd>
+      <dt>首字延迟</dt><dd>${m.avg_ttft != null ? m.avg_ttft + 's' : '—'}</dd>
+      <dt>结束方式</dt><dd>${fc}</dd>
+      <dt>状态</dt><dd>${last}</dd>
+    </dl>`;
+}
+
+function renderProviders(providers, metrics) {
+  lastMetrics = metrics || lastMetrics;
   const tabs = $("#providerTabs");
   const detail = $("#providerDetail");
   if (!providers.length) {
@@ -131,6 +163,7 @@ function renderProviders(providers) {
       (p) => `<button class="tab ${p.name === selectedProvider ? "active" : ""}" data-name="${esc(p.name)}">
         <span class="dot ${dotClass(p)}"></span>${esc(p.name)}
         <span class="tab-sub">${esc(p.default_model || "")}</span>
+        <span class="tab-metrics">${metricsBar(metricsFor(p.name))}</span>
       </button>`
     )
     .join("");
@@ -245,6 +278,7 @@ function renderProviderDetail(p) {
     </dl>
     <div class="sec-title">模型 / 别名</div>
     <div class="chips">${chips}</div>
+    ${metricsCard(p.name)}
     ${shot}
     <div class="actions">
       <button class="btn" onclick="actLoginStatus('${p.name}')">刷新登录状态</button>

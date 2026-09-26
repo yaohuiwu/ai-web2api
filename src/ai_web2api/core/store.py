@@ -41,6 +41,21 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, id);
+CREATE TABLE IF NOT EXISTS metrics (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider   TEXT NOT NULL,
+    model      TEXT,
+    thread_id  TEXT DEFAULT 'stateless',
+    ok         INTEGER NOT NULL DEFAULT 1,
+    total      REAL,
+    ttft       REAL,
+    settle_lag REAL,
+    tail       REAL,
+    finalize   TEXT,
+    error      TEXT,
+    created_at REAL NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS ix_metrics_provider ON metrics(provider, created_at);
 """
 
 
@@ -206,6 +221,116 @@ class ThreadStore:
                     d[key] = None
             out.append(d)
         return out
+
+    # ---------- metrics ----------
+
+    def record_metric(
+        self,
+        provider: str,
+        ok: bool,
+        total: float | None = None,
+        ttft: float | None = None,
+        settle_lag: float | None = None,
+        tail: float | None = None,
+        finalize: str = "",
+        error: str = "",
+        model: str = "",
+        thread_id: str = "stateless",
+    ) -> None:
+        """写一条请求指标（同步，内部已串行化）。"""
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO metrics
+                    (provider, model, thread_id, ok, total, ttft, settle_lag, tail, finalize, error)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (provider, model, thread_id, 1 if ok else 0,
+                 total, ttft, settle_lag, tail, finalize, error or None),
+            )
+            self._conn.commit()
+
+    def aggregate_metrics(
+        self, window_hours: float = 24
+    ) -> list[dict]:
+        """滚动窗口内按 provider 聚合。
+
+        返回列表每项：
+        ``name/n/ok_n/success_rate/avg_total/p50_total/p95_total/
+        avg_ttft/finalize_counts/last_ok/last_error``。
+        ``ranking`` 按成功率降序、同率按平均耗时升序。
+        """
+        cutoff = time.time() - window_hours * 3600
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT provider, ok, total, ttft, finalize, error, created_at
+                     FROM metrics
+                    WHERE created_at >= ?
+                    ORDER BY created_at DESC""",
+                (cutoff,),
+            ).fetchall()
+        if not rows:
+            return []
+        # 按 provider 分组
+        groups: dict[str, list[dict]] = {}
+        for r in rows:
+            groups.setdefault(r[0], []).append(
+                {"ok": r[1], "total": r[2], "ttft": r[3],
+                 "finalize": r[4], "error": r[5]}
+            )
+        out = []
+        for prov, items in groups.items():
+            n = len(items)
+            ok_n = sum(1 for x in items if x["ok"])
+            rates = [x["total"] for x in items if x["total"] is not None]
+            ttfts = [x["ttft"] for x in items if x["ttft"] is not None]
+            # finalize 计数
+            fc: dict[str, int] = {}
+            for x in items:
+                if x["finalize"]:
+                    fc[x["finalize"]] = fc.get(x["finalize"], 0) + 1
+            # 最近一条（created_at DESC 已排序，取第一个）
+            recent = items[-1] if items else {}
+            success_rate = round(100.0 * ok_n / n, 1) if n else 0.0
+
+            def pct(vals: list[float], p: float) -> float | None:
+                if not vals:
+                    return None
+                s = sorted(vals)
+                k = (len(s) - 1) * p
+                lo = int(k)
+                hi = lo + 1
+                if hi >= len(s):
+                    return round(s[-1], 2)
+                return round(s[lo] + (s[hi] - s[lo]) * (k - lo), 2)
+
+            out.append(
+                {
+                    "name": prov,
+                    "n": n,
+                    "ok_n": ok_n,
+                    "success_rate": success_rate,
+                    "avg_total": round(sum(rates) / len(rates), 2) if rates else None,
+                    "p50_total": pct(rates, 0.5),
+                    "p95_total": pct(rates, 0.95),
+                    "avg_ttft": round(sum(ttfts) / len(ttfts), 2) if ttfts else None,
+                    "finalize_counts": fc,
+                    "last_ok": recent.get("ok", 0) == 1,
+                    "last_error": recent.get("error"),
+                }
+            )
+        out.sort(key=lambda x: (-x["success_rate"], x["avg_total"] or 9e9))
+        ranking = [x["name"] for x in out]
+        out.append({"ranking": ranking})  # 尾元素携带排名
+        return out
+
+    def clear_metrics_older_than(self, days: int = 7) -> int:
+        """删掉早于 `days` 天的指标，返回删除行数。"""
+        cutoff = time.time() - days * 86400
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM metrics WHERE created_at < ?", (cutoff,)
+            )
+            self._conn.commit()
+        return cur.rowcount
 
     # ---------- 迁移 ----------
 

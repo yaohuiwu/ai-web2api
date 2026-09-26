@@ -155,6 +155,13 @@ def test_yuanbao_provider_registered_and_configured():
     # 实测 SSE 流式端点
     assert p.network.url_pattern and "/api/chat/" in p.network.url_pattern
     assert p.selectors.stream_content or p.selectors.response_all_new
+    # 指标落盘钩子（注册表注入，未启动服务时为 None）
+    from ai_web2api.providers.registry import ProviderRegistry
+    from ai_web2api.browser.manager import BrowserManager
+    from ai_web2api.config import load_config as _lc
+    _reg = ProviderRegistry(_lc(ROOT / "config.yaml"), BrowserManager(_lc(ROOT / "config.yaml").browser, ROOT / "profiles"))
+    _prov = _reg.get_provider("yuanbao")
+    assert hasattr(_prov, "metrics_store")
 
 
 def test_claude_calibrated_scaffold():
